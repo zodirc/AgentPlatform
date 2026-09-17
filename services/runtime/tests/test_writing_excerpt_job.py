@@ -292,7 +292,7 @@ def test_pitch_family_rejects_resample_without_teaching_the_story() -> None:
     assert pitch_item_reject("周记推拿", occupation)[0] == "ponds_occupation_centrality"
     assert pitch_item_reject("余火", yu_huo) is None
     assert pitch_item_reject("假作真", fake)[0] == "ponds_occupation_centrality"
-    assert pitch_item_reject("卷入", passive)[0] == "ponds_passive_initiation"
+    assert pitch_item_reject("卷入", passive)[0] == "ponds_story_opening"
     mixed = pitch_group_reject(
         [{"title": "周记推拿", "opening": occupation}, {"title": "特区", "opening": serial}]
     )
@@ -304,7 +304,7 @@ def test_pitch_family_rejects_resample_without_teaching_the_story() -> None:
     assert dropped[0][0] == "ponds_occupation_centrality"
     assert "推拿" not in dropped[0][1]
     odd = pitch_item_reject("奇闻", anecdote)
-    assert odd is not None and odd[0] == "ponds_local_anecdote"
+    assert odd is not None and odd[0] == "ponds_serial_trajectory_absence"
     assert odd[1] == PITCH_RESAMPLE_DETAIL
     card = pitch_item_reject("点子", idea)
     assert card is not None and card[0] == "ponds_idea_card"
@@ -322,4 +322,93 @@ def test_pitch_family_rejects_resample_without_teaching_the_story() -> None:
         ]
     )
     assert ok is None
+
+
+def test_pitch_signals_overlay_point_and_trajectory() -> None:
+    from app.writing.excerpt_job import (
+        genre_overlay_high,
+        pitch_item_reject,
+        serial_trajectory_absence_high,
+    )
+
+    overlay = (
+        "这座城的地铁就是灵脉，签下去的合同即是道契。"
+        "流量换成香火，公司一层层叠成宗门。"
+        "他沿着这条被替换过的城市往上爬，每换一个词就多一块地盘。"
+        "读者要看的是下一站还能把什么日常设施改成修真编制。"
+    )
+    point = (
+        "停尸房里多了一个死人，旁边压着一张表，像是一次事故留下的清单。"
+        "他只围着这一件事故转，查完这件，故事也就该停。"
+        "后面可以继续写，不过都是同一具尸体的余波，没有第二件要做的事。"
+        "这本书的核就是把这一桩命案写完，写完就没有别处可去。"
+    )
+    secret_only = (
+        "他接下来会遇到更大的秘密，真相会一层层揭开。"
+        "人还站在原来的地方，只是知道得越来越多。"
+        "每揭开一层，外面的世界并不给他新的位子。"
+        "读者追的是下一个更大阴谋，而不是他本人换一个能做事的圈层。"
+    )
+    serial = (
+        "灾变之后，人类进入了一个新的时代。资源匮乏、军阀割据、势力林立，"
+        "秦禹只想要活下去。但现实一步步把他推向了更大的舞台。"
+        "他明天还得去领粮，也还得决定跟哪一路人站在一起。"
+    )
+    assert genre_overlay_high(overlay) is True
+    assert genre_overlay_high(serial) is False
+    assert serial_trajectory_absence_high(point) is True
+    assert serial_trajectory_absence_high(secret_only) is True
+    assert serial_trajectory_absence_high(serial) is False
+    assert pitch_item_reject("替换", overlay)[0] == "ponds_genre_overlay"
+    assert pitch_item_reject("一桩", point)[0] == "ponds_serial_trajectory_absence"
+    assert pitch_item_reject("揭秘", secret_only)[0] == "ponds_serial_trajectory_absence"
+    assert pitch_item_reject("第九特区", serial) is None
+
+
+def test_pitch_book_level_and_premise_cohesion() -> None:
+    from app.writing.excerpt_job import (
+        book_level_low,
+        pitch_item_reject,
+        premise_cohesion_low,
+    )
+
+    local = (
+        "某小区住着一个剑仙，白天也在物业办公室坐班。"
+        "邻居只当他是脾气怪的老头。这本书就围着这栋楼转，"
+        "剑仙偶尔露一手，把楼里漏水、停电梯、邻里吵架的事摆平。"
+        "出了这个小区，故事就没有别处可去。"
+    )
+    generic = (
+        "修真已经成为现代社会的一部分。城里到处都是修士，大家习以为常。"
+        "普通人也能看见他们走在路上、坐进地铁、去公司上班。"
+        "这本书写的就是这种已经融合好的都市，不再解释修真从哪来，"
+        "只说它已经是日常，人人都知道。"
+    )
+    spliced = (
+        "他白天跑物流，夜里打开青铜盒，里面通向昆仑。"
+        "快递单和仙山各管各的，拿走物流昆仑还在，拿走昆仑物流也还在。"
+        "两套东西并排放着，谁也不需要谁，只是被写进同一段简介。"
+        "青铜盒不来自这趟运输，昆仑也不靠这张运单才能存在。"
+    )
+    renjian = (
+        "灵气复苏一百二十年了。修仙早就是旧日常识，功法改过一轮又一轮，"
+        "两三百岁并不稀奇，却始终没有人飞升。今天还在用的修行法，"
+        "和第一代已经对不上。没人把它当成新闻，也没人再等那天到来。"
+    )
+    assert book_level_low(local) is True
+    assert book_level_low(generic) is True
+    assert book_level_low(renjian) is False
+    assert premise_cohesion_low(spliced) is True
+    assert premise_cohesion_low(renjian) is False
+    assert pitch_item_reject("楼里", local)[0] == "ponds_book_level"
+    assert pitch_item_reject("融合", generic)[0] == "ponds_book_level"
+    assert pitch_item_reject("昆仑件", spliced)[0] == "ponds_premise_cohesion"
+    assert pitch_item_reject("人间未醒", renjian) is None
+    start = (
+        "直到有一天他踏上这条路，从此他的命运被改写。"
+        "没人知道这背后还有更大的局。故事开始于一个普通的早晨，"
+        "他才发现自己已经回不去原来的日子，只能一路往前走。"
+        "后面发生的事，都从这一天开始。"
+    )
+    assert pitch_item_reject("启程", start)[0] == "ponds_story_opening"
 

@@ -401,6 +401,55 @@ _PASSIVE_INITIATION = re.compile(
     r"普通人.{0,16}(发现|遇上)|突然.{0,8}发现|忽然.{0,8}出现|"
     r"捡到了?(一张符|异物|不该)"
 )
+_OVERLAY_EQ = re.compile(
+    r"(?:地铁|合同|契约|流量|公司|办公室|小区|楼盘|绩效|KPI).{0,12}"
+    r"(?:就是|即是|等于|叫作|当成)"
+    r"(?:灵脉|道契|香火|宗门|洞府|洞天|修炼|修为)"
+    r"|(?:灵脉|道契|香火|宗门|洞府|洞天).{0,12}"
+    r"(?:就是|即是|等于)"
+    r"(?:地铁|合同|契约|流量|公司|办公室|小区|楼盘)"
+)
+_OVERLAY_PAIRS: tuple[tuple[re.Pattern[str], re.Pattern[str]], ...] = (
+    (re.compile(r"地铁"), re.compile(r"灵脉")),
+    (re.compile(r"合同|契约"), re.compile(r"道契")),
+    (re.compile(r"流量"), re.compile(r"香火")),
+    (re.compile(r"公司"), re.compile(r"宗门")),
+    (re.compile(r"办公室"), re.compile(r"洞府")),
+    (re.compile(r"小区|楼盘"), re.compile(r"洞府|洞天")),
+)
+_POINT_STORY = re.compile(
+    r"一个死人|一具尸体|一张表|一次事故|一桩命案|"
+    r"只是一个案子|查完这件|案子结束就|"
+    r"围绕这一件事|围着这一件|这一件事查清"
+)
+_SECRET_ESCALATION = re.compile(
+    r"更大(?:的)?(?:秘密|阴谋|真相)|真相(?:会|将)(?:揭开|出现)|会遇到更大"
+)
+_STORY_OPENING = re.compile(
+    r"直到有一天|直到某天|故事开始于|他踏上|从此他的命运|"
+    r"没人知道这背后"
+)
+_TRAJECTORY = re.compile(
+    r"走[到进上]|进入.{0,8}(?:圈|层|局|位)|争取|"
+    r"行动(?:空间|边界|位置)|获得.{0,6}位置|"
+    r"改变局面|推向.{0,6}舞台|从.{0,8}到.{0,8}(?:再|又)|"
+    r"下一步能走|能走到哪里|位置会变|边界会"
+)
+_LOCAL_XIAN = re.compile(
+    r"(?:小区|物业).{0,24}(?:剑仙|仙人|隐世)|"
+    r"(?:剑仙|仙人).{0,24}(?:小区|物业)|"
+    r"住着一个(?:剑仙|仙人)"
+)
+_GENERIC_CIV = re.compile(
+    r"修真已经(?:成为|融入|是)(?:了)?(?:现代社会|都市社会|社会的一部分|日常生活的一部分)"
+)
+_SPLICE_PAIRS: tuple[tuple[re.Pattern[str], re.Pattern[str]], ...] = (
+    (re.compile(r"物流|快递"), re.compile(r"昆仑")),
+    (re.compile(r"物业"), re.compile(r"剑仙")),
+    (re.compile(r"房产|学区房|二手房"), re.compile(r"长生")),
+    (re.compile(r"旧房子|老宅"), re.compile(r"槐树")),
+    (re.compile(r"青铜盒"), re.compile(r"昆仑|物流|快递")),
+)
 
 
 def _pitch_body(item: Mapping[str, str]) -> str:
@@ -419,6 +468,65 @@ def passive_initiation_high(body: str) -> bool:
     return bool(_PASSIVE_INITIATION.search(body or ""))
 
 
+def genre_overlay_high(body: str) -> bool:
+    """修真是不是只是现代世界的词汇替换。"""
+    text = body or ""
+    if _OVERLAY_EQ.search(text):
+        return True
+    hits = 0
+    for mundane, xian in _OVERLAY_PAIRS:
+        if mundane.search(text) and xian.search(text):
+            hits += 1
+    return hits >= 2
+
+
+def point_story_high(body: str) -> bool:
+    """整本书是不是其实只有一个故事点，只是附带可以继续写。"""
+    text = body or ""
+    if _POINT_STORY.search(text):
+        return True
+    if re.search(r"可以(?:继续|一直)写|足以写成", text) and re.search(
+        r"一件事|一桩|一次事故|一个秘密|一个案子", text
+    ):
+        return True
+    return False
+
+
+def trajectory_absence_high(body: str) -> bool:
+    """长期拉力是不是只剩更大秘密，而看不出行动边界会移动。"""
+    text = body or ""
+    if _TRAJECTORY.search(text):
+        return False
+    return bool(_SECRET_ESCALATION.search(text))
+
+
+def serial_trajectory_absence_high(body: str) -> bool:
+    """看不见人物持续行动的方向，只剩一个事件或一层更大的谜。"""
+    return point_story_high(body) or trajectory_absence_high(body)
+
+
+def book_level_low(body: str) -> bool:
+    """核心是不是一个局部点子或一句空的类型判断，而不是能撑起整本的作品现实。"""
+    text = body or ""
+    if _LOCAL_XIAN.search(text):
+        return True
+    return bool(_GENERIC_CIV.search(text))
+
+
+def premise_cohesion_low(body: str) -> bool:
+    """几件东西是不是本来就属于同一作品现实，而不是职业/仙缘硬拼。"""
+    text = body or ""
+    for left, right in _SPLICE_PAIRS:
+        if left.search(text) and right.search(text):
+            return True
+    return False
+
+
+def story_opening_high(body: str) -> bool:
+    """简介是不是在讲故事怎么开始，而不是这本书是什么。"""
+    return bool(_STORY_OPENING.search(body or ""))
+
+
 def pitch_item_reject(title: str, opening: str) -> tuple[str, str] | None:
     """单本判定。detail 只给内部日志用，不应当成改稿说明书喂回模型。"""
     hit = pitch_reject(title, opening)
@@ -426,12 +534,18 @@ def pitch_item_reject(title: str, opening: str) -> tuple[str, str] | None:
         return hit
     if _IDEA_CARD.search(opening or ""):
         return ("ponds_idea_card", PITCH_RESAMPLE_DETAIL)
-    if _LOCAL_ANECDOTE.search(opening or ""):
-        return ("ponds_local_anecdote", PITCH_RESAMPLE_DETAIL)
+    if book_level_low(opening):
+        return ("ponds_book_level", PITCH_RESAMPLE_DETAIL)
+    if premise_cohesion_low(opening):
+        return ("ponds_premise_cohesion", PITCH_RESAMPLE_DETAIL)
+    if story_opening_high(opening):
+        return ("ponds_story_opening", PITCH_RESAMPLE_DETAIL)
+    if genre_overlay_high(opening):
+        return ("ponds_genre_overlay", PITCH_RESAMPLE_DETAIL)
     if occupation_centrality_high(title, opening):
         return ("ponds_occupation_centrality", PITCH_RESAMPLE_DETAIL)
-    if passive_initiation_high(opening):
-        return ("ponds_passive_initiation", PITCH_RESAMPLE_DETAIL)
+    if serial_trajectory_absence_high(opening):
+        return ("ponds_serial_trajectory_absence", PITCH_RESAMPLE_DETAIL)
     return None
 
 
