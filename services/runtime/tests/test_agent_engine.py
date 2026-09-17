@@ -782,12 +782,13 @@ def test_domain_event_payload_clamps_plan_title_and_outline() -> None:
         {
             "items": [
                 {"title": f"t{i}", "who": "a", "where": "b", "want": "c"}
-                for i in range(5)
+                for i in range(7)
             ]
         },
     )
     assert five is not None
-    assert len(five["items"]) == 4
+    assert len(five["items"]) == 6
+    validate_event_payload("opening.ponds", five)
     mixed = _domain_event_payload(
         "opening.ponds",
         {"items": ["nope", {"title": "a"}, {"title": "b"}]},

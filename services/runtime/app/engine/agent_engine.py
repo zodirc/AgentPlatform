@@ -415,7 +415,7 @@ def _domain_event_payload(event_type: str, result: dict[str, Any]) -> dict[str, 
                 if not row:
                     continue
                 ponds.append(row)
-                if len(ponds) >= 4:
+                if len(ponds) >= 6:
                     break
         if len(ponds) < 2:
             return None

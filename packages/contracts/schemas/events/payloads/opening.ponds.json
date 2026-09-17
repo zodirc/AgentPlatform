@@ -15,7 +15,7 @@
     "items": {
       "type": "array",
       "minItems": 2,
-      "maxItems": 4,
+      "maxItems": 6,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -27,7 +27,7 @@
           "where": { "type": "string", "maxLength": 240 },
           "want": { "type": "string", "maxLength": 240 },
           "chapter_job": { "type": "string", "maxLength": 240 },
-          "opening": { "type": "string", "maxLength": 400 },
+          "opening": { "type": "string", "maxLength": 800 },
           "arc": { "type": "string", "maxLength": 400 },
           "flavor": { "type": "string", "maxLength": 400 },
           "price": { "type": "string", "maxLength": 160 },

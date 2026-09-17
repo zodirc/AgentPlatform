@@ -44,6 +44,16 @@ describe("openingPonds", () => {
     expect(
       normalizeOpeningPondsArtifact({
         type: "opening_ponds",
+        items: Array.from({ length: 7 }, (_, i) => ({
+          id: `c0${i + 1}`,
+          title: `c0${i + 1}`,
+          opening: `${i + 1}. 一条已经成立的事实。`,
+        })),
+      })?.items,
+    ).toHaveLength(6);
+    expect(
+      normalizeOpeningPondsArtifact({
+        type: "opening_ponds",
         items: [{ id: "a", title: "only" }],
       }),
     ).toBeNull();

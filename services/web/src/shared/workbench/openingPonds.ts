@@ -78,7 +78,7 @@ export function normalizeOpeningPondItems(
 ): OpeningPondItem[] {
   if (!Array.isArray(raw)) return [];
   const out: OpeningPondItem[] = [];
-  for (let i = 0; i < raw.length && out.length < 4; i += 1) {
+  for (let i = 0; i < raw.length && out.length < 6; i += 1) {
     const row = raw[i];
     if (!row || typeof row !== "object") continue;
     const rec = row as Record<string, unknown>;
@@ -91,7 +91,7 @@ export function normalizeOpeningPondItems(
       where: clip(rec.where, 240) || undefined,
       want: clip(rec.want, 240) || undefined,
       chapter_job: clip(rec.chapter_job, 240) || undefined,
-      opening: clip(rec.opening, 400) || undefined,
+      opening: clip(rec.opening, 800) || undefined,
       arc: clip(rec.arc, 400) || undefined,
       flavor: clip(rec.flavor, 400) || undefined,
       price: clip(rec.price, 160) || undefined,

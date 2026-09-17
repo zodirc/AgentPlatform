@@ -3,6 +3,10 @@
 版本规则见 [README.md](README.md) §版本化。每次改动 `schemas/`、`openapi/`、
 `python/agent_contracts` 时,在此追加一条并按规则调整版本号。
 
+## 2026-09-17 runtime
+
+- `opening.ponds` items `maxItems` 4→6，`opening` `maxLength` 400→800。给独立采样更长的 pitch，并允许最多 6 条载荷。旧载荷 2～4 条仍合法。
+
 ## 2026-09-14 runtime
 
 - `opening.ponds` items 的 `flavor` 自本版起由 runtime 不再产出；`opening` 语义改为正文第一段。事件 schema 不变（`flavor` 仍 optional，`opening` `maxLength` 400）。向后兼容。
