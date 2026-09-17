@@ -131,31 +131,46 @@ def test_opening_choice_block_is_book_pitch_first() -> None:
     assert "写到这一拍停" not in block
     assert "绩效" not in block
     assert "封面" not in block
+    assert "互相不同" not in block
+    assert "后续从这本继续" not in block
+    assert "三次短调用" not in block
+    assert "形成这一本" not in block
+    assert "pitch" in block
     assert 200 <= len(block) <= 4000
 
 
 def test_candidate_mode_block_is_shelf_not_prose_rules() -> None:
-    from app.writing.opening_ponds import candidate_mode_block
+    from app.writing.opening_ponds import candidate_mode_block, target_shelf_block
 
     block = candidate_mode_block()
     assert "### CANDIDATE MODE" in block
-    assert "### TARGET SHELF" in block
-    assert "不要总结它们的共同公式" in block
-    assert "《诡秘之主》" in block
-    assert "《第九特区》" in block
-    assert "《我在精神病院里学斩神》" in block
-    assert "《修真四万年》" in block
-    assert "可以不出现在 pitch 中" in block
+    assert "### TARGET SHELF" not in block
+    assert "《诡秘之主》" not in block
+    assert "设计一个创意卡" in block
     assert "主角已经有" not in block
-    assert "当成构思起点" in block
     assert "先写正在发生的事。" not in block
     assert "两本不同的书" not in block
-    assert "读者长期追" not in block
     assert "作品空间" not in block
+    assert "长期阅读期待" not in block
     assert "### TARGET SPACE" not in block
     assert "### MODEL ATTRACTOR" not in block
-    assert "### WORK CHECK" not in block
-    assert "### HUMAN BOUNDARY" not in block
+    assert "work_intent" not in block
+    assert "reading_pull" not in block
+    assert "{user_topic}" not in block
+    shelf = target_shelf_block()
+    assert "### TARGET SHELF" in shelf
+    assert "不要分析它们" in shelf
+    assert "不要提炼共同规律" in shelf
+    assert "这些作品共同具有" not in shelf
+    assert "读者长期追" not in shelf
+    assert "《诡秘之主》" in shelf
+    assert "《第九特区》" in shelf
+    assert "《我在精神病院里学斩神》" in shelf
+    assert "《夜的命名术》" in shelf
+    assert "《凡人修仙传》" in shelf
+    assert "《修真四万年》" not in shelf
+    assert "作品空间" not in shelf
+    assert "长期阅读期待" not in shelf
 
 
 def test_picking_prompt_omits_after_lock_craft(tmp_path, monkeypatch) -> None:
@@ -394,7 +409,7 @@ def test_opening_ponds_edge_paths(workspace: Path) -> None:
     from app.writing.opening_ponds import opening_ponds_path, pond_item_event_fields
 
     assert normalize_pond_items("nope") == []
-    assert len(normalize_pond_items([{"title": "x"}] * 5 + ["skip"])) == 4
+    assert len(normalize_pond_items([{"title": "x"}] * 7 + ["skip"])) == 6
     path = opening_ponds_path(workspace_root=workspace)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{", encoding="utf-8")
@@ -434,17 +449,11 @@ def test_clear_and_load_opening_ponds_browse_is_soft(workspace: Path) -> None:
     )
     save_opening_ponds(items, summary="x", workspace_root=workspace)
     browse = format_opening_ponds_block(workspace_root=workspace, mode="browse")
-    assert "还没用过的 start_kind" not in browse
-    assert "price_axis" not in browse
-    assert "此前候选：《A窗》《B窗》" in browse
-    assert "不要续写、修补或改名" in browse
+    assert browse == ""
     more = format_opening_ponds_block(workspace_root=workspace, mode="more")
-    assert "## 此前候选" in more
-    assert "《A窗》《B窗》" in more
-    assert "离下面这几本远" not in more
-    assert "社会角落" not in more
-    assert "必须换第一口力" not in more
-    assert "还没用过的" not in more
+    assert more == ""
+    assert "A窗" not in browse
+    assert "B窗" not in more
     assert clear_opening_ponds(workspace_root=workspace) is True
     assert format_opening_ponds_block(workspace_root=workspace) == ""
 
@@ -626,7 +635,8 @@ def test_committed_pond_block_omits_axis_labels(workspace: Path) -> None:
         MORE_PONDS_MESSAGE,
         workspace_root=workspace,
     )
-    assert "## 此前候选" in more.volatile_block
+    assert "## 此前候选" not in more.volatile_block
+    assert "《A窗》" not in more.volatile_block
     assert "## 已选作品" not in more.volatile_block
 
 
@@ -798,10 +808,10 @@ def test_drop_pond_attempt_strips_titles_and_injects_opaque_flag() -> None:
     assert "余火" not in blob
     assert "propose_book_candidates" not in blob
     vol = inject_pond_fresh_retry_block("## Work index\nempty")
-    assert "重新形成一个新的候选" in vol
-    assert "empty items" in vol
+    assert "previous_attempt_discarded: true" in vol
     assert "occupation" not in vol
     assert "ponds_occupation" not in vol
+    assert "genre_overlay" not in vol
     assert "余火" not in vol
 
 

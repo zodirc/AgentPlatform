@@ -21,20 +21,24 @@ _POND_REJECTS: dict[str, int] = {}
 _POND_HELD: dict[str, list[dict[str, Any]]] = {}
 _POND_REJECT_USER_SUMMARY = "开篇候选这轮没交成。请再说一次「我看看」。"
 _POND_REPAIR_SUMMARY = "重新形成一个新的候选。"
-POND_FRESH_RETRY_BLOCK = (
-    "Call `propose_book_candidates` with empty items.\n"
-    "重新形成一个新的候选。"
-)
+POND_FRESH_RETRY_BLOCK = "previous_attempt_discarded: true"
 _STRUCTURAL_RESAMPLE_CODES = frozenset(
     {
         "ponds_same_book",
         "ponds_near_rejected",
         "ponds_occupation_centrality",
-        "ponds_passive_initiation",
         "ponds_idea_card",
-        "ponds_local_anecdote",
         "ponds_fresh_retry",
+        "ponds_genre_overlay",
+        "ponds_book_level",
+        "ponds_premise_cohesion",
+        "ponds_story_opening",
+        "ponds_serial_trajectory_absence",
+        "ponds_passive_initiation",
+        "ponds_local_anecdote",
         "ponds_occupation_anomaly",
+        "ponds_point_story",
+        "ponds_trajectory_absence",
     }
 )
 
@@ -161,7 +165,7 @@ def pick_distinct_pond_pair(
 
 
 def inject_pond_fresh_retry_block(volatile: str) -> str:
-    if "重新形成一个新的候选" in (volatile or ""):
+    if "previous_attempt_discarded: true" in (volatile or ""):
         return volatile
     block = POND_FRESH_RETRY_BLOCK
     text = (volatile or "").rstrip()
@@ -313,26 +317,56 @@ _WEB_SERIAL_PATCH_REL = _TEMPLATES_DIR / "web_serial_patch.md"
 _TITLE_MAX = 80
 _FIELD_MAX = 240
 _SUMMARY_MAX = 160
-_PLAN_MAX = 400
+_PLAN_MAX = 800
 _FLAVOR_MAX = 400
 _PRICE_MAX = 160
 _SELF_NOTE_MAX = 160
 _SOCIAL_SPACE_MAX = 80
 _ENGINE_NOTE_MAX = 160
 _MIN_ITEMS = 2
-_MAX_ITEMS = 4
+_MAX_ITEMS = 6
 
 
-def candidate_mode_block() -> str:
-    """内部采样专用：候选模式 + 真实书架。不进外层 chatting context。"""
+def _split_web_serial_patch() -> tuple[str, str]:
     try:
-        return _WEB_SERIAL_PATCH_REL.read_text(encoding="utf-8").strip()
+        raw = _WEB_SERIAL_PATCH_REL.read_text(encoding="utf-8")
     except OSError:
-        return (
+        raw = ""
+    marker = "### TARGET SHELF"
+    if marker in raw:
+        mode, shelf = raw.split(marker, 1)
+        return mode.strip(), f"{marker}{shelf}".strip()
+    return raw.strip(), ""
+
+
+def candidate_mode_block(user_text: str = "") -> str:
+    """候选模式切换。不含书架，也不含作品理论。"""
+    mode, _shelf = _split_web_serial_patch()
+    if not mode:
+        mode = (
             "### CANDIDATE MODE\n"
-            "这一阶段是在决定写哪一本书，不是在写第一章。\n"
-            "先形成一部真正的长篇都市修真网文，再压成 title + pitch。"
+            "这一轮是在决定写哪一本书，不是在写第一章，也不是在设计一个创意卡。\n\n"
+            "用户指定的题材是：{user_topic}\n\n"
+            "目标是得到一部真正可以长期连载的作品。\n"
+            "不要急着起书名或写简介。"
         )
+    topic = (user_text or "").strip()
+    if "{user_topic}" in mode:
+        if topic:
+            mode = mode.replace("{user_topic}", topic)
+        else:
+            mode = re.sub(
+                r"用户指定的题材是：\{user_topic\}\n+",
+                "",
+                mode,
+            )
+    return mode
+
+
+def target_shelf_block() -> str:
+    """真实作品简介。提供分布，不提供公式。"""
+    _mode, shelf = _split_web_serial_patch()
+    return shelf
 
 
 def opening_choice_block() -> str:
@@ -469,7 +503,7 @@ def ponds_contrast_summary(items: list[dict[str, str]]) -> str:
     return " ｜ ".join(bits)
 
 
-def normalize_pond_item(raw: dict[str, Any], index: int) -> dict[str, str]:
+def normalize_pond_item(raw: dict[str, Any], index: int) -> dict[str, Any]:
     """一条近池：书名 + 这本书 + 开篇；自述在后。"""
     title = _clip(raw.get("title") or raw.get("name") or f"候选 {index + 1}", _TITLE_MAX)
     item_id = _clip(raw.get("id") or f"pond-{index + 1}", 32) or f"pond-{index + 1}"
@@ -549,10 +583,10 @@ def normalize_pond_item(raw: dict[str, Any], index: int) -> dict[str, str]:
     }
 
 
-def normalize_pond_items(raw: Any) -> list[dict[str, str]]:
+def normalize_pond_items(raw: Any) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
         return []
-    out: list[dict[str, str]] = []
+    out: list[dict[str, Any]] = []
     for i, item in enumerate(raw):
         if not isinstance(item, dict):
             continue

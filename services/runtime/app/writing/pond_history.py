@@ -92,6 +92,44 @@ def load_rejected_pond_items(
     return out
 
 
+def pond_title_key(item: Mapping[str, Any] | dict[str, Any]) -> str:
+    return str(item.get("title") or item.get("id") or "").strip().casefold()
+
+
+def seen_pond_title_keys(*, workspace_root: Path | None = None) -> set[str]:
+    """当前池 + 已拒池的书名。新采样硬排除，不靠 prompt 换方向。"""
+    keys: set[str] = set()
+    from app.writing.opening_ponds import load_opening_ponds
+
+    current = load_opening_ponds(workspace_root=workspace_root)
+    if current:
+        for item in current.get("items") or []:
+            if isinstance(item, dict):
+                key = pond_title_key(item)
+                if key:
+                    keys.add(key)
+    for item in load_rejected_pond_items(workspace_root=workspace_root):
+        key = pond_title_key(item)
+        if key:
+            keys.add(key)
+    return keys
+
+
+def drop_seen_pond_items(
+    items: Sequence[Mapping[str, Any]],
+    seen: set[str],
+) -> list[dict[str, Any]]:
+    if not seen:
+        return [dict(it) for it in items]
+    out: list[dict[str, Any]] = []
+    for item in items:
+        key = pond_title_key(item)
+        if key and key in seen:
+            continue
+        out.append(dict(item))
+    return out
+
+
 def flatten_rejected_groups(
     groups: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:

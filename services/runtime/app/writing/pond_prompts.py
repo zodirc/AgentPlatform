@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from app.writing.pond_history import load_rejected_pond_groups
-
 _USER_KIND_PHRASES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "granted_path",
@@ -65,44 +63,9 @@ def format_opening_ponds_block(
     workspace_root: Path | None = None,
     mode: Literal["more", "browse"] = "browse",
 ) -> str:
-    """volatile：browse/more 只留标题作历史，不灌旧简介，避免模型在原书上修补。"""
-    from app.writing.opening_ponds import load_opening_ponds
-
-    data = load_opening_ponds(workspace_root=workspace_root)
-    titles: list[str] = []
-    if mode == "browse":
-        if not data:
-            return ""
-        titles = [
-            str(it.get("title") or "") for it in data["items"] if it.get("title")
-        ]
-        if not titles:
-            return ""
-        shown = "》《".join(titles)
-        return (
-            f"此前候选：《{shown}》。\n"
-            "它们只作为历史产物保存。不要续写、修补或改名。下一轮重新形成新的作品。"
-        )
-    groups = list(load_rejected_pond_groups(workspace_root=workspace_root))
-    seen_ids = {str(g.get("ponds_id") or "") for g in groups}
-    if data and str(data.get("ponds_id") or "") not in seen_ids:
-        groups.append(data)
-    if not groups:
-        return ""
-    for group in groups:
-        for item in group.get("items") or []:
-            if isinstance(item, dict):
-                title = str(item.get("title") or item.get("id") or "").strip()
-                if title and title not in titles:
-                    titles.append(title)
-    if not titles:
-        return ""
-    shown = "》《".join(titles)
-    return (
-        "## 此前候选\n"
-        f"《{shown}》\n"
-        "它们只作为历史产物保存。不要续写、修补或改名。下一轮重新形成新的作品。"
-    )
+    """历史候选只留 sidecar / pond_history，给 similarity 闸门用，不进模型。"""
+    del workspace_root, mode
+    return ""
 
 
 def format_committed_pond_block(

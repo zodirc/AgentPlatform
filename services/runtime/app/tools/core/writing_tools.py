@@ -1169,7 +1169,7 @@ async def propose_book_candidates(
     items: list[dict[str, Any]] | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """交 2～3 本书页简介，停下来等用户点选或说「我要其他的」。"""
+    """live：独立采样 ×2 → 冻结 → 判尺 → 渲染卡片。stub：仍收调用方交来的卡片。"""
     from app.writing.candidate_sample import sample_independent_pair
     from app.writing.excerpt_job import job_signals_for, keep_passing_pond_items
     from app.writing.opening_ponds import (
@@ -1189,7 +1189,9 @@ async def propose_book_candidates(
     )
     from app.writing.pond_history import (
         append_rejected_ponds,
+        drop_seen_pond_items,
         load_rejected_pond_items,
+        seen_pond_title_keys,
     )
     from app.writing.pond_similarity import compute_pond_similarity
 
@@ -1207,13 +1209,46 @@ async def propose_book_candidates(
     if _use_independent_candidate_sample(_kwargs):
         sampled = await sample_independent_pair(
             message,
-            held=held_pond_items(turn_id),
             complete=_kwargs.get("sample_complete"),
-            gate=bool(settings.ponds_excerpt_gate),
+            gate=False,
             turn_id=turn_id,
         )
-        passing = fill_pond_defaults(normalize_pond_items(sampled))
-        held = merge_held_pond_items(held_pond_items(turn_id), passing)
+        passing = drop_seen_pond_items(
+            sampled, seen_pond_title_keys(workspace_root=root)
+        )
+        if len(passing) < _MIN_ITEMS:
+            exhausted = note_pond_reject(
+                turn_id,
+                ("ponds_fresh_retry", ""),
+            )
+            if exhausted:
+                return exhausted
+            return {
+                "status": "error",
+                "error": "ponds_fresh_retry",
+                "detail": "",
+                "summary": _POND_REPAIR_SUMMARY,
+                "stop_retry": False,
+                "fresh_retry": True,
+            }
+        saved = save_opening_ponds(
+            passing,
+            summary="",
+            job_signals=job_signals_for(passing),
+        )
+        clear_pond_rejects(turn_id)
+        from app.writing.ledger import append_pond_fingerprint
+
+        for item in saved["items"]:
+            append_pond_fingerprint(item, workspace_root=root)
+        return {
+            "status": "ok",
+            "ponds_id": saved["ponds_id"],
+            "items": saved["items"],
+            "summary": saved.get("summary")
+            or f"{len(passing)} 本作品候选，待你点选或说「我要其他的」",
+            "awaiting_choice": True,
+        }
     else:
         normalized = normalize_pond_items(supplied)
         if len(normalized) < _MIN_ITEMS:
@@ -1234,6 +1269,9 @@ async def propose_book_candidates(
         else:
             passing = list(normalized)
         held = merge_held_pond_items(held_pond_items(turn_id), passing)
+        held = drop_seen_pond_items(
+            held, seen_pond_title_keys(workspace_root=root)
+        )
 
     similarity = compute_pond_similarity(
         held[:2] if len(held) >= 2 else held,
