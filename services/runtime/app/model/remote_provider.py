@@ -10,6 +10,7 @@ import httpx
 
 from app.model.config import ModelConfig
 from app.model.gateway import AbortSignal, ModelFatalError, ModelResponse, StreamActivity
+from app.model.generation import GenerationParams
 from app.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -37,9 +38,11 @@ class RemoteModelProvider:
         scenario_id: str | None = None,
         base_url: str | None = None,
         token: str | None = None,
+        generation: GenerationParams | None = None,
     ) -> None:
         self._config = config
         self._scenario_id = scenario_id
+        self._generation = generation
         self.base_url = (
             base_url or getattr(settings, "model_gateway_url", "") or ""
         ).rstrip("/")
@@ -60,6 +63,15 @@ class RemoteModelProvider:
             "config": _serialize_config(self._config),
             "scenario_id": self._scenario_id,
         }
+        if self._generation is not None:
+            body["generation"] = {
+                "temperature": self._generation.temperature,
+                "top_p": self._generation.top_p,
+                "max_output_tokens": self._generation.max_output_tokens,
+                "tool_choice": self._generation.tool_choice,
+                "thinking_enabled": self._generation.thinking_enabled,
+                "reasoning_effort": self._generation.reasoning_effort,
+            }
         timeout = httpx.Timeout(
             None,
             connect=float(settings.model_connect_timeout_seconds or 10.0),

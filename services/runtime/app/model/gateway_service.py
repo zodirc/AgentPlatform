@@ -51,6 +51,34 @@ def _config_from_body(raw: dict[str, Any] | None):
     )
 
 
+def _generation_from_body(
+    raw: dict[str, Any] | None,
+    *,
+    scenario_id: str | None,
+):
+    from dataclasses import replace
+
+    from app.model.generation import GenerationParams
+
+    base = GenerationParams.from_settings(scenario_id=scenario_id)
+    if not raw:
+        return None
+    kwargs: dict[str, Any] = {}
+    if "max_output_tokens" in raw and raw["max_output_tokens"] is not None:
+        kwargs["max_output_tokens"] = int(raw["max_output_tokens"])
+    if "temperature" in raw:
+        kwargs["temperature"] = raw["temperature"]
+    if "top_p" in raw:
+        kwargs["top_p"] = raw["top_p"]
+    if "tool_choice" in raw and raw["tool_choice"] is not None:
+        kwargs["tool_choice"] = str(raw["tool_choice"])
+    if "thinking_enabled" in raw and raw["thinking_enabled"] is not None:
+        kwargs["thinking_enabled"] = bool(raw["thinking_enabled"])
+    if "reasoning_effort" in raw and raw["reasoning_effort"] is not None:
+        kwargs["reasoning_effort"] = str(raw["reasoning_effort"])
+    return replace(base, **kwargs) if kwargs else base
+
+
 async def _ndjson_stream(body: dict[str, Any]):
     from app.model.factory import create_gateway
     from app.model.gateway import ModelResponse, StreamActivity
@@ -63,6 +91,10 @@ async def _ndjson_stream(body: dict[str, Any]):
         tools = []
     config = _config_from_body(body.get("config") if isinstance(body.get("config"), dict) else None)
     scenario_id = body.get("scenario_id")
+    generation = _generation_from_body(
+        body.get("generation") if isinstance(body.get("generation"), dict) else None,
+        scenario_id=str(scenario_id) if scenario_id else None,
+    )
     # Force local providers inside the gateway process (do not recurse to remote).
     prev_role = getattr(settings, "service_role", None)
     prev_url = getattr(settings, "model_gateway_url", None)
@@ -73,6 +105,7 @@ async def _ndjson_stream(body: dict[str, Any]):
             config,
             messages=messages,
             scenario_id=str(scenario_id) if scenario_id else None,
+            generation=generation,
         )
         async for chunk in gateway.stream(messages=messages, tools=tools):
             if isinstance(chunk, str):

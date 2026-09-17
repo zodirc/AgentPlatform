@@ -37,6 +37,7 @@ def create_gateway(
     scenario_id: str | None = None,
     for_compact: bool = False,
     context_window_tokens: int | None = None,
+    generation: GenerationParams | None = None,
 ) -> ModelGateway:
     """作用：按模式/provider 创建 ModelGateway。
 
@@ -54,7 +55,7 @@ def create_gateway(
     window = context_window_tokens
     if window is None and config is not None and config.context_window_tokens:
         window = int(config.context_window_tokens)
-    generation = GenerationParams.from_settings(
+    generation = generation or GenerationParams.from_settings(
         scenario_id=scenario_id,
         context_window_tokens=window,
     )
@@ -71,7 +72,12 @@ def create_gateway(
         from app.model.remote_provider import RemoteModelProvider
 
         return ModelGateway(
-            RemoteModelProvider(config=config, scenario_id=scenario_id, base_url=gateway_url)
+            RemoteModelProvider(
+                config=config,
+                scenario_id=scenario_id,
+                base_url=gateway_url,
+                generation=generation,
+            )
         )
 
     provider_name = config.provider.lower()
