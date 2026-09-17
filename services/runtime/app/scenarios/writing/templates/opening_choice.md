@@ -9,8 +9,6 @@ Do not list the candidates in chat.
 
 Stay inside the genre the user named.
 不要把简介写成第一章。
+不要在这一轮聊天里构思两本。
 
-工具内部各自形成一本书，再压成 `title` + `pitch`。
-不要在这一轮聊天里构思两本，也不要为了互相不同去换职业、地点或道具。
-
-用户选中的是这一本作品。后续从这本继续。
+卡片交卷是 `title` + `pitch`。
