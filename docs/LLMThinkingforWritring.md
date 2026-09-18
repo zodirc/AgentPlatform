@@ -1,432 +1,358 @@
-# LLM 开篇写作的惯性
+# 写作模块：立意（作品候选）
 
-给另一模型核对分类、核对本仓是否真碰到、并在此基础上想优化。不要把优化理解成「往热门网文店招靠拢」。
+本文描述 **现行实现** 里「只给题材、先出两本候选」这一段。冲突时以代码为准。
+
+立意在本仓不是文学课，也不是「找一个更好的方向」。它是一个程序阶段：用户点名题材 → 工具内部采两个互不可见的 `{title, pitch}` → 交给点选 UI → 停。好不好、像不像一本可以写下去的书，不在 child 里判。
+
+范围到此为止。点选后的 opening / outline / `draft_section`、L1 质地、`excerpt_job` 硬卫生（stub 路径仍可能走）不在本文展开。
 
 ---
 
-## 0. 怎么用这份稿
+## 1. 这一阶段要解决什么
 
-请按四件事读，不要只读禁词：
+用户说「写一篇长篇的都市修真小说」时，产品要的不是第一章，也不是聊天里的两段创意。
 
-| 问 | 看哪 |
+要的是：
+
+- 两张卡
+- 每张卡一个工作书名 + 一段书页简介（`pitch`）
+- 简介是入口，不是第一章，也不是构思过程
+- 助手正文应空；卡片才是交卷
+
+程序上把这件事拆成三层，避免同一个模型又当导演又当执笔者：
+
+| 层 | 谁 | 只做什么 |
+|----|----|----------|
+| Parent | writing 场景主模型 | 认出「只要题材」→ 空调用 `propose_book_candidates` → 停 |
+| Handler | `propose_book_candidates` | 抽题材、开两个 sample job、校验、落盘、返回两张卡 |
+| Child | 每个 sample 的独立补全 | 根据题材交一个 `{title, pitch}` 对象 |
+
+Child 不决定「什么时候交卷」。Sample 是 handler 创建的原子 job：一次结构化补全 → 解析一个对象 → 结束。格式失败只丢弃当前结果，再新开一发（新 messages），每个槽最多一次。
+
+---
+
+## 2. 何时进入立意
+
+闸门在 `wants_opening_candidates`（`outline_phase.py`），不是模型自己理解「该选书了」。
+
+进入的典型条件（同时满足「长篇近池未立」）：
+
+- 整句 `我要其他的`
+- 或 `看看` / `发散` / `几种` / `换个开` 等浏览口令
+- 或消息命中尺度/类型词：`长篇`、`第一章`、`写一章`、`修真`、`玄幻`、`都市`、`仙侠`、`修仙`
+
+不进入或退出：
+
+- 大纲里已经订了风格契约（`outline_style_committed`）
+- 已有 committed pond
+- 用户在点选某一张（`按开篇候选` / `采用此开篇` 等）
+- 消息已经在点名既有书（`名叫`、流派标签等）
+
+进入后：
+
+- 工具集闸成 `propose_book_candidates`（及 alias / `stub_echo`）
+- volatile 灌 `opening_choice.md`：只触发空调用
+- 点选成功后引擎 `TERMINATE`，原因 `opening_ponds_awaiting_choice`
+
+`「我看看」` 不是「再采一组」。只有整句 `我要其他的` 才会把当前池记入拒池再采新的两本。
+
+---
+
+## 3. 总链
+
+```
+用户：写一篇长篇的都市修真小说
+        │
+        ▼
+parent（writing system + opening_choice）
+  只调用 propose_book_candidates(items=[])
+  助手消息保持空
+        │
+        ▼
+handler  extract genre
+        │
+        ├──────────────┐
+        ▼              ▼
+  fresh sample #1  fresh sample #2
+  structured out   structured out
+  title+pitch      title+pitch
+        │              │
+        └──────┬───────┘
+               ▼
+        硬校验 / 排除旧卡
+               ▼
+        落盘 opening_ponds.json
+               ▼
+        返回两张卡  STOP
+```
+
+生产路径写死 **N = 2**。没有 adaptive 补采，没有第三发，没有 child 侧 selector。不够两张合法卡：`stop_retry=True`，不再让 parent 把整轮「生成候选」重跑一遍。
+
+---
+
+## 4. 工具构成
+
+### 4.1 对外工具
+
+注册在 `tools/bootstrap.py`。
+
+**`propose_book_candidates`**
+
+- 描述：触发采样两本长篇网文候选；`items` 传空；不要在 parent 上下文里编书名和简介。
+- 参数：`items` 数组，live 路径忽略内容，只认空调用。
+- Schema 里仍写了 `title`「二到八字」、`pitch`「约100–220字」——那是 **stub / 旧调用方** 的字段说明。live child 的硬约束是 `CANDIDATE_SCHEMA`（书名 2–16 字，pitch 非空）。
+- timeout 600s。
+- 成功：`status=ok`，`awaiting_choice=true`，`items` 为两张卡。
+- 失败（live 不够两张）：`error=ponds_fresh_retry`，`stop_retry=true`，`fresh_retry=false`，摘要「开篇候选这轮没交成。请再说一次「我看看」」。
+
+**`propose_opening_ponds`**
+
+- 旧名，直接转调 `propose_book_candidates`。
+- 仍接受 legacy `opening` 作为 `pitch` 别名。
+
+### 4.2 live 与 stub
+
+`_use_independent_candidate_sample`：
+
+- `MODEL_MODE=live`，或测试钩子 `sample_complete` / `force_independent_sample` → **工具内部采样**
+- 否则 stub：仍吃调用方交来的 `items`，可走 `excerpt_job` 闸、held 合并、相似度挑对
+
+本文其余默认讲 live。
+
+### 4.3 引擎对工具结果
+
+`agent_engine.py`：
+
+- 成功且 `awaiting_choice` → 结束 Turn（`opening_ponds_awaiting_choice`）
+- `stop_retry` 错误 → 结束 Turn（`opening_ponds_retry_exhausted`）
+- `fresh_retry` 且非 `stop_retry` → 丢掉这次 tool 尝试、灌 `previous_attempt_discarded`，让 parent 再调一次。**live 采样失败不再走这条**，避免「整轮生成候选」循环。
+
+---
+
+## 5. 采样构成
+
+实现：`writing/candidate_sample.py`。
+
+### 5.1 一个 sample 是什么
+
+`sample_one_candidate`：
+
+1. 打 thinking 分隔 `—— 独立采样 ——`
+2. `form_messages(user_text)` 得到 **全新** messages（不带上一发、不带 A 的草稿）
+3. `form_generation()` 带 `response_schema=CANDIDATE_SCHEMA`
+4. 一次 complete
+5. `parse_card`；pitch 以元话语开头则当格式失败
+6. 合法则排除旧书名 / 内容指纹；命中则丢弃，**不再为「换一本」加采**
+7. 否则打成卡片返回
+
+格式失败：丢掉本次文本，**不把失败稿送回模型编辑**，再跑步骤 2–5，最多 `_SLOT_RETRIES=1`。失败的 A 永远不会变成 A2。
+
+### 5.2 两个 sample
+
+`asyncio.gather(c01, c02)`。两路并行、互不可见。
+
+汇合后再按 title / pitch 指纹去重。槽位名 `c01`/`c02` **不是作品身份**：旧池若把 `id` 写成 `c01`，不得把新采样整槽扔掉。排除只看书名和内容指纹。
+
+常数：
+
+| 名 | 值 | 含义 |
+|----|----|------|
+| `_SAMPLE_POOL` | 2 | 每次只采两本 |
+| `_SLOT_RETRIES` | 1 | 每槽格式失败再试 1 次 |
+| `_FORM_MAX_OUTPUT_TOKENS` | 1024 | child 输出上限 |
+| `_FORM_THINK_CHAR_BUDGET` | 4000 | 思考字符预算，超了且尚无正文则 abort |
+| pitch clip | 800 字 | 解析后裁切 |
+| title | 2–16 字 | 解析硬门槛 |
+
+### 5.3 Child 生成参数
+
+`scenario_id=None`：不继承 writing 场景温度 / 主 system。
+
+- `thinking_enabled=False`
+- `reasoning_effort=none`（DeepSeek 会显式 `thinking: disabled`，否则默认思考模式不能强制 `tool_choice`）
+- `tool_choice=none`（随后由 `response_schema` 覆盖成结构化约束）
+- `response_schema=CANDIDATE_SCHEMA`
+
+### 5.4 结构化输出（不要靠「请输出 JSON」）
+
+`GenerationParams.response_schema` → `apply_response_schema`：
+
+| 族 | 约束 |
 |----|------|
-| 原理对不对 | 每条「原理」：训练目标 / 下一词 / RLHF，不是口味 |
-| 现象在不在 | 「现象」+ 第 4 节两轮原文。能指出句子在干什么，才算这条成立 |
-| 我们处理了没有 | 「处理」：改提问 / 硬卫生 / 提示拒因 / 无 / 本仓诱发。对上文件才算有 |
-| 挡住之后还在不在 | 「换皮」。检测器变绿而任务仍是「把书讲明白」= 假胜利 |
+| OpenAI / gpt-5 | `response_format.json_schema`，name `book_candidate`，`strict` |
+| DeepSeek | 强制函数 `book_candidate`，parameters 即该 schema |
+| Anthropic | 强制工具 `book_candidate`，`input_schema` 即该 schema |
 
-优化约束（避免重蹈）：
+DeepSeek 若 400「Thinking mode does not support this tool_choice」，兼容层补 `thinking: disabled` 再试。`json_schema` 不被吃时，降级为强制函数，**不剥成自由生成**。
 
-- 不要用「金手指 + 身份 + 读者台阶」当成功标准，那是 Hollywood logline。
-- 不要只加禁词。挡接头会换皮。
-- 不要把点选后的「得到或发现要早」抄进选书回合，那会把出书变成交金手指。
-- 假胜利：没有「都市修真，」「后来他明白」，但「这本书」仍是 1–3 章梗概、老李口播规矩、三张开篇同一句式。
-- 不要用改提问把「热门开局 / 日常再引入」塞进选书卡。卡只有一段；开局在点选后的章。加位子模型就填位子（§10）。
-
-范围：选书回合的开篇卡。落地后模型只交工作书名 + 正文第一段（`opening`）；`flavor`（这本书）仅旧记录兼容，runtime 不再产出。成章 `draft_section`、L1 质地分不在本表展开，文末注明。
+Child 流结束时：优先从 `tool_calls[].input` 取对象，否则用文本里的 JSON。
 
 ---
 
-## 1. 总根
+## 6. 提示词（三套，职责不同）
 
-提示里出现「这本书」，对模型等于：解释这是一本什么书。
+### 6.1 Parent system（`scenarios/writing/system.md`）
 
-问答的目标函数是**说完**（卖点、规则、去向、读者该如何理解）。叙事入口是**停在还没解释的一拍**。冲突时默认选说完。下面各条是「说完」的不同实现；剪一条，下一词用另一条把段落闭环。
+主模型仍拿完整 writing system。立意相关只有 WORK STATE / TOOLS 里几句，用来 **禁止它自己编候选、禁止把草稿状态带进构思**：
 
-**现象。** 卡片不像一场未完的事，像一份交完的说明书。思考链先设计书，再填场面。
+> 用户只给题材或说「看看」时，进入作品候选阶段。  
+> 这一阶段只负责产生若干个新的作品候选，不写第一章，不进入 opening / outline / draft，也不要把当前章节、story_state、author_state 或其他写作状态带入候选构思。  
+> 调用 `propose_book_candidates` 时不要自己编候选。工具会为每个候选建立独立的最小上下文并分别采样；每次采样只产生一个候选，不进行候选之间的比较、连续 brainstorm 或二次创作。  
+> 候选只是一个大概成立、值得继续发展的作品概貌。形成后立即停止，由后续选择阶段负责判断。  
+> 候选的 `pitch` 是书页入口，不是第一章开头。
 
-**处理。** 碰到，且曾由产品自己造出：字段就叫「这本书」；`system.md` 曾要求「能连载的书」。已改任务形状：工具只收 `title`+`opening`（正文第一段）；`system.md` 已删「能连载的书」；保存前剪尾，并由 `excerpt_job` 硬拒说完的句法痕迹（第 2 节）。字段名「这本书」不再出现在模型交卷槽里。
+TOOLS：
 
----
+> 只给题材或说看看 → `propose_book_candidates`（工具内部两本独立采样，交两张书页简介；卡片是交卷，不要写进聊天；停下来等用户点选或说「我要其他的」）
 
-## 2. 本仓处理栈
+Parent 不负责「写出一本优秀的都市修真」。它只负责调用工具。
 
-「处理」不是学番茄、不是改文风。选书与成章是两套注入。
+### 6.2 Parent volatile（`templates/opening_choice.md`）
 
-| 类 | 行为 | 文件 | 不是 |
-|----|------|------|------|
-| 改提问 | 不再要「简介、让人想点进去」；卡片改为工作书名 + 正文第一段 | `opening_choice.md`；`tools/bootstrap.py` 的 title/opening description；`excerpt_job.py` | 不是规定某家网文店招 |
-| 硬卫生 | 模型仍会写；`normalize_pond_item` 对 opening 调用 `strip_pitch_closers_report`；`excerpt_job` 五类计数 + 标题落地 + 前两句起法 | `writing/pitch_closer.py`；`writing/excerpt_job.py` | 不是微调，不是 L1 改稿 |
-| 提示与拒因 | 无负例、无禁词表；拒因只在 handler `detail`（正向改法 + 命中 token） | `opening_choice.md`；`excerpt_job` / `note_pond_reject`；`pond_similarity.same_book_reject`（shadow，不拒） | 负例表已删，不再用禁词诱发合规思考 |
+本轮只触发采样。全文：
 
-硬卫生现剪的接头（`_EXPLAINER` + `_CLOSER`）：后来他明白 / 原来， / 这意味着；都市修真（非群/者）；灵气复苏；比谁都清楚；他要弄清楚|面对|踏上；从××开始；山/门没有了；他不修仙；整句「有人A，有人B」。从第一处命中**剪到段末**。剪后不够 60 字则拒。
+```
+## Book choice
 
-硬卫生**现拒**（`excerpt_job`，不靠加禁词）：日历/蒙太奇（J1，时间跳 ≥2）；「有人」对 ≥2（J3，一句三个「有人」或两句各一对）；五类里**两类叠上**（`distinct ≥ 2`，含口播+时间跳这种）；工作书名 2-gram 不在正文里；组检查 `openings_same_beat`（前两句同一起法类：多了/醒来/响了）。**单独一类不拒**：纯口播（J2）、一句两个「有人」、介绍句（J4）、只剪过尾。`ponds_similarity_shadow=True`：同书向量闸只记日志，不拒。
+This turn only triggers sampling. Call `propose_book_candidates` once with empty `items`.
+Do not invent the two books in this context. The tool samples each book in a fresh context.
 
-选书时 `format_after_lock_craft_block(picking=True)` 返回空，不灌 `SERIAL_AFTER_LOCK_CRAFT`。点选后且 `work_mode=web_serial` 才灌：从已选开头接着写，这段原样作开头。不再要求前三分之一交到得到或发现。L1 `writing_signals` 打质地，不打开篇卡。
+Leave the assistant message empty; the cards are the deliverable.
+Do not call `draft_section` or `update_outline`.
+Do not list the candidates in chat.
 
-相关文件：
+Stay inside the genre the user named.
+不要把简介写成第一章。
+不要在这一轮聊天里构思两本。
 
-- `services/runtime/app/scenarios/writing/templates/opening_choice.md`
-- `services/runtime/app/scenarios/writing/system.md`
-- `services/runtime/app/scenarios/writing/templates/web_serial_voice.md`
-- `services/runtime/app/writing/pitch_closer.py`
-- `services/runtime/app/writing/excerpt_job.py`
-- `services/runtime/app/writing/opening_ponds.py`（normalize、拒因、`excerpt_group_reject`）
-- `services/runtime/app/writing/pond_similarity.py`
-- `services/runtime/app/writing/work_mode.py`（`SERIAL_AFTER_LOCK_CRAFT`）
-- `services/runtime/app/tools/bootstrap.py`（`propose_opening_ponds` schema：title 二到八字；隐藏 `start_kind`/`promise`/`engine_note`/`who`）
-- 证据：`eval/recordings/opening_cards/2026-09-14-urban-cultivation-1.json`（3.3 live）；3.4 未另存 json；仓库根 `thinking.txt` 已漂，见 §8 / §11。第一章取证：`eval/recordings/chapter_one/`
+卡片交卷是 `title` + `pitch`。
+```
 
----
+灌入条件：`should_gate_opening_choice` 为真。同时工具白名单只剩选书工具，避免主模型去 `draft_section`。
 
-## 3. 两轮现象（核对用原文）
+### 6.3 Child（真正产候选的 prompt）
 
-同一需求：写一部三百章都市修真。硬卫生上线前后对照。
+`work_reconstruction.form_messages`。**不**继承 writing system，**不**带 `opening_choice`，**不**带旧卡。
 
-### 3.1 剪尾前（金句 + 明白仍在卡上）
+System：
 
-标题：楼下有人结丹 ｜ 多出一条经脉 ｜ 睁眼是人间；下一组 旧货认主 ｜ 下水道亮了 ｜ 十九层。
+```
+根据题材直接生成一个小说候选。
 
-> 锯子夜里自己在磨东西，磨的是他白天刚收下的那把椅子。**后来他明白**，走了的修士不散……他一屋子的旧货，是一屋子等着认主的账。有人上门出十倍价……有人只求他别拆开。**都市修真，他不修仙，他收货。**
+只交一个结果，不需要寻找更好的方向。
+```
 
-> 李满每天下井，**比谁都清楚**光往哪边走，**也清楚**它会先淹到谁家。**都市修真，灵气复苏，从一条下水道开始。**
+User：
 
-> 下来时口袋里多了一枚不是她的钥匙。**都市修真，她要弄清楚自己少的是什么。**
+```
+题材：{genre}
+```
 
-### 3.2 剪尾后（`thinking.txt`：末班车｜下山｜空手）
+`genre` 由投影函数从用户话里抽出。例：`写一篇长篇都市修真小说` → `都市修真`。
 
-金句和「后来他明白」不再出现。思考链先设计三种 300 章 engine，再倒填场面；合规对照反例。卡片：
+故意不写的：
 
-> **末班车** · 十一点四十从总站发车……老李……说，有人上车就拉，**别问人家哪下**。**跑了两个月**，站牌上多出来两个站……  
-> 开篇：过了第二个路口，后视镜里靠窗那排座位上**多了一个人**。
+- 「请输出 JSON」——由 `response_schema` 约束
+- 「想到一个成立的方向就直接写」——「方向」会诱发搜索与比较
+- 「看起来像一本可以认真写下去的小说」——会被读成优化到足够优秀
+- 质量、套路、连载潜力、与另一张卡比较
 
-> **下山** · 山上待了**二十七年**。……**第二天**……**每天**去问。到**第二十天**，匣子比下山时重了。  
-> 开篇：巷子没了，原地是超市，保安不让他往里站。
-
-> **空手** · 被雷劈了……**第二天开始有人**放东西，**有人**喊师兄，**有人**跪下。**他什么也不会**……退回去两回，第三回收进柜子。  
-> 开篇：门口两箱水果和一沓没名字的钱。
-
-3.1 → 3.2 不是病好了，是换皮：点题变口播和日历；短篇题变成两字立意；开篇克隆「多出一个不该在的人/物」。
-
-### 3.3 换任务形状后（live，`excerpt_job` 已上）
-
-同一需求。2026-09-14，`ponds_excerpt_gate=True`，live / anthropic，一次交卷，`awaiting_choice`。记录：`eval/recordings/opening_cards/2026-09-14-urban-cultivation-1.json`。思考在仓库根 `thinking.txt`。
-
-标题：两枚硬币 ｜ 灶上的锅盖。无「这本书」行。
-
-> **两枚硬币** · 周砚把两枚硬币投进烘干机……手背上那道旧疤在发烫。……对面那栋烂尾楼的楼顶站着一个人，雨从他肩头绕开，落不下去。
-
-> **灶上的锅盖** · 卷帘门拉到一半卡住了。老陈……灶上那口锅在晃——火没开。……他伸手去按锅盖，盖子底下有东西顶了他一下，很有力气。
-
-`job_signals.distinct=0`（无日历/口播/枚举/介绍句/解释接头）；书名 2-gram 在段里；前两句起法不同。思考在数 60–260、从段里取书名、对第一句起法——执行新题面，不是躲 3.2 反例。
-
-这不是 3.2 那种假胜利：任务已是正文第一段，句子工作是发生（疤烫、锅晃、雨绕开），不是明白/金句/口播/日历。两段都停在都市修真题材里场上的异常，是「跟用户点名的题材」，不要写成「停法还不够异形所以没做完」。校园悬疑、历史架空当时未跑，不外推。同题后来的 live 见 3.4：检测器仍绿，读者判成短篇铰链。
-
-### 3.4 3.3 之后同题 live（2026-09-15）
-
-同一句三百章都市修真。`excerpt_job` 仍绿。产品判为短篇征文 / AI 铰链，不是章尺度的网文开局。为对齐「热门 / 日常再引入」改过的选书提问已全部回退，代码回到本文落地时的 HEAD。
-
-| 轮 | 卡 | 句子在干什么 | 当时多出来的题面 |
-|----|----|--------------|------------------|
-| 六号线｜桶底青石 | 工牌、灯灭、水珠没了；青石齐裂 | 发生，停在物件异常 | 仍是 3.3 屠户/椅子 |
-| 竖瞳里的灯｜二十七层 | 掌心漏灵气；摸到护体真气 | 用名词证明题材 | 「已经在转」+「能看出那种书」+ 抽签/闸口 |
-| 负一层｜没下雨的雷 | 告示「灵脉管道检修」；老头讲没下雨的雷 | 按菜单填别人/告示/队伍 | 「日子的底可以写在告示、队伍里」 |
-| 霜指印｜茯苓片 | 玻璃柜霜指印；茯苓自己翻面 | 秤砣/椅子换皮 | 退回屠户正例，只删功法家具 |
-| 检修口｜枕头底下的铜钱 | 检修口碰到不是水的东西；枕头下铜钱 | 仍是物件铰链 + 立意题 | 「第一段超凡可以还没出现」+ 伙房/豆浆 |
-
-思考仍在执行题面（字数、起法、空聊天），并补「都市修真要有痕迹」，把引入做进第一段。后几轮不是病好了：铰链 → 盖章 → 告示口播 → 又回到铰链。
+Child 的工作是：题材 → 随手产一个对象。不是：研究都市修真 → 比较创意 → 交卷。
 
 ---
 
-## 4. 条目
+## 7. 上下文投影
 
-统一四栏：**原理**（为什么会生成）**现象**（读者看见什么）**处理**（本仓有/无/诱发）**换皮**（挡住之后还在的现象）。
+`project_candidate_context`：只返回 `{genre, fresh_work=True}`。
 
-### 4.1 解释器先验（explainer prior）
+不读、不注入：
 
-**原理。** 助手不能把异常留给用户。先事实、再翻译成规则。说明文形状，不是场面形状。
+- `writing_context` / `focus=ch1` / `outline_phase` / `plot_progress`
+- `outline.md`、draft、manuscript
+- `story_state`、`author_state`
+- 上一组卡片、拒池正文
+- 长篇 / 网文 / 工作模式标签（除了从用户句里剥题材时用到的「长篇」前缀）
 
-**现象。** `后来他明白` / `原来，` / `这意味着`。怪事与世界观在同一段说完。
+抽取规则（`genre_label`）：去掉「请/帮我/写一篇/写一本/写一章/写部」「长篇」「小说/网文」外壳，剩下的当题材。空则回退整句，再空则默认 `都市修真`。
 
-**处理。** 有硬卫生（`_EXPLAINER` 剪到段末，计入 J5）。J2 口播只计数；单独不拒，与另一类叠上才走 `distinct ≥ 2`。提示不再放反例。
-
-**换皮。** 3.2 配角口播规矩（老李「别问人家哪下」）。3.3 live 未再交口播。
-
-### 4.2 用 so what 完成 pitch
-
-**原理。** 简介语料与 RLHF 奖励段末收束。「所以呢」槽必须填。
-
-**现象。** 品类章、主题金句、全知对仗：都市修真，从下水道开始；她要弄清楚自己少的是什么；比谁都清楚 A，也清楚 B。
-
-**处理。** 有硬卫生（`_CLOSER`，不扩表）。提示不再写「不要段末 so what」。
-
-**换皮。** 3.2「他不修仙，他收货」（不含这三字则漏）；日历代替金句。3.3 live 未再交金句。
-
-### 4.3 Hollywood logline
-
-**原理。** 故事被压成人物+欲望+赌注。与 so what 近亲：都在陈述这本书是什么。店招三句是同一只手的商业版。
-
-**现象。** 思考先写 300 章 engine，简介是证据。选书像策划会。
-
-**处理。** 选书不灌「得到/发现」。`start_kind`/`promise`/`engine_note` 已从工具 schema 删除。思考链仍可能先想两本再填段，但交卷位不再是 engine 表。点选后成章纪律仍可能变成另一种 logline（本文未覆盖）。
-
-**换皮。** 3.2 三种 engine 差异表。3.3 交的是两场，不是三份封面轴。
-
-### 4.4 标题即立意（conceit-as-title）
-
-**原理。** 标题当主题句。二到八字封面短句只够装论点。
-
-**现象。** 短篇题：楼下有人结丹、下水道亮了。标签题：末班车、下山、空手（思考里空手=误会/扮演，再倒填雷劈）。
-
-**处理。** `title_on_page`：工作书名 2-gram 须落在 opening 里。提示要二到八字、从这段里取；不再禁绩效词。
-
-**换皮。** 3.2 长短篇句 → 两字标签（空手）。3.3《两枚硬币》《灶上的锅盖》从段里取，能落地。
-
-### 4.5 发动机先行（engine-first）
-
-**原理。** 长篇被当成产品设计：先证明能写三百章。差书规则被执行成三种互斥 logline。
-
-**现象。** 列 engine → 怕太像 → 更概念的第三本 → 最后写后视镜。
-
-**处理。** 默认 2 张、最多 3；`system.md` 已删「能连载的书」；无自述轴字段。`same_book_reject` 仍 shadow，不拒。组内差异靠两张默认 + `openings_same_beat`（前两句起法）。
-
-**换皮。** 3.2 误认/寄居/下山，差在概念。3.3 差在人/地/事（周砚烘干机 / 老陈粥铺）。
-
-### 4.6 对仗补全（parallelism completion）
-
-**原理。** `有人 A` 后 `有人 B` 条件概率极高。`他不 X，他 Y` 同理。句法槽，不是第二个顾客到场。
-
-**现象。** 有人十倍价，有人求别拆；有人放东西、有人喊师兄、有人跪下。
-
-**处理。** J3：按句计对（不限句首）；`parallel_enum ≥ 2` 才拒。一句两个「有人」单独不拒。`_CLOSER` 仍吃句首「有人A，有人B」和「他不修仙」。
-
-**换皮。** 3.2 两项变三项，槽不变。3.3 未再交有人A有人B。
-
-### 4.7 概念过饱和（conceit overdetermination）
-
-**原理。** 同一命题用定义、比喻、例题、口号重说。助手要「清楚」。
-
-**现象。** 明白→账→十倍价→别拆→他不修仙。五次认主。空手：他什么也不会 + 书名空手。
-
-**处理。** 描述槽已删。J5 剪尾后 `distinct ≥ 2` 拒（简介痕迹叠两类）。无单独的「说了几遍」计数。
-
-**换皮。** 3.2 金句改成时间线上的多次例证。3.3 无描述槽可叠。
-
-### 4.8 起承转合（closed parable）
-
-**原理。** 一段必须闭环。80–200 字写成写完的寓言。
-
-**现象。** 起铺子 → 承磨椅 → 转明白 → 合点题。
-
-**处理。** 配额改为一段一时刻 60–260（硬上限 300）；J1 日历/蒙太奇 ≥2 处现拒。不剪「闭环需求」本身。
-
-**换皮。** 3.2 闭环改走时间压缩。3.3 两段都是一场，未摊成日历。
-
-### 4.9 时间压缩简介（montage recap）
-
-**原理。** 点题被挡后仍要在字数里把书讲完。日历代替主题句。
-
-**现象。** 跑了两个月；二十七年、第二天、每天、第二十天；第二天开始有人……「这本书」是 1–3 章 synopsis。开篇一两句往往仍是一场。
-
-**处理。** J1（含「待了二十七年」「跑了两个月」「每天」）；单处时间跳不拒。
-
-**换皮。** 3.2 第二天 → 头一个月没什么。3.3 未再交蒙太奇。
-
-### 4.10 合规思考（constraint theater）
-
-**原理。** 思考变成检查表。算力花在不像反例，不花在场上的人。
-
-**现象。** `thinking.txt` 大段「不能写旧货账、职业差不算不同」，后视镜最后才出现。
-
-**处理。** 曾本仓诱发（反例表）。负例与标题禁词已从 `opening_choice.md` 删除；拒因只在 `detail`。`_POND_REPAIR_MAX=2`。
-
-**换皮。** 3.2 躲开反例，产出成反例镜像。3.3 思考是执行新题面（字数/落地书名/起法），不是躲旧货账。
-
-### 4.11 样板克隆（few-shot cloning）
-
-**原理。** 「到此停」被当成正例形状。模仿轮廓，不模仿「停在未解释处」。
-
-**现象。** 三张开篇都是：不该在的人/物忽然在场（后视镜多一个人；门口一沓钱）。
-
-**处理。** 曾本仓诱发（四句「到此停」同构）。现两段跨题材异形正例（张屠户 / 陈老师）+ 组检查 `openings_same_beat`（前两句起法类）。默认两张。
-
-**换皮。** 3.2 停点对了，三张仍一道填空。3.3 两段起法不同；段末都是场上异常。3.4 把该轮廓执行成霜指印、检修口摸异物：仍是屠户/椅子，不是章尺度的日常开局。不要把「场上异常」做成下一闸禁形，也不要用换正例去对齐热门。
-
-### 4.12 字数填满（length filling）
-
-**原理。** 「约 80–200 字」当配额。场面不够则口播、日历、排比补齐。
-
-**现象。** 开篇瘦，「这本书」胖，胖的部分即 4.1–4.9。
-
-**处理。** 配额一段一时刻 60–260，超 300 拒。无 flavor 槽可把简介写胖。
-
-**换皮。** 3.2 开篇瘦、「这本书」胖。3.3 只有开头一段。
-
-### 4.13 三卡工厂（rule of three）
-
-**原理。** 默认三份 + 必须不同 → 三个互斥轴最省。
-
-**现象。** 卷进/发觉/重生；载客/下山/误认。同一本三个封面。
-
-**处理。** 默认 2，最多 3。start_kind 已不在模型 schema。同书向量仍 shadow。
-
-**换皮。** 3.2 载客/下山/误认三封面。3.3 两本。
-
-### 4.14 语域过纠（register overcorrection）
-
-**原理。** 挡 KPI 后合法出口变成城中村、积水、旧货、十九层。回避，不是观察。
-
-**现象。** 题材都市修真，气味短篇征文/质感文。
-
-**处理。** 选书提示已删标题禁词与「绩效考核不可以」。无正例去规定必须不像短篇。不是注入店招。
-
-**换皮。** 3.2 都市修真气味质感文。3.3 仍是城里干活的人；那是题材，不是 KPI 过纠的出口。
-
-### 4.15 职能主角（schematic protagonist）
-
-**原理。** 立意先于人。人是司机/下山的/被雷劈的。
-
-**现象。** 剪尾后三张卡无名「他」；有名时是「林渡+工作+场面」。
-
-**处理。** 题面「一个人正在做一件事」。J4 介绍句只计数，单独不拒。`who` 不在模型 schema、不展示。
-
-**换皮。** 3.2 无名「他」或「林渡+工作」。3.3 周砚、老陈从这场里做事，不是职能标签。
+两路 child 拿到的 user 正文相同（同一题材），messages 实例各自独立，所以不是「一次 brainstorm 切两段」。
 
 ---
 
-## 5. 换皮总表（假胜利检测）
+## 8. 对象、解析、排除
 
-| 挡住 | 下一张皮（仍应判未好） |
-|------|------------------------|
-| 都市修真，…… | 他不修仙，他收货 |
-| 后来他明白 | 老李/师父口播规矩 |
-| 段末主题句 | 两个月、第二十天 |
-| 楼下有人结丹 | 空手 |
-| 职业差=同一本 | 误认/寄居当差 |
-| 到此停样板 | 三张开篇同一轮廓 |
+### 8.1 Schema
 
-检测器变绿、任务仍是把书讲明白 → 假胜利。3.2 即实例。3.3 任务已是正文第一段，不要用这张表把「场上的超凡」判成未好。
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "pitch"],
+  "properties": {
+    "title": {"type": "string", "minLength": 2, "maxLength": 16},
+    "pitch": {"type": "string", "minLength": 1}
+  }
+}
+```
 
----
+Handler 只接受能解析成这个形状的结果。卡片落盘时 `pitch` 同时写入 `opening`（UI / 旧字段兼容）。`flavor` 解析器仍认，live 不再要求模型填。
 
-## 6. 还在场上 vs 上岗当助手
+### 8.2 解析
 
-句子工作是**发生**：积水往上走；口袋里多了一枚不是她的钥匙；后视镜里多了一个人；门口一沓没名字的钱。
+`parse_card`：JSON 对象（含 fence）优先；否则 `title:` / `书名:` / `pitch:` / `简介:` 行。书名长度不在 2–16、或没有简介 → `None`。
 
-上岗当助手：明白、品类金句、口播规矩、日历梗概、把书名再解释一遍。
+`obvious_meta_text`：pitch 以「我觉得 / 我先 / 首先 / 分析：/ 先比较…」开头 → 当格式失败。这是「这是在分析，不是候选」，不是文学评分。
 
-模型会写前一类。问题是写完是否立刻做后一类。优化应让后一类更难交卷，而不是规定前一类必须长成某家网文。
+### 8.3 排除旧卡
 
----
+`load_candidate_excludes`：当前 `opening_ponds.json` + `opening_ponds_rejected.jsonl`。
 
-## 7. 可动杠杆（事实，不是方案）
+排除键：书名（casefold）、pitch 指纹、title+pitch 指纹。槽位 id `c01`/`c02` 不进入排除集。
 
-另一模型可在这些点上想办法。每条都已在本仓存在，改它会同时碰到惯性与副作用。
+`我要其他的`：先把当前组 `append_rejected_ponds`，再采新的两本。新采样看不到旧卡正文，只在交卷后按指纹/书名丢掉撞车项。
 
-| 杠杆 | 现在 | 动它主要碰 |
-|------|------|------------|
-| 字段名「这本书」+ 能连载的书 | 正文第一段 + 工作书名；system.md 已删「能连载的书」 | 总根 |
-| flavor 约 80–200 字 | 已删除模型输出槽；opening 60–260 一场 | 时间压缩、过饱和 |
-| title 二到八字封面 | 落地工作书名（2-gram 须在正文里） | 标题即立意 |
-| 默认 3 卡 + 向量同一本 | 默认 2、最多 3；`ponds_similarity_shadow=True` 向量不拒 | 三卡、发动机先行、合规 |
-| opening_choice 反例/正例 | 无负例；两段跨题材异形正例 | 4.10、4.11 |
-| pitch_closer 接头表 | 接头 + 五类结构计数（不扩 `_CLOSER`） | 换皮 |
-| 选书不灌得到/发现 | 仍不灌 | 若灌回去=logline |
-| 隐藏 start_kind 等 | 已从工具 schema 删除 | logline |
-| 禁绩效考核 | 已从选书提示删除 | 4.14 |
+不够两张：直接停，不因为「内容不够好」再想一轮。
 
 ---
 
-## 8. 本文未覆盖（避免复核时误判写全）
+## 9. 落盘与 UI
 
-- 成章 `draft_section` 是否同套惯性（解释器、对仗、日历）。点选后 craft 已改为从已选开头接着写，不再要求早交得到。选书仍不灌这条。
-- UI：新卡是书名 + 开头；「这本书」只画历史 `flavor`。
-- 思考链对 handler 不可见，硬卫生看不到「先想两本」。3.3 看见的思考是在填新题面，不是 engine 表。
-- 文学 `work_mode` 与 `web_serial` 在选书仍同一套 `opening_choice`（刻意不分）。
-- 测评：stub golden `writing.16` 打的是蒙太奇拒再修，不是「停在未解释处」文学裁判；L1 不打开篇卡。
-- 用户点名题材：都市修真 live 3.3 见 `eval/recordings/opening_cards/2026-09-14-urban-cultivation-1.json`。3.4 同题多轮当时未另存 json；仓库根 `thinking.txt` 是滚动粘贴，2026-09-16 只剩「负一层｜没下雨的雷」，不能再当 3.2/3.3 原文。校园悬疑、历史架空未跑。回退后没有新的选书 live。
-- 2026-09-15 为「热门开局」改选书提问的实验已回退，见 §10。
-- 2026-09-16 复核与第一章取证：§11；协议 `eval/recordings/chapter_one/`。
+成功路径 `save_opening_ponds` → `.agent/work/opening_ponds.json`。每张卡 `append_pond_fingerprint` 进 ledger。
+
+前端 picker 吃 `items[].title` + `items[].pitch`（或 `opening`）。Parent 被要求不要把两张卡抄进聊天。
+
+点选之后才进入 opening / 第一章。那是另一条链：committed pond、大纲这一段写入书名和简介、`SERIAL_AFTER_LOCK_CRAFT` 等。立意 child 看不到那些块。
 
 ---
 
-## 9. 一句话
+## 10. 职责边界（刻意不放进 child）
 
-病不在都市修真，在把叙事当问答。选书已换成「交正文第一段」，3.2 那种简介换皮交不了卷。3.4 说明：卡上的「发生」会被读成短篇铰链；再用改提问去对齐热门开局会盖章。不要把场上的发生做成禁形或店招课；也不要在选书卡上模拟第一章。点选后的成章不再要求早交得到；第一章是否仍收成 logline，用 `eval/recordings/chapter_one/` 对照。
-
----
-
-## 10. 选书改提问实验（2026-09-15，已回退）
-
-目的曾是：减轻 AI 口吻、让卡更像三百章网文开局（日常再引入），而不是短篇怪谈。动过 `opening_choice.md`、工具说明、声口、开篇 duty、承诺闸、点选后 craft、选书 UI。全部 `git checkout` 回 HEAD。
-
-### 三角（选书卡尺度解不开）
-
-| 角 | 读者看见 | 本仓怎么诱发 |
-|----|----------|--------------|
-| 说完 | 金句、日历、这本书是什么 | 3.1 / 3.2；卫生已挡 |
-| 物件铰链 | 干活 + 霜/水珠/自翻/摸到异物；立意题 | 屠户/椅子正例 +「写到这一拍停」+ 都市修真要痕迹 |
-| 盖章 | 灵气、护体真气、灵脉检修告示 | 「能看出那种书」「已经在转」「写在告示/队伍里」 |
-
-产品要的开局（世界当底、主角平常生活、再引入超凡）是**章**的节奏，约一千八到四千五。选书卡 60–260 字做不了这件事。硬做只会落进铰链或盖章。
-
-### 试过、且更差的改提问
-
-- 空掉点选后 craft、第一章不填承诺表：不改变选书卡形状。
-- 「已经在转」+「写到能看出那种书」+ 抽签/闸口正例 → 竖瞳/二十七层（灵气盖章，AI 味升）。
-- 「日子的底可以在别人、告示、队伍里」→ 负一层/没下雨的雷（思考写 nice touch 写在告示上；菜单三栏交齐）。
-- 退回屠户正例只删功法家具 → 霜指印/茯苓片（秤砣换皮）。
-- 「第一段超凡可以还没出现」+ 伙房/豆浆 → 检修口/枕头底下的铜钱（铰链仍在；标题更立意）。
-
-接口多一个可填的位子，训练就把它填完。这和六栏承诺、flavor「这本书」是同一惯性。
-
-### 以后不要
-
-- 再往 `opening_choice.md` 加「像热门 / 像日常 / 像局里」的位子或正例菜单。
-- 把《夜的命名术》《全球高武》写进提示。
-- 为「必须有局」加检测器。
-- 把 `excerpt_job` 搬到章稿。
-- 把点选后「得到或发现要早」抄进选书。
-
-下一份证据若还要做，应是**点选后第一章**的思考和正文，不是再出一组卡。选书停在 3.3 的交卷形状（title+opening、屠户/椅子、硬卫生），承认卡不是开局。
+| 事情 | 谁做 |
+|------|------|
+| 要不要进入选书 | `wants_opening_candidates` |
+| 采几本 | handler，`N=2` |
+| 何时停 | sample job 结束；不是模型「想够了」 |
+| 对象形状 | `response_schema` + parser |
+| 好不好、模板、值不值得写 | 用户点选；以后若有 selector 也在 handler 之后 |
+| 第一章怎么开 | 点选后的章，不在立意 child |
+| 旧卡不要再出现 | 指纹/书名硬排除，不靠 prompt 黑名单 |
 
 ---
 
-## 11. 2026-09-16 复核（代码 + 另一模型）
+## 11. 文件地图
 
-对照现行实现，并读 `workspace/开篇写作惯性：分析与后续方向.md`。不改选书栈。不把优化理解成往热门开局靠。
+| 文件 | 职责 |
+|------|------|
+| `app/scenarios/writing/system.md` | Parent：何时调工具、不要自己编 |
+| `app/scenarios/writing/templates/opening_choice.md` | Parent volatile：空调用、空助手消息 |
+| `app/tools/bootstrap.py` | 工具 schema / 选书相位白名单 |
+| `app/tools/core/writing_tools.py` | `propose_book_candidates` live/stub 分流 |
+| `app/writing/outline_phase.py` | `wants_opening_candidates`；开写 note |
+| `app/writing/opening_ponds.py` | 闸工具、volatile 块、normalize、落盘、`我要其他的` |
+| `app/writing/work_reconstruction.py` | 题材投影、child prompt、schema、解析 |
+| `app/writing/candidate_sample.py` | 两个原子 sample、gather、格式重试 |
+| `app/writing/pond_history.py` | 拒池、排除集 |
+| `app/model/generation.py` | `response_schema`、DeepSeek thinking/tool 兼容 |
+| `app/engine/agent_engine.py` | awaiting_choice / stop_retry 结束 Turn |
 
-### 三层（不要混成一句「还不好」）
-
-| 层 | 问什么 | 现在 |
-|----|--------|------|
-| 1 交付对象 | 正文，还是介绍一本书 | 3.3 以后大体过去。3.1/3.2 那种皮仍交不上卷 |
-| 2 段落质地 | 人与停点是否可替换；是否表演完一个钩子 | 还在。闸绿 ≠ 这一层过 |
-| 3 长篇入口 | 接下去能不能住进去 | 卡上判不了。点选是继续阅读的许可，不是三百章验收 |
-
-「未解释」不是「未完成」。做事 → 异样 → 不可能之物 → 停住，可以语义上留悬念，段落却已经亮相完毕。3.3 疤烫 / 锅晃 / 雨绕开属于这一类。说完、物件铰链、盖章是同一压缩压力下的三条捷径，不是三套要分别加闸的风格。
-
-物件异常本身不是禁形。值得问的是：换职业、换物件，推进和停点是否几乎不变。这只是阅读线索，不能做硬闸。
-
-### 闸的实际门槛（补第 2 节）
-
-`excerpt_job` 保护交付类型，不是文学裁判。3.3、3.4 原文今天再跑仍 `distinct=0`、组检查绿。3.2《末班车》被拒是口播叠「跑了两个月」，不是「有口播就拒」。
-
-`openings_same_beat` 只认多了 / 醒来 / 响了。屠户形铰链（秤砣沉、锅盖顶）`beat_class=None`，组检查看不见。可检测的起法差 ≠ 叙事组织不同。
-
-剪尾改善的是用户看见的文本，不等于模型已学会停笔。取证要分：原始交卷、裁剪结果、拒后重写。
-
-### 回退后仍在 HEAD、现在也不动的位子
-
-记录当时的位子；2026-09-16 已减掉「早交得到」和题材填空菜单，见下节「本轮改动」：
-
-- `opening_choice.md` / 工具 description：正例已改成未了的人事；不再用「写到这一拍停」+ 秤砣手停住
-- schema 不列 `flavor`/`start_kind`/`who`；`normalize_pond_item` 仍会吃多出来的键
-
-### 本轮改动（减位子，不加店招）
-
-- 点选后 `SERIAL_AFTER_LOCK_CRAFT`、`serial_opening_compass`、成章 mixed 义务：改为从已选开头接着写；删「前三分之一交到得到或发现 / 觉醒 / 灵视」
-- `opening_choice.md`：删题材填空菜单；正例从「手停在异物上」改为「钱没松手 / 名字没人应」（事还在手里）。工具 description 同步。不写「像热门」。
-- `web_serial_voice.md`：删「仙门绩效考核不可以」
-- 选书 UI：「勾选一段，从这里接着写」
-- `/outline` 与大纲模板：不再写「抄进『这本书』」当交卷指令
-- `system.md`：点选是从这段接着写满一场，不是在卡上验收全书
-
-### 做 / 不做
-
-**做。** 用 3.3《两枚硬币》这段原样作开头，写满第一章。协议：`eval/recordings/chapter_one/`。读后只记四件事（人读，不写进提示）：开头那件事有没有继续占住时间与选择；新信息改没改下一步行动；他人接触改没改走向；章末的问题是不是这一章长出来的。
-
-**不做。** 扩 `_CLOSER`；把铰链做成禁形或组检查；把「像热门 / 日常再引入」写进选书；把上面四条观察做成写作表；把 `excerpt_job` 搬到章稿。
-
-思考记录只解释假设，不给正文定罪；`thinking.txt` 已漂，不要用来反推当前 HEAD。校园悬疑、历史架空仍不外推。允许第一段暂时不能证明一本书。
+核对时以这些文件为准。旧文里的「开篇第一段 + excerpt 五类硬拒 + 标题 2-gram 必须出现在正文」属于 **stub / 点选后章** 的另一套卫生，不是当前 live 立意 child 的交卷合同。
