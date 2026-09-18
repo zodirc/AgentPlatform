@@ -71,6 +71,7 @@ class RemoteModelProvider:
                 "tool_choice": self._generation.tool_choice,
                 "thinking_enabled": self._generation.thinking_enabled,
                 "reasoning_effort": self._generation.reasoning_effort,
+                "response_schema": self._generation.response_schema,
             }
         timeout = httpx.Timeout(
             None,

@@ -21,8 +21,10 @@ from app.model.gateway import (
 from app.model.generation import (
     GenerationParams,
     apply_openai_compat_reasoning,
+    apply_response_schema,
     apply_tool_choice,
     openai_compat_retryable_status,
+    repair_openai_compat_payload,
     strip_next_openai_compat_field,
 )
 from app.model.openai_messages import _to_openai_messages
@@ -94,6 +96,12 @@ class OpenAIProvider:
             ]
             apply_tool_choice(payload, gen.tool_choice, style="openai")
         apply_openai_compat_reasoning(payload, model_name=self.model_name, gen=gen)
+        apply_response_schema(
+            payload,
+            gen.response_schema,
+            style="openai",
+            model_name=self.model_name,
+        )
 
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         text_parts: list[str] = []
@@ -122,7 +130,10 @@ class OpenAIProvider:
                             body = (await resp.aread()).decode(errors="replace")
                             if openai_compat_retryable_status(
                                 status_code=resp.status_code, body=body
-                            ) and strip_next_openai_compat_field(payload):
+                            ) and (
+                                repair_openai_compat_payload(payload, body=body)
+                                or strip_next_openai_compat_field(payload)
+                            ):
                                 continue
                             raise classify_http_status(
                                 resp.status_code,

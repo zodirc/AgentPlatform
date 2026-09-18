@@ -10,6 +10,7 @@ from app.settings import settings
 _REASONING_EFFORTS = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
 _OPENAI_COMPAT_STRIP_STEPS: tuple[tuple[str, ...], ...] = (
     ("stream_options",),
+    ("response_format",),
     ("reasoning_effort", "thinking"),
 )
 
@@ -72,9 +73,12 @@ def apply_openai_compat_reasoning(
 ) -> None:
     """作用：注入 thinking/reasoning_effort 字段。"""
     requested = normalize_reasoning_effort(gen.reasoning_effort)
-    if requested == "none":
-        return
     family = openai_compat_model_family(model_name)
+    if requested == "none":
+        # DeepSeek 默认开 thinking；和强制 tool_choice 互斥。
+        if family == "deepseek":
+            payload["thinking"] = {"type": "disabled"}
+        return
     explicit = requested not in {"", "auto"}
     effort = requested if explicit else "high"
     if family == "gpt5":
@@ -89,12 +93,24 @@ def apply_openai_compat_reasoning(
 
 
 def strip_next_openai_compat_field(payload: dict) -> bool:
-    """作用：relay 400 时剥离可选字段。"""
+    """作用：relay 400 时剥离可选字段。json_schema 降级为强制函数，不丢约束。"""
     for group in _OPENAI_COMPAT_STRIP_STEPS:
-        if any(key in payload for key in group):
-            for key in group:
-                payload.pop(key, None)
+        if not any(key in payload for key in group):
+            continue
+        if group == ("response_format",):
+            rf = payload.get("response_format")
+            schema = None
+            if isinstance(rf, dict) and rf.get("type") == "json_schema":
+                inner = rf.get("json_schema")
+                if isinstance(inner, dict):
+                    schema = inner.get("schema")
+            payload.pop("response_format", None)
+            if isinstance(schema, dict) and schema.get("properties"):
+                apply_openai_forced_schema_tool(payload, schema)
             return True
+        for key in group:
+            payload.pop(key, None)
+        return True
     return False
 
 
@@ -105,8 +121,27 @@ def openai_compat_retryable_status(*, status_code: int, body: str) -> bool:
     lowered = (body or "").lower()
     return any(
         token in lowered
-        for token in ("stream_options", "reasoning_effort", "thinking")
+        for token in (
+            "stream_options",
+            "reasoning_effort",
+            "thinking",
+            "tool_choice",
+            "response_format",
+            "json_schema",
+        )
     )
+
+
+def repair_openai_compat_payload(payload: dict, *, body: str) -> bool:
+    """400 后的定向修复：thinking 与强制 tool_choice 冲突时关掉 thinking。"""
+    lowered = (body or "").lower()
+    if "tool_choice" not in lowered and "thinking mode" not in lowered:
+        return False
+    current = payload.get("thinking")
+    if current != {"type": "disabled"}:
+        payload["thinking"] = {"type": "disabled"}
+        return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -119,6 +154,7 @@ class GenerationParams:
     tool_choice: str = "auto"  # auto | required | none
     thinking_enabled: bool = False
     reasoning_effort: str = ""  # empty/auto → family default; none → omit extras
+    response_schema: dict | None = None
 
     @classmethod
     def from_settings(
@@ -134,7 +170,61 @@ class GenerationParams:
             tool_choice=settings.model_tool_choice,
             thinking_enabled=settings.model_thinking_enabled,
             reasoning_effort=normalize_reasoning_effort(settings.model_reasoning_effort),
+            response_schema=None,
         )
+
+
+def apply_openai_forced_schema_tool(payload: dict, schema: dict) -> None:
+    """OpenAI-compat 强制 book_candidate 函数。DeepSeek 等不吃 json_schema 时用。"""
+    payload.pop("response_format", None)
+    payload["tools"] = [
+        {
+            "type": "function",
+            "function": {
+                "name": "book_candidate",
+                "description": "Submit one novel candidate.",
+                "parameters": schema,
+            },
+        }
+    ]
+    payload["tool_choice"] = {
+        "type": "function",
+        "function": {"name": "book_candidate"},
+    }
+
+
+def apply_response_schema(
+    payload: dict,
+    schema: dict | None,
+    *,
+    style: str,
+    model_name: str = "",
+) -> None:
+    """结构化输出：OpenAI json_schema；DeepSeek 强制函数；Anthropic 强制工具。"""
+    if not schema:
+        return
+    if style == "openai":
+        if openai_compat_model_family(model_name) == "deepseek":
+            apply_openai_forced_schema_tool(payload, schema)
+            return
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "book_candidate",
+                "strict": True,
+                "schema": schema,
+            },
+        }
+        return
+    if style == "anthropic":
+        payload["tools"] = [
+            {
+                "name": "book_candidate",
+                "description": "Submit one novel candidate.",
+                "input_schema": schema,
+            }
+        ]
+        payload["tool_choice"] = {"type": "tool", "name": "book_candidate"}
 
 
 def apply_tool_choice(payload: dict, tool_choice: str, *, style: str) -> None:

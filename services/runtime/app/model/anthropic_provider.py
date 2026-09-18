@@ -18,7 +18,7 @@ from app.model.gateway import (
     StreamActivity,
     classify_http_status,
 )
-from app.model.generation import GenerationParams, apply_tool_choice
+from app.model.generation import GenerationParams, apply_response_schema, apply_tool_choice
 from app.model.stream_abort import close_response_on_abort
 from app.settings import settings
 
@@ -79,6 +79,7 @@ class AnthropicProvider:
                 tool_defs[-1]["cache_control"] = {"type": "ephemeral"}
             payload["tools"] = tool_defs
             apply_tool_choice(payload, gen.tool_choice, style="anthropic")
+        apply_response_schema(payload, gen.response_schema, style="anthropic")
         if gen.thinking_enabled:
             payload["thinking"] = {"type": "enabled", "budget_tokens": min(8000, gen.max_output_tokens // 2)}
 

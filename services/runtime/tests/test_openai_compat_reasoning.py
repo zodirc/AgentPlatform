@@ -10,7 +10,9 @@ import pytest
 from app.model.generation import (
     GenerationParams,
     apply_openai_compat_reasoning,
+    apply_response_schema,
     openai_compat_model_family,
+    repair_openai_compat_payload,
     strip_next_openai_compat_field,
 )
 from app.model.gateway import ModelResponse
@@ -57,6 +59,34 @@ def test_apply_openai_compat_reasoning_none_omits() -> None:
     assert payload == {}
 
 
+def test_apply_openai_compat_reasoning_none_disables_deepseek_thinking() -> None:
+    payload: dict[str, Any] = {}
+    apply_openai_compat_reasoning(
+        payload,
+        model_name="deepseek-v4-flash",
+        gen=GenerationParams(reasoning_effort="none"),
+    )
+    assert payload == {"thinking": {"type": "disabled"}}
+
+
+def test_repair_openai_compat_payload_disables_thinking_for_tool_choice() -> None:
+    payload: dict[str, Any] = {
+        "tool_choice": {"type": "function", "function": {"name": "book_candidate"}},
+    }
+    assert repair_openai_compat_payload(
+        payload,
+        body='{"error":{"message":"Thinking mode does not support this tool_choice"}}',
+    )
+    assert payload["thinking"] == {"type": "disabled"}
+    assert (
+        repair_openai_compat_payload(
+            payload,
+            body="Thinking mode does not support this tool_choice",
+        )
+        is False
+    )
+
+
 def test_apply_openai_compat_reasoning_skips_gpt4() -> None:
     payload: dict[str, Any] = {}
     apply_openai_compat_reasoning(
@@ -78,6 +108,58 @@ def test_strip_next_openai_compat_field_layers() -> None:
     assert "reasoning_effort" not in payload
     assert "thinking" not in payload
     assert strip_next_openai_compat_field(payload) is False
+
+
+def test_apply_response_schema_openai_and_anthropic() -> None:
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["title", "pitch"],
+        "properties": {
+            "title": {"type": "string"},
+            "pitch": {"type": "string"},
+        },
+    }
+    openai_payload: dict[str, Any] = {}
+    apply_response_schema(openai_payload, schema, style="openai")
+    assert openai_payload["response_format"]["type"] == "json_schema"
+    assert openai_payload["response_format"]["json_schema"]["schema"] == schema
+    deepseek_payload: dict[str, Any] = {}
+    apply_response_schema(
+        deepseek_payload,
+        schema,
+        style="openai",
+        model_name="deepseek-v4-flash",
+    )
+    assert "response_format" not in deepseek_payload
+    assert deepseek_payload["tools"][0]["function"]["name"] == "book_candidate"
+    assert deepseek_payload["tool_choice"]["function"]["name"] == "book_candidate"
+    anthropic_payload: dict[str, Any] = {}
+    apply_response_schema(anthropic_payload, schema, style="anthropic")
+    assert anthropic_payload["tools"][0]["name"] == "book_candidate"
+    assert anthropic_payload["tool_choice"] == {"type": "tool", "name": "book_candidate"}
+
+
+def test_strip_next_openai_compat_field_downgrades_json_schema() -> None:
+    schema = {
+        "type": "object",
+        "properties": {"title": {"type": "string"}, "pitch": {"type": "string"}},
+    }
+    payload = {
+        "stream_options": {"include_usage": True},
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "book_candidate", "schema": schema},
+        },
+        "reasoning_effort": "high",
+    }
+    assert strip_next_openai_compat_field(payload) is True
+    assert "stream_options" not in payload
+    assert "response_format" in payload
+    assert strip_next_openai_compat_field(payload) is True
+    assert "response_format" not in payload
+    assert payload["tools"][0]["function"]["name"] == "book_candidate"
+    assert "reasoning_effort" in payload
 
 
 class _FakeStreamResponse:

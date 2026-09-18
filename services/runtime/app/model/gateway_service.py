@@ -76,6 +76,8 @@ def _generation_from_body(
         kwargs["thinking_enabled"] = bool(raw["thinking_enabled"])
     if "reasoning_effort" in raw and raw["reasoning_effort"] is not None:
         kwargs["reasoning_effort"] = str(raw["reasoning_effort"])
+    if "response_schema" in raw and isinstance(raw["response_schema"], dict):
+        kwargs["response_schema"] = raw["response_schema"]
     return replace(base, **kwargs) if kwargs else base
 
 
