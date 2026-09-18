@@ -41,7 +41,7 @@ def test_pending_candidates_not_auto_pinned(tmp_path: Path) -> None:
 
     pin = prepare_writing_system_prompt(
         "You are a writing assistant.",
-        "写一章",
+        "按资料写第三章",
         workspace_root=tmp_path,
     )
     assert "pending" not in pin.volatile_block

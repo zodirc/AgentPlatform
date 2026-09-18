@@ -84,7 +84,7 @@ def test_c4_card_edit_changes_prefix(tmp_path: Path) -> None:
 def test_quality_reject_does_not_change_cards_prefix_hash(tmp_path: Path) -> None:
     _seed(tmp_path)
     base = "You are a writing assistant."
-    ordinary = prepare_writing_system_prompt(base, "写一章", workspace_root=tmp_path)
+    ordinary = prepare_writing_system_prompt(base, "按资料写第三章", workspace_root=tmp_path)
     rejected = prepare_writing_system_prompt(
         base, "立意不行，没意思", workspace_root=tmp_path
     )
