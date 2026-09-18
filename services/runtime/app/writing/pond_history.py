@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from app.writing.work_reconstruction import candidate_fingerprint
+
 OPENING_PONDS_REJECTED_REL = Path(".agent") / "work" / "opening_ponds_rejected.jsonl"
+_SLOT_ID_RE = re.compile(r"c\d{2,}")
 
 
 def _workspace(workspace_root: Path | None = None) -> Path:
@@ -94,6 +99,46 @@ def load_rejected_pond_items(
 
 def pond_title_key(item: Mapping[str, Any] | dict[str, Any]) -> str:
     return str(item.get("title") or item.get("id") or "").strip().casefold()
+
+
+@dataclass
+class CandidateExclude:
+    ids: set[str] = field(default_factory=set)
+    fingerprints: set[str] = field(default_factory=set)
+    titles: set[str] = field(default_factory=set)
+
+
+def _add_exclude_item(exclude: CandidateExclude, item: Mapping[str, Any]) -> None:
+    sample_id = str(item.get("id") or item.get("sample_id") or "").strip()
+    if sample_id and not _SLOT_ID_RE.fullmatch(sample_id):
+        exclude.ids.add(sample_id)
+    title = pond_title_key(item)
+    if title:
+        exclude.titles.add(title)
+    for part in (
+        item.get("raw"),
+        item.get("work"),
+        item.get("opening"),
+        item.get("pitch"),
+    ):
+        fp = candidate_fingerprint(str(part or ""))
+        if fp:
+            exclude.fingerprints.add(fp)
+
+
+def load_candidate_excludes(*, workspace_root: Path | None = None) -> CandidateExclude:
+    """当前池 + 已拒池：id / 指纹 / 书名。只用于硬排除，不进 child prompt。"""
+    exclude = CandidateExclude()
+    from app.writing.opening_ponds import load_opening_ponds
+
+    current = load_opening_ponds(workspace_root=workspace_root)
+    if current:
+        for item in current.get("items") or []:
+            if isinstance(item, dict):
+                _add_exclude_item(exclude, item)
+    for item in load_rejected_pond_items(workspace_root=workspace_root):
+        _add_exclude_item(exclude, item)
+    return exclude
 
 
 def seen_pond_title_keys(*, workspace_root: Path | None = None) -> set[str]:

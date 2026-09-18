@@ -560,9 +560,11 @@ def normalize_pond_item(raw: dict[str, Any], index: int) -> dict[str, Any]:
         raw.get("engine_note") or raw.get("为什么能一直写") or "",
         _ENGINE_NOTE_MAX,
     )
+    work = _clip(raw.get("work") or raw.get("raw") or "", 250)
     return {
         "id": item_id,
         "title": title or f"候选 {index + 1}",
+        **({"work": work} if work else {}),
         "who": _clip(raw.get("who") or raw.get("跟着谁") or "", _FIELD_MAX),
         "where": _clip(raw.get("where") or raw.get("站在哪") or "", _FIELD_MAX),
         "want": _clip(raw.get("want") or raw.get("眼下要什么") or "", _FIELD_MAX),

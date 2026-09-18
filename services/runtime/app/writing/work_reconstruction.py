@@ -1,96 +1,57 @@
-"""作品形成：极简采样。不含采样循环。"""
+"""作品候选：题材投影 + 卡片解析。不含采样循环。"""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+import hashlib
 import json
 import re
 from typing import Any
 
 from app.engine.state import user_message
 
-_WORK_MIN = 80
-_WORK_MAX = 250
 _FLAVOR_MAX = 400
 _OPENING_MAX = 800
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
 _LEAD_IN_RE = re.compile(r"^(请)?(帮我)?(写一篇|写一本|写一章|写部)\s*")
 _LENGTH_RE = re.compile(r"^长篇\s*")
 _TAIL_RE = re.compile(r"(小说|网文).*$")
-_INDEX_RE = re.compile(r"\d+")
-_ID_RE = re.compile(r"\bc\d{2}\b", re.I)
-
-_GOLD_SNAPSHOT = (
-    "灵气复苏已经过去一百二十年，修仙早已成为旧日常识。"
-    "如今境界体系已经沿用了很多代，寿命也早就超过凡人的尺度，活两三百岁并不稀奇。"
-    "奇怪的是，飞升从来没有出现过。"
-    "如今流传的功法大多是后人改过的版本，最早一批留下来的东西，连“炼气”两个字都和现在不一样。"
+_META_HEADS = (
+    "我觉得",
+    "我认为",
+    "我先",
+    "首先",
+    "接下来",
+    "这个故事可以",
+    "这部小说可以",
+    "分析：",
+    "比较：",
+    "创作过程",
+    "先想",
+    "先比较",
 )
 
-_FORM_SYSTEM = """你正在为一部新小说生成一个候选。
+CANDIDATE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["title", "pitch"],
+    "properties": {
+        "title": {"type": "string", "minLength": 2, "maxLength": 16},
+        "pitch": {"type": "string", "minLength": 1},
+    },
+}
 
-根据用户给出的题材，直接形成一个大概不错的小说概貌。
+_FORM_SYSTEM = """根据题材直接生成一个小说候选。
 
-不用把东西想完整，也不用寻找最优方案。想到一个成立的方向，就直接写出来。
+只交一个结果，不需要寻找更好的方向。"""
 
-结果应该让人觉得这是一本有空间继续写下去的小说，而不是一句创意。
+_FORM_USER = """题材：{genre}"""
 
-只输出结果，不输出分析、思考过程或比较。"""
 
-_FORM_USER = """genre = {genre}
-fresh_work = true
-
-题材：{genre}
-
-直接写出这部小说大概是什么样子。
-
-大而泛即可，整体成立、看起来还不错、有一点自己的东西就够了。不要找最优。
-
-150～250字。
-
-架空世界，不使用现实世界的具体地名和事件。
-
-只写这一次形成的结果。写完停止。"""
-
-_SELECT_SYSTEM = """你在辨认，不在写作。不要打分，不要改写。"""
-
-_SELECT_USER = """判尺只用来辨认哪个更像一本已经成立的小说，而不是一个点子或设定。不要模仿它，也不要改写候选。
-
-《人间未醒》
-
-{gold}
-
-候选：
-{candidates}
-
-最多看：
-是否像一本书；
-是否有整体性；
-是否有展开空间；
-是否明显模板化。
-
-选择其中 2 个。
-不要打分。
-不要补内容。
-只返回选中的 candidate_id，例如：
-{"selected": ["c01", "c02"]}
-若不足两份，有几份写几份。"""
-
-_RENDER_SYSTEM = """你是编辑。"""
-
-_RENDER_USER = """下面是已经冻结的候选概貌。
-
-{work}
-
-只把它整理成卡片。只能表达这段已经存在的内容。
-保持架空世界。不出现现实世界的具体地名、事件。
-不得增加新的世界事实、人物经历、事件、悬念、反转、金手指、主线谜团或世界真相。
-不得修改这段内容。
-
-title：2–8字
-这本书：这本书是什么，40–80字
-opening：面向书页入口的简述，100–220字
-
-只输出 title、这本书、opening。"""
+@dataclass(frozen=True)
+class CandidateContext:
+    genre: str
+    fresh_work: bool = True
 
 
 def _clip_draft(text: str, limit: int) -> str:
@@ -121,33 +82,39 @@ def topic_of(user_text: str) -> str:
     return genre
 
 
+def candidate_fingerprint(*parts: str) -> str:
+    """作品指纹：空白折叠后的 sha256 前缀。不做关键词黑名单。"""
+    blob = "".join(re.sub(r"\s+", "", str(part or "")) for part in parts)
+    if not blob:
+        return ""
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:24]
+
+
+def project_candidate_context(
+    user_text: str = "",
+    *,
+    workspace_root: Any = None,
+) -> CandidateContext:
+    """只抽出题材。不读 writing_context / ch1 / outline / draft / 旧卡。"""
+    _ = workspace_root
+    return CandidateContext(genre=genre_of(user_text), fresh_work=True)
+
+
 def build_candidate_context(
     user_text: str = "",
     *,
     workspace_root: Any = None,
 ) -> dict[str, Any]:
-    """只投影题材。不带 writing system、ch1、outline、draft、旧卡。"""
-    _ = workspace_root
-    return {
-        "genre": genre_of(user_text),
-        "fresh_work": True,
-    }
+    ctx = project_candidate_context(user_text, workspace_root=workspace_root)
+    return {"genre": ctx.genre, "fresh_work": ctx.fresh_work}
 
 
-def gold_reference_block() -> str:
-    return _GOLD_SNAPSHOT
-
-
-def freeze_work(text: str) -> str:
-    return _clip_draft(text, _WORK_MAX)
-
-
-def parse_work(raw: str) -> str | None:
-    """冻结整段形成结果。不拆字段。"""
-    frozen = freeze_work(raw)
-    if len(frozen) < _WORK_MIN:
-        return None
-    return frozen
+def obvious_meta_text(text: str) -> bool:
+    """格式错误：这是在分析，不是候选。不做文学判断。"""
+    body = (text or "").strip()
+    if not body:
+        return True
+    return any(body.startswith(head) for head in _META_HEADS)
 
 
 def first_json_object(raw: str) -> dict[str, Any] | None:
@@ -204,85 +171,33 @@ def parse_card(raw: str) -> dict[str, str] | None:
             flavor = flavor or flavor_m.group(1).strip().splitlines()[0]
         if opening_m:
             opening = opening or opening_m.group(1).strip()
-    title = title[:16]
     flavor = _clip_draft(flavor, _FLAVOR_MAX)
     opening = _clip_draft(opening, _OPENING_MAX)
-    if title and opening:
-        return {"title": title, "flavor": flavor, "opening": opening}
-    return None
+    if not (2 <= len(title) <= 16 and opening):
+        return None
+    return {"title": title, "flavor": flavor, "opening": opening, "pitch": opening}
 
 
-def parse_title_pitch(raw: str) -> dict[str, str] | None:
+def parse_candidate(raw: str) -> dict[str, str] | None:
     parsed = parse_card(raw)
     if parsed is None:
         return None
-    return {"title": parsed["title"], "pitch": parsed["opening"]}
+    if obvious_meta_text(parsed["pitch"]):
+        return None
+    return parsed
 
 
-def parse_selector_ids(raw: str, ids: list[str]) -> list[str]:
-    if not ids:
-        return []
-    data = first_json_object(raw)
-    tokens: list[str] = []
-    if data is not None:
-        blob = data.get("selected") or data.get("picks") or data.get("indices")
-        if isinstance(blob, list):
-            tokens = [str(item).strip() for item in blob]
-    if not tokens:
-        tokens = _ID_RE.findall(raw or "")
-    lookup = {item.lower(): item for item in ids}
-    out: list[str] = []
-    for token in tokens:
-        key = token.lower()
-        if key in lookup and lookup[key] not in out:
-            out.append(lookup[key])
-        elif token.isdigit():
-            idx = int(token) - 1
-            if 0 <= idx < len(ids) and ids[idx] not in out:
-                out.append(ids[idx])
-        if len(out) == 2:
-            return out
-    if out:
-        return out
-    nums = [int(tok) for tok in _INDEX_RE.findall(raw or "")]
-    zero_based = any(n == 0 for n in nums)
-    for n in nums:
-        idx = n if zero_based else n - 1
-        if 0 <= idx < len(ids) and ids[idx] not in out:
-            out.append(ids[idx])
-        if len(out) == 2:
-            break
-    return out
+def parse_title_pitch(raw: str) -> dict[str, str] | None:
+    parsed = parse_candidate(raw)
+    if parsed is None:
+        return None
+    return {"title": parsed["title"], "pitch": parsed["pitch"]}
 
 
 def form_messages(user_text: str = "") -> list[dict[str, Any]]:
-    ctx = build_candidate_context(user_text)
-    body = _FORM_USER.replace("{genre}", str(ctx["genre"]))
+    ctx = project_candidate_context(user_text)
+    body = _FORM_USER.replace("{genre}", ctx.genre)
     return [
         {"role": "system", "content": [{"type": "text", "text": _FORM_SYSTEM}]},
         user_message(body),
     ]
-
-
-def selector_messages(candidates: list[tuple[str, str]]) -> list[dict[str, Any]]:
-    """每项 (sample_id, work)。《人间未醒》只作作品感觉判尺。"""
-    lines = [f"{sample_id}\n{work}" for sample_id, work in candidates]
-    body = _SELECT_USER.replace("{gold}", gold_reference_block()).replace(
-        "{candidates}", "\n\n".join(lines)
-    )
-    return [
-        {"role": "system", "content": [{"type": "text", "text": _SELECT_SYSTEM}]},
-        user_message(body),
-    ]
-
-
-def render_messages(work: str) -> list[dict[str, Any]]:
-    body = _RENDER_USER.replace("{work}", freeze_work(work))
-    return [
-        {"role": "system", "content": [{"type": "text", "text": _RENDER_SYSTEM}]},
-        user_message(body),
-    ]
-
-
-def pitch_messages(work: str) -> list[dict[str, Any]]:
-    return render_messages(work)

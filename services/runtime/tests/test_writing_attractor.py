@@ -102,9 +102,9 @@ def test_standing_priors_do_not_force_same_book_under_new_coat() -> None:
     assert "平凡" not in SERIAL_AFTER_LOCK_CRAFT
     assert "start_kind 不同" not in voice
     assert "只给题材时先换 start_kind" not in voice
-    assert "fresh context" in system
-    assert "直接采样" in system
-    assert "寻找最优方案" in system
+    assert "独立的最小上下文" in system
+    assert "分别采样" in system
+    assert "二次创作" in system
     assert "两本不同的书" not in system
     assert "MODEL ATTRACTOR" not in system
     assert "TARGET SPACE" not in system

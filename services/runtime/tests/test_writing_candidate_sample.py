@@ -20,45 +20,28 @@ from app.writing.candidate_sample import (
     sample_one_candidate,
 )
 from app.writing.work_reconstruction import (
+    CANDIDATE_SCHEMA,
     build_candidate_context,
+    obvious_meta_text,
+    parse_candidate,
     parse_card,
-    parse_selector_ids,
-    parse_work,
-    render_messages,
-    selector_messages,
+    project_candidate_context,
 )
 
 
-_GOOD_A = (
+_PITCH = (
     "灾变之后，人类进入了一个新的时代。资源匮乏、军阀割据、势力林立，"
     "秦禹只想要活下去。但现实一步步把他推向了更大的舞台。"
     "他明天还得去领粮，也还得决定跟哪一路人站在一起。"
 )
 _TITLES = ["余烬", "潮汐"]
-_FLAVOR = "日常已经把未完成当成常态，这本书靠这块现实站住。"
 
 
-def _work(tag: str) -> str:
-    return (
-        f"{tag} 修仙早已成为旧日常识。活两百年并不稀奇。"
-        "某种闭合从未真正出现。旧教材封面还印着已经不用的功法名。"
-        "人们早就这样过日子，也不觉得需要另外解释。城里的人把这些事当成天气。"
-    )
-
-
-def _card(title: str) -> str:
+def _card(title: str, pitch: str | None = None) -> str:
     return json.dumps(
-        {"title": title, "这本书": _FLAVOR, "opening": _GOOD_A},
+        {"title": title, "pitch": pitch or f"{title} {_PITCH}"},
         ensure_ascii=False,
     )
-
-
-def _stage(text: str) -> str:
-    if "已经冻结的候选概貌" in text:
-        return "render"
-    if "判尺只用来辨认哪个更像" in text:
-        return "select"
-    return "form"
 
 
 def _banned_theory(blob: str) -> None:
@@ -89,6 +72,13 @@ def _banned_theory(blob: str) -> None:
     assert "已常态化现实" not in blob
     assert "生活沉积" not in blob
     assert "作品现实" not in blob
+    assert "换个方向" not in blob
+    assert "WRITING" not in blob
+    assert "WORK STATE" not in blob
+    assert "DELIVERY" not in blob
+    assert "《人间未醒》" not in blob
+    assert "selector" not in blob.lower()
+    assert "renderer" not in blob.lower()
 
 
 def test_genre_label_is_boundary_not_task() -> None:
@@ -96,32 +86,33 @@ def test_genre_label_is_boundary_not_task() -> None:
     assert _topic_of("写一篇长篇都市修真小说") == "长篇都市修真"
 
 
-def test_form_is_a_loose_novel_sketch() -> None:
-    ctx = build_candidate_context("写一篇长篇都市修真小说")
-    assert ctx == {
+def test_form_is_a_direct_candidate_job() -> None:
+    ctx = project_candidate_context("写一篇长篇都市修真小说")
+    assert ctx.genre == "都市修真"
+    assert ctx.fresh_work is True
+    assert build_candidate_context("写一篇长篇都市修真小说") == {
         "genre": "都市修真",
         "fresh_work": True,
     }
     blob = _content_text(form_messages("写一篇长篇都市修真小说"))
-    assert "genre = 都市修真" in blob
-    assert "fresh_work = true" in blob
     assert "题材：都市修真" in blob
-    assert "大概是什么样子" in blob
-    assert "不要找最优" in blob
-    assert "不用寻找最优方案" in blob
-    assert "150～250字" in blob
-    assert "架空世界" in blob
-    assert "不使用现实世界的具体地名和事件" in blob
-    assert "scope =" not in blob
-    assert "mode =" not in blob
+    assert "根据题材直接生成一个小说候选" in blob
+    assert "只交一个结果" in blob
+    assert "不需要寻找更好的方向" in blob
+    assert "大概是什么样子" not in blob
+    assert "不用寻找最优方案" not in blob
+    assert "大概成立" not in blob
+    assert "请输出 JSON" not in blob
+    assert "看起来像一本" not in blob
+    assert "150～250字" not in blob
+    assert "fresh_work" not in blob
+    assert "task = " not in blob
+    assert "genre =" not in blob
+    assert "focus=ch1" not in blob
+    assert "book_scope" not in blob
+    assert "work_mode" not in blob
     assert "You are a writing assistant" not in blob
     assert "先写正在发生的事" not in blob
-    assert "一本长篇小说本身" not in blob
-    assert "已经成立的若干事实" not in blob
-    assert "《人间未醒》" not in blob
-    assert "飞升从来没有出现过" not in blob
-    assert "title" not in blob.lower()
-    assert "pitch" not in blob.lower()
     _banned_theory(blob)
     assert "[writing_context]" not in blob
     msgs = form_messages("写一篇长篇都市修真小说")
@@ -129,117 +120,94 @@ def test_form_is_a_loose_novel_sketch() -> None:
     assert msgs[0]["role"] == "system"
 
 
-def test_selector_uses_gold_as_work_ruler() -> None:
-    blob = _content_text(selector_messages([("c01", "修仙早已成为旧日常识。")]))
-    assert "《人间未醒》" in blob
-    assert "飞升从来没有出现过" in blob
-    assert "已经成立的小说" in blob
-    assert "是否有整体性" in blob
-    assert "不要打分" in blob
-    assert "c01" in blob
-    assert "genre = 都市修真" not in blob
-    _banned_theory(blob)
+def test_projection_ignores_workspace_writing_state(tmp_path) -> None:
+    (tmp_path / "outline.md").write_text("focus=ch1\nfragment=plot_progress\n", encoding="utf-8")
+    (tmp_path / ".agent" / "work").mkdir(parents=True)
+    (tmp_path / ".agent" / "work" / "author_state.md").write_text("旧书", encoding="utf-8")
+    (tmp_path / "drafts").mkdir()
+    (tmp_path / "drafts" / "manuscript.md").write_text("正文", encoding="utf-8")
+    ctx = project_candidate_context(
+        "写一篇长篇都市修真小说",
+        workspace_root=tmp_path,
+    )
+    assert ctx.genre == "都市修真"
+    blob = _content_text(form_messages("写一篇长篇都市修真小说"))
+    assert "focus=ch1" not in blob
+    assert "manuscript" not in blob
+    assert "旧书" not in blob
 
 
-def test_renderer_packages_frozen_sketch_only() -> None:
-    blob = _content_text(render_messages("修行已经改过几代，旧名还挂在嘴里。"))
-    assert "已经冻结的候选概貌" in blob
-    assert "修行已经改过几代，旧名还挂在嘴里。" in blob
-    assert "这本书" in blob
-    assert "架空世界" in blob
-    assert "《人间未醒》" not in blob
-    _banned_theory(blob)
-
-
-def test_parse_work_and_card() -> None:
-    text = _work("ONE")
-    assert parse_work(text) == text
-    assert parse_work("太短了") is None
+def test_parse_card_and_meta_guard() -> None:
     card = parse_card(_card("余烬"))
     assert card is not None
     assert card["title"] == "余烬"
-    assert card["flavor"] == _FLAVOR
-    assert card["opening"].startswith("灾变之后")
-    assert parse_selector_ids('{"selected": ["c01", "c02"]}', ["c01", "c02"]) == [
-        "c01",
-        "c02",
-    ]
+    assert "灾变之后" in card["pitch"]
+    assert parse_candidate("太短了") is None
+    assert parse_candidate(_card("余烬", "我觉得这个故事可以很长。")) is None
+    assert obvious_meta_text("我觉得这个故事可以很长。") is True
+    assert obvious_meta_text(_PITCH) is False
+    assert parse_card(_card("烬")) is None
+    assert parse_card(_card("灵潮纪元：地铁末班车")) is not None
+    assert parse_card(_card("这是一个过长的书名还要再长一些才行")) is None
 
 
 def test_form_budget_is_medium_not_30k() -> None:
     form = form_generation()
     assert form.max_output_tokens == _FORM_MAX_OUTPUT_TOKENS
+    assert _FORM_MAX_OUTPUT_TOKENS <= 2048
     assert _FORM_THINK_CHAR_BUDGET <= 8000
     assert form.tool_choice == "none"
     assert form.thinking_enabled is False
     assert form.reasoning_effort == "none"
+    assert form.response_schema == CANDIDATE_SCHEMA
+    assert form.response_schema["required"] == ["title", "pitch"]
     assert _SAMPLE_POOL == 2
 
 
 @pytest.mark.asyncio
-async def test_two_independent_sketches_then_select_then_render() -> None:
+async def test_two_independent_sketches_then_cards() -> None:
     seen: list[str] = []
     form_i = 0
+    lock = asyncio.Lock()
 
     async def complete(messages):
         nonlocal form_i
         text = _content_text(messages)
         seen.append(text)
-        stage = _stage(text)
-        if stage == "form":
-            assert "《人间未醒》" not in text
-            assert "previous_attempt_discarded" not in text
-            assert "start_kind" not in text
+        assert "《人间未醒》" not in text
+        assert "previous_attempt_discarded" not in text
+        assert "已经冻结的候选概貌" not in text
+        async with lock:
             idx = form_i
             form_i += 1
-            return _work(f"SNAP{idx}")
-        if stage == "select":
-            assert "《人间未醒》" in text
-            assert "SNAP0" in text
-            assert "SNAP1" in text
-            return '{"selected": ["c01", "c02"]}'
-        for i in range(_SAMPLE_POOL):
-            if f"SNAP{i}" in text:
-                return _card(_TITLES[i])
-        raise AssertionError("render saw an unknown work")
+        return _card(_TITLES[idx], f"{_TITLES[idx]} {_PITCH}")
 
     pair = await sample_independent_pair(
         "写一篇长篇都市修真小说",
         complete=complete,
-        gate=True,
         held=[{"title": "渡劫要报备", "opening": "旧卡"}],
     )
-    assert [it["title"] for it in pair] == ["余烬", "潮汐"]
-    assert pair[0]["flavor"] == _FLAVOR
-    assert pair[0]["work"].startswith("SNAP0")
-    assert pair[1]["work"].startswith("SNAP1")
+    assert sorted(it["title"] for it in pair) == ["余烬", "潮汐"]
+    assert {it["pitch"][:2] for it in pair} == {"余烬", "潮汐"}
     assert form_i == 2
-    stages = [_stage(s) for s in seen]
-    assert stages.count("form") == 2
-    assert stages.count("select") == 1
-    assert stages.count("render") == 2
-    form_blobs = [s for s in seen if _stage(s) == "form"]
-    assert len(set(form_blobs)) == 1
+    assert len(seen) == 2
+    assert len(set(seen)) == 1
     assert not any("渡劫要报备" in s for s in seen)
 
 
 @pytest.mark.asyncio
-async def test_short_form_does_not_enter_pool() -> None:
+async def test_missing_title_retries_this_sample_once() -> None:
     form_i = 0
+    lock = asyncio.Lock()
 
     async def complete(messages):
         nonlocal form_i
-        text = _content_text(messages)
-        stage = _stage(text)
-        if stage == "form":
+        async with lock:
             idx = form_i
             form_i += 1
-            if idx == 0:
-                return "短。"
-            return _work(f"SNAP{idx}")
-        if stage == "select":
-            return '{"selected": ["c01", "c02"]}'
-        return _card("余烬")
+        if idx == 0:
+            return "短。"
+        return _card(_TITLES[min(idx - 1, 1)])
 
     pair = await sample_independent_pair(
         "写一篇长篇都市修真小说",
@@ -248,7 +216,7 @@ async def test_short_form_does_not_enter_pool() -> None:
     )
     assert len(pair) == 2
     assert form_i == 3
-    assert all(it["title"] == "余烬" for it in pair)
+    assert {it["title"] for it in pair} == {"余烬", "潮汐"}
 
 
 @pytest.mark.asyncio
@@ -267,20 +235,16 @@ async def test_pair_thinking_stays_on_one_sample_at_a_time(monkeypatch) -> None:
     )
 
     form_i = 0
+    lock = asyncio.Lock()
 
     async def complete(messages):
         nonlocal form_i
-        text = _content_text(messages)
-        stage = _stage(text)
-        await cs._emit_thinking_delta(f"<{stage}>")
+        await cs._emit_thinking_delta("<form>")
         await asyncio.sleep(0.01)
-        if stage == "form":
+        async with lock:
             idx = form_i
             form_i += 1
-            return _work(f"SNAP{idx}")
-        if stage == "select":
-            return '{"selected": ["c01", "c02"]}'
-        return _card("余烬")
+        return _card(_TITLES[idx])
 
     pair = await sample_independent_pair(
         "写一篇长篇都市修真小说",
@@ -290,7 +254,7 @@ async def test_pair_thinking_stays_on_one_sample_at_a_time(monkeypatch) -> None:
     assert len(pair) == 2
     assert deltas.count("\n—— 独立采样 ——\n") == 2
     stages = [d for d in deltas if d.startswith("<")]
-    assert stages == ["<form>", "<form>", "<select>", "<render>", "<render>"]
+    assert stages == ["<form>", "<form>"]
 
 
 @pytest.mark.asyncio
@@ -324,6 +288,7 @@ async def test_independent_sample_does_not_resurrect_held_cards(
         ],
     )
     form_i = 0
+    lock = asyncio.Lock()
 
     async def complete(messages):
         nonlocal form_i
@@ -331,14 +296,10 @@ async def test_independent_sample_does_not_resurrect_held_cards(
         assert "渡劫要报备" not in text
         assert "城隍夜巡" not in text
         assert "previous_attempt_discarded" not in text
-        stage = _stage(text)
-        if stage == "form":
+        async with lock:
             idx = form_i
             form_i += 1
-            return _work(f"NEW{idx}")
-        if stage == "select":
-            return '{"selected": ["c01", "c02"]}'
-        return _card("余烬")
+        return _card(_TITLES[idx], f"NEW{idx} {_PITCH}")
 
     result = await propose_book_candidates(
         [],
@@ -348,10 +309,10 @@ async def test_independent_sample_does_not_resurrect_held_cards(
     )
     assert result["status"] == "ok"
     titles = [it["title"] for it in result["items"]]
-    assert titles == ["余烬", "余烬"]
+    assert set(titles) == {"余烬", "潮汐"}
     assert "渡劫要报备" not in titles
     assert "城隍夜巡" not in titles
-    assert result["items"][0]["work"].startswith("NEW0")
+    assert all(it["pitch"].startswith("NEW") for it in result["items"])
     clear_pond_rejects()
 
 
@@ -374,15 +335,7 @@ async def test_handler_hard_excludes_previous_titles(workspace, monkeypatch) -> 
     )
 
     async def complete(messages):
-        text = _content_text(messages)
-        stage = _stage(text)
-        if stage == "form":
-            return _work("OLD")
-        if stage == "select":
-            return '{"selected": ["c01", "c02"]}'
-        if "OLD" in text:
-            return _card("渡劫要报备")
-        return _card("余烬")
+        return _card("渡劫要报备")
 
     result = await propose_book_candidates(
         [],
@@ -391,35 +344,74 @@ async def test_handler_hard_excludes_previous_titles(workspace, monkeypatch) -> 
         sample_complete=complete,
     )
     assert result["status"] == "error"
-    assert result.get("fresh_retry") is True
+    assert result.get("stop_retry") is True
+    assert result.get("fresh_retry") is False
     assert "渡劫要报备" not in json.dumps(result, ensure_ascii=False)
     clear_pond_rejects()
 
 
 @pytest.mark.asyncio
-async def test_sample_one_forms_sketch_only(caplog) -> None:
-    stages: list[str] = []
+async def test_slot_ids_in_old_pond_do_not_drop_new_samples(workspace, monkeypatch) -> None:
+    from uuid import uuid4
+
+    from app.settings import settings
+    from app.tools.core.writing_tools import propose_book_candidates
+    from app.writing.opening_ponds import clear_pond_rejects, save_opening_ponds
+
+    monkeypatch.setattr(settings, "ponds_excerpt_gate", True)
+    clear_pond_rejects()
+    turn_id = uuid4()
+    save_opening_ponds(
+        [
+            {"id": "c01", "title": "c01", "opening": "旧槽位残留。"},
+            {"id": "c02", "title": "c02", "opening": "另一槽位残留。"},
+        ]
+    )
+    form_i = 0
+    lock = asyncio.Lock()
 
     async def complete(messages):
+        nonlocal form_i
+        async with lock:
+            idx = form_i
+            form_i += 1
+        return _card(_TITLES[idx], f"NEW{idx} {_PITCH}")
+
+    result = await propose_book_candidates(
+        [],
+        turn_id=turn_id,
+        turn_user_text="写一篇长篇都市修真小说",
+        sample_complete=complete,
+    )
+    assert result["status"] == "ok"
+    assert set(it["title"] for it in result["items"]) == {"余烬", "潮汐"}
+    clear_pond_rejects()
+
+
+@pytest.mark.asyncio
+async def test_sample_one_returns_title_and_pitch(caplog) -> None:
+    calls = 0
+
+    async def complete(messages):
+        nonlocal calls
+        calls += 1
         text = _content_text(messages)
-        stages.append(_stage(text))
         assert "《人间未醒》" not in text
-        return _work("ONE")
+        return _card("余烬")
 
     with caplog.at_level(logging.INFO, logger="app.writing.candidate_sample"):
         item = await sample_one_candidate("写一篇长篇都市修真小说", complete=complete)
     assert item is not None
-    assert item["work"].startswith("ONE")
-    assert stages == ["form"]
+    assert item["title"] == "余烬"
+    assert item["pitch"].startswith("余烬")
+    assert calls == 1
     traces = [
         json.loads(rec.getMessage().removeprefix("candidate_trace "))
         for rec in caplog.records
         if rec.getMessage().startswith("candidate_trace ")
     ]
-    assert traces[-1]["work"].startswith("ONE")
-    assert traces[-1]["selected"] is False
-    assert traces[-1]["title"] == ""
-    assert traces[-1]["opening"] == ""
+    assert traces[-1]["title"] == "余烬"
+    assert traces[-1]["opening"].startswith("余烬")
 
 
 @pytest.mark.asyncio
@@ -470,3 +462,45 @@ async def test_think_budget_aborts_before_content() -> None:
     assert result.text == ""
     assert aborted == [1]
     assert result.think_chars >= 40
+
+
+@pytest.mark.asyncio
+async def test_consume_complete_reads_structured_tool_call() -> None:
+    from app.model.gateway import ModelResponse
+
+    async def stream():
+        yield ModelResponse(
+            text="",
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "book_candidate",
+                    "input": {"title": "余烬", "pitch": _PITCH},
+                }
+            ],
+        )
+
+    result = await consume_complete(stream())
+    parsed = parse_card(result.text)
+    assert parsed is not None
+    assert parsed["title"] == "余烬"
+    assert "灾变之后" in parsed["pitch"]
+
+
+@pytest.mark.asyncio
+async def test_format_fail_does_not_spawn_third_sample() -> None:
+    calls = 0
+    lock = asyncio.Lock()
+
+    async def complete(messages):
+        nonlocal calls
+        async with lock:
+            calls += 1
+        return "短。"
+
+    pair = await sample_independent_pair(
+        "写一篇长篇都市修真小说",
+        complete=complete,
+    )
+    assert pair == []
+    assert calls == 4

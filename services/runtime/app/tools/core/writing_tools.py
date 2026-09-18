@@ -1169,11 +1169,12 @@ async def propose_book_candidates(
     items: list[dict[str, Any]] | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """live：独立采样 ×2 → 冻结 → 判尺 → 渲染卡片。stub：仍收调用方交来的卡片。"""
+    """live：独立采样 ×2，各交 title+pitch。stub：仍收调用方交来的卡片。"""
     from app.writing.candidate_sample import sample_independent_pair
     from app.writing.excerpt_job import job_signals_for, keep_passing_pond_items
     from app.writing.opening_ponds import (
         _MIN_ITEMS,
+        _POND_REJECT_USER_SUMMARY,
         _POND_REPAIR_SUMMARY,
         clear_pond_rejects,
         fill_pond_defaults,
@@ -1190,6 +1191,7 @@ async def propose_book_candidates(
     from app.writing.pond_history import (
         append_rejected_ponds,
         drop_seen_pond_items,
+        load_candidate_excludes,
         load_rejected_pond_items,
         seen_pond_title_keys,
     )
@@ -1207,29 +1209,27 @@ async def propose_book_candidates(
         against = load_rejected_pond_items(workspace_root=root)
 
     if _use_independent_candidate_sample(_kwargs):
+        exclude = load_candidate_excludes(workspace_root=root)
         sampled = await sample_independent_pair(
             message,
             complete=_kwargs.get("sample_complete"),
             gate=False,
             turn_id=turn_id,
+            exclude_ids=exclude.ids,
+            exclude_fingerprints=exclude.fingerprints,
+            exclude_titles=exclude.titles,
         )
         passing = drop_seen_pond_items(
-            sampled, seen_pond_title_keys(workspace_root=root)
+            sampled, exclude.titles or seen_pond_title_keys(workspace_root=root)
         )
         if len(passing) < _MIN_ITEMS:
-            exhausted = note_pond_reject(
-                turn_id,
-                ("ponds_fresh_retry", ""),
-            )
-            if exhausted:
-                return exhausted
             return {
                 "status": "error",
                 "error": "ponds_fresh_retry",
                 "detail": "",
-                "summary": _POND_REPAIR_SUMMARY,
-                "stop_retry": False,
-                "fresh_retry": True,
+                "summary": _POND_REJECT_USER_SUMMARY,
+                "stop_retry": True,
+                "fresh_retry": False,
             }
         saved = save_opening_ponds(
             passing,

@@ -27,7 +27,7 @@ Your job is to help the user develop, write, revise, and deliver documents while
 
 这一阶段只负责产生若干个新的作品候选，不写第一章，不进入 opening / outline / draft，也不要把当前章节、story_state、author_state 或其他写作状态带入候选构思。
 
-调用 `propose_book_candidates` 时不要自己编候选。工具对每个候选使用独立的、最小化的 fresh context 直接采样；候选之间互相不可见，不做连续 brainstorm，不要求单个候选寻找最优方案。
+调用 `propose_book_candidates` 时不要自己编候选。工具会为每个候选建立独立的最小上下文并分别采样；每次采样只产生一个候选，不进行候选之间的比较、连续 brainstorm 或二次创作。
 
 候选只是一个大概成立、值得继续发展的作品概貌。形成后立即停止，由后续选择阶段负责判断。
 

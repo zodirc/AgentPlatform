@@ -1,4 +1,4 @@
-"""作品候选：独立采样 ×2 → 冻结 → 判尺 → 渲染卡片。"""
+"""作品候选：独立采样 ×2 → title+pitch 卡片。无 selector / renderer。"""
 
 from __future__ import annotations
 
@@ -13,14 +13,12 @@ from uuid import UUID
 from app.model.gateway import ModelResponse, StreamActivity
 from app.model.generation import GenerationParams
 from app.writing.work_reconstruction import (
+    CANDIDATE_SCHEMA,
+    candidate_fingerprint,
     form_messages,
-    freeze_work,
     genre_label,
+    obvious_meta_text,
     parse_card,
-    parse_selector_ids,
-    parse_work,
-    render_messages,
-    selector_messages,
     topic_of,
 )
 
@@ -29,21 +27,17 @@ logger = logging.getLogger(__name__)
 CompleteFn = Callable[[list[dict[str, Any]]], Awaitable[str]]
 
 _SAMPLE_POOL = 2
+_SLOT_RETRIES = 1
 _THINKING_DELTA_MAX = 8192
-_FORM_MAX_OUTPUT_TOKENS = 4096
-_FORM_THINK_CHAR_BUDGET = 8000
-_SELECT_MAX_OUTPUT_TOKENS = 512
-_SELECT_THINK_CHAR_BUDGET = 4000
-_RENDER_MAX_OUTPUT_TOKENS = 1200
-_RENDER_THINK_CHAR_BUDGET = 2500
-_RENDER_OUT_MAX = 1200
+_FORM_MAX_OUTPUT_TOKENS = 1024
+_FORM_THINK_CHAR_BUDGET = 4000
 _sample_turn_id: ContextVar[object | None] = ContextVar(
     "candidate_sample_turn_id", default=None
 )
+_think_emit_lock = asyncio.Lock()
 
 _genre_label = genre_label
 _topic_of = topic_of
-pitch_messages = render_messages
 
 
 @dataclass
@@ -53,17 +47,6 @@ class CompleteResult:
     output_tokens: int = 0
     think_chars: int = 0
     aborted: bool = False
-
-
-@dataclass
-class WorkSample:
-    sample_id: str
-    sample_raw: str
-    work: str
-    think_chars: int = 0
-    output_tokens: int = 0
-    aborted: bool = False
-    selected: bool = False
 
 
 def _content_text(messages: list[dict[str, Any]]) -> str:
@@ -83,13 +66,6 @@ def _content_text(messages: list[dict[str, Any]]) -> str:
     return "\n".join(parts)
 
 
-def _clip_draft(text: str, limit: int) -> str:
-    body = (text or "").strip()
-    if len(body) <= limit:
-        return body
-    return body[:limit].rstrip()
-
-
 def _isolated_generation(max_output_tokens: int) -> GenerationParams:
     """候选 child 不继承 writing 场景温度/system，也不开内部搜索。"""
     base = GenerationParams.from_settings(scenario_id=None)
@@ -103,19 +79,10 @@ def _isolated_generation(max_output_tokens: int) -> GenerationParams:
 
 
 def form_generation() -> GenerationParams:
-    return _isolated_generation(_FORM_MAX_OUTPUT_TOKENS)
-
-
-def selector_generation() -> GenerationParams:
-    return _isolated_generation(_SELECT_MAX_OUTPUT_TOKENS)
-
-
-def render_generation() -> GenerationParams:
-    return _isolated_generation(_RENDER_MAX_OUTPUT_TOKENS)
-
-
-def pitch_generation() -> GenerationParams:
-    return render_generation()
+    return replace(
+        _isolated_generation(_FORM_MAX_OUTPUT_TOKENS),
+        response_schema=CANDIDATE_SCHEMA,
+    )
 
 
 def candidate_generation() -> GenerationParams:
@@ -150,9 +117,7 @@ def _log_candidate_trace(
                 "flavor": flavor,
                 "opening": opening,
                 "think_chars_form": think_chars_form,
-                "think_chars_render": think_chars_render,
                 "output_tokens_form": output_tokens_form,
-                "output_tokens_render": output_tokens_render,
                 "aborted": aborted,
             },
             ensure_ascii=False,
@@ -169,14 +134,15 @@ async def _emit_thinking_delta(text: str) -> None:
     writer = get_event_writer()
     if writer is None:
         return
-    try:
-        await writer(
-            event_type="turn.thinking.delta",
-            payload={"delta": delta, "step_index": 0},
-            step_index=0,
-        )
-    except Exception:
-        logger.debug("candidate thinking emit failed", exc_info=True)
+    async with _think_emit_lock:
+        try:
+            await writer(
+                event_type="turn.thinking.delta",
+                payload={"delta": delta, "step_index": 0},
+                step_index=0,
+            )
+        except Exception:
+            logger.debug("candidate thinking emit failed", exc_info=True)
 
 
 async def _mark_candidate_thinking() -> None:
@@ -206,6 +172,27 @@ def _buffered_writer():
     except (TypeError, ValueError):
         return None
     return get_buffered(turn_id)
+
+
+def _text_from_tool_calls(calls: list[dict[str, Any]] | None) -> str:
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        payload = call.get("input")
+        if payload is None:
+            raw_args = call.get("arguments")
+            if isinstance(raw_args, str) and raw_args.strip():
+                try:
+                    payload = json.loads(raw_args)
+                except json.JSONDecodeError:
+                    return raw_args.strip()
+            elif isinstance(raw_args, dict):
+                payload = raw_args
+        if isinstance(payload, dict):
+            return json.dumps(payload, ensure_ascii=False)
+        if isinstance(payload, str) and payload.strip():
+            return payload.strip()
+    return ""
 
 
 async def consume_complete(
@@ -240,7 +227,10 @@ async def consume_complete(
         if isinstance(chunk, str):
             collected += chunk
         elif isinstance(chunk, ModelResponse):
-            if chunk.text and not collected:
+            blob = _text_from_tool_calls(chunk.tool_calls)
+            if blob:
+                collected = blob
+            elif chunk.text and not collected:
                 collected = chunk.text
             if chunk.output_tokens:
                 output_tokens = int(chunk.output_tokens)
@@ -304,127 +294,108 @@ async def _run_complete(
     )
 
 
-def _rendered_card(sample: WorkSample, parsed: dict[str, str]) -> dict[str, Any]:
-    opening = parsed["opening"]
+def _card_payload(
+    *,
+    sample_id: str,
+    raw: str,
+    parsed: dict[str, str],
+) -> dict[str, Any]:
+    pitch = parsed["pitch"]
     return {
-        "id": sample.sample_id,
+        "id": sample_id,
+        "sample_id": sample_id,
+        "raw": raw,
         "title": parsed["title"],
         "flavor": parsed.get("flavor") or "",
-        "opening": opening,
-        "pitch": opening,
-        "work": sample.work,
+        "opening": pitch,
+        "pitch": pitch,
+        "work": pitch,
     }
 
 
-async def form_one_work(
-    user_text: str,
+def _is_excluded(
+    parsed: dict[str, str],
     *,
-    complete: CompleteFn | None = None,
-    sample_id: str = "",
-) -> WorkSample | None:
-    await _emit_thinking_delta("\n—— 独立采样 ——\n")
-    formed = await _run_complete(
-        form_messages(user_text),
-        complete=complete,
-        generation=form_generation(),
-        think_char_budget=_FORM_THINK_CHAR_BUDGET,
-    )
-    sample_raw = formed.reasoning or formed.text
-    if formed.aborted and not formed.text:
-        _log_candidate_trace(
-            sample_id=sample_id,
-            sample_raw=sample_raw,
-            aborted=True,
-            think_chars_form=formed.think_chars,
-            output_tokens_form=formed.output_tokens,
-        )
-        return None
-    work = parse_work(formed.text)
-    if work is None:
-        _log_candidate_trace(
-            sample_id=sample_id,
-            sample_raw=sample_raw,
-            think_chars_form=formed.think_chars,
-            output_tokens_form=formed.output_tokens,
-            aborted=formed.aborted,
-        )
-        logger.info("candidate work discarded id=%s", sample_id)
-        return None
-    sample = WorkSample(
-        sample_id=sample_id,
-        sample_raw=sample_raw,
-        work=freeze_work(work),
-        think_chars=formed.think_chars,
-        output_tokens=formed.output_tokens,
-        aborted=formed.aborted,
-    )
-    _log_candidate_trace(
-        sample_id=sample.sample_id,
-        sample_raw=sample.sample_raw,
-        work=sample.work,
-        selected=False,
-        think_chars_form=sample.think_chars,
-        output_tokens_form=sample.output_tokens,
-        aborted=sample.aborted,
-    )
-    return sample
-
-
-async def render_card(
-    sample: WorkSample,
-    *,
-    complete: CompleteFn | None = None,
-) -> dict[str, str] | None:
-    rendered = await _run_complete(
-        render_messages(sample.work),
-        complete=complete,
-        generation=render_generation(),
-        think_char_budget=_RENDER_THINK_CHAR_BUDGET,
-    )
-    if rendered.aborted and not rendered.text:
-        logger.info("candidate render aborted at think budget chars=%s", rendered.think_chars)
-        return None
-    return parse_card(_clip_draft(rendered.text, _RENDER_OUT_MAX))
-
-
-async def _select_ids(
-    pool: list[WorkSample],
-    *,
-    complete: CompleteFn | None,
-) -> list[str]:
-    if len(pool) < 2:
-        return [it.sample_id for it in pool]
-    raw = await _run_complete(
-        selector_messages([(it.sample_id, it.work) for it in pool]),
-        complete=complete,
-        generation=selector_generation(),
-        think_char_budget=_SELECT_THINK_CHAR_BUDGET,
-    )
-    if raw.aborted and not raw.text:
-        logger.info("candidate selector aborted at think budget chars=%s", raw.think_chars)
-        return []
-    return parse_selector_ids(raw.text, [it.sample_id for it in pool])
+    exclude_ids: set[str],
+    exclude_fingerprints: set[str],
+    exclude_titles: set[str],
+    sample_id: str,
+) -> bool:
+    # c01/c02 是采样槽位名，不是作品身份。旧池把槽位写进 id 时不得把新采样整槽扔掉。
+    _ = (exclude_ids, sample_id)
+    title = str(parsed.get("title") or "").strip().casefold()
+    if title and title in exclude_titles:
+        return True
+    fps = {
+        candidate_fingerprint(parsed.get("pitch") or ""),
+        candidate_fingerprint(parsed.get("title") or "", parsed.get("pitch") or ""),
+    }
+    return bool(fps & exclude_fingerprints)
 
 
 async def sample_one_candidate(
     user_text: str,
     *,
     complete: CompleteFn | None = None,
+    sample_id: str = "c01",
+    exclude_ids: set[str] | None = None,
+    exclude_fingerprints: set[str] | None = None,
+    exclude_titles: set[str] | None = None,
 ) -> dict[str, Any] | None:
-    """单样本：只形成并冻结一稿。"""
-    sample = await form_one_work(
-        user_text,
-        complete=complete,
-        sample_id="c01",
-    )
-    if sample is None:
-        return None
-    return {
-        "id": sample.sample_id,
-        "title": sample.sample_id,
-        "work": sample.work,
-        "opening": sample.work,
-    }
+    """一个 sample job：结构化 {title, pitch}。格式失败丢弃后再新开一发。"""
+    await _emit_thinking_delta("\n—— 独立采样 ——\n")
+    last_raw = ""
+    for _attempt in range(_SLOT_RETRIES + 1):
+        formed = await _run_complete(
+            form_messages(user_text),
+            complete=complete,
+            generation=form_generation(),
+            think_char_budget=_FORM_THINK_CHAR_BUDGET,
+        )
+        last_raw = formed.text.strip()
+        if formed.aborted and not last_raw:
+            _log_candidate_trace(
+                sample_id=sample_id,
+                aborted=True,
+                think_chars_form=formed.think_chars,
+                output_tokens_form=formed.output_tokens,
+            )
+            return None
+        parsed = parse_card(last_raw)
+        if parsed is not None and obvious_meta_text(parsed["pitch"]):
+            parsed = None
+        if parsed is None:
+            _log_candidate_trace(
+                sample_id=sample_id,
+                sample_raw=last_raw,
+                think_chars_form=formed.think_chars,
+                output_tokens_form=formed.output_tokens,
+                aborted=formed.aborted,
+            )
+            continue
+        if _is_excluded(
+            parsed,
+            exclude_ids=exclude_ids or set(),
+            exclude_fingerprints=exclude_fingerprints or set(),
+            exclude_titles=exclude_titles or set(),
+            sample_id=sample_id,
+        ):
+            logger.info("candidate excluded id=%s title=%s", sample_id, parsed["title"])
+            return None
+        card = _card_payload(sample_id=sample_id, raw=last_raw, parsed=parsed)
+        _log_candidate_trace(
+            sample_id=sample_id,
+            sample_raw=last_raw,
+            work=card["pitch"],
+            selected=True,
+            title=card["title"],
+            opening=card["pitch"],
+            think_chars_form=formed.think_chars,
+            output_tokens_form=formed.output_tokens,
+        )
+        return card
+    logger.info("candidate schema miss id=%s", sample_id)
+    return None
 
 
 async def sample_independent_pair(
@@ -435,8 +406,11 @@ async def sample_independent_pair(
     gate: bool = True,
     need: int | None = None,
     turn_id: object | None = None,
+    exclude_ids: set[str] | None = None,
+    exclude_fingerprints: set[str] | None = None,
+    exclude_titles: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """同一个极简 prompt 各采一稿，冻结后由判尺选 2，再渲染卡片。旧卡不进 child。"""
+    """恰好两个互不可见的 fresh sample。无 fill、无第三发。"""
 
     _ = (held, gate)
     token = _sample_turn_id.set(turn_id)
@@ -449,6 +423,9 @@ async def sample_independent_pair(
             user_text,
             complete=complete,
             need=need,
+            exclude_ids=set(exclude_ids or ()),
+            exclude_fingerprints=set(exclude_fingerprints or ()),
+            exclude_titles=set(exclude_titles or ()),
         )
     finally:
         if buffered is not None:
@@ -461,57 +438,44 @@ async def _sample_independent_pair_body(
     *,
     complete: CompleteFn | None,
     need: int | None,
+    exclude_ids: set[str],
+    exclude_fingerprints: set[str],
+    exclude_titles: set[str],
 ) -> list[dict[str, Any]]:
-    target = _SAMPLE_POOL if need is None else max(0, need)
-    pool: list[WorkSample] = []
-    misses = 0
-    while len(pool) < target and misses < target + 4:
-        sample_id = f"c{len(pool) + 1:02d}"
-        sample = await form_one_work(
+    _ = need
+    sampled = await asyncio.gather(
+        sample_one_candidate(
             user_text,
             complete=complete,
-            sample_id=sample_id,
-        )
-        if sample is None:
-            misses += 1
-            continue
-        pool.append(sample)
-    picks = await _select_ids(pool, complete=complete)
-    if len(picks) < min(2, len(pool)):
-        picks = [it.sample_id for it in pool[:2]]
-    chosen: list[WorkSample] = []
-    by_id = {it.sample_id: it for it in pool}
-    for sid in picks:
-        if sid in by_id and by_id[sid] not in chosen:
-            chosen.append(by_id[sid])
-        if len(chosen) == 2:
-            break
-    picked = {it.sample_id for it in chosen}
-    for sample in pool:
-        sample.selected = sample.sample_id in picked
-        _log_candidate_trace(
-            sample_id=sample.sample_id,
-            sample_raw=sample.sample_raw,
-            work=sample.work,
-            selected=sample.selected,
-        )
+            sample_id="c01",
+            exclude_ids=exclude_ids,
+            exclude_fingerprints=exclude_fingerprints,
+            exclude_titles=exclude_titles,
+        ),
+        sample_one_candidate(
+            user_text,
+            complete=complete,
+            sample_id="c02",
+            exclude_ids=exclude_ids,
+            exclude_fingerprints=exclude_fingerprints,
+            exclude_titles=exclude_titles,
+        ),
+    )
+    seen_fps = set(exclude_fingerprints)
+    seen_titles = set(exclude_titles)
     cards: list[dict[str, Any]] = []
-    for sample in chosen:
-        parsed = await render_card(sample, complete=complete)
-        if parsed is None:
-            parsed = {
-                "title": sample.sample_id,
-                "flavor": "",
-                "opening": sample.work,
-            }
-        _log_candidate_trace(
-            sample_id=sample.sample_id,
-            sample_raw=sample.sample_raw,
-            work=sample.work,
-            selected=True,
-            title=parsed["title"],
-            flavor=parsed.get("flavor") or "",
-            opening=parsed["opening"],
-        )
-        cards.append(_rendered_card(sample, parsed))
-    return cards
+    for card in sampled:
+        if card is None:
+            continue
+        fp = candidate_fingerprint(card.get("pitch") or "")
+        title = str(card.get("title") or "").strip().casefold()
+        if fp and fp in seen_fps:
+            continue
+        if title and title in seen_titles:
+            continue
+        if fp:
+            seen_fps.add(fp)
+        if title:
+            seen_titles.add(title)
+        cards.append(card)
+    return cards[:_SAMPLE_POOL]
