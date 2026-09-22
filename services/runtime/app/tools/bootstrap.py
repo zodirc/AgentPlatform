@@ -401,7 +401,7 @@ def build_registry() -> ToolRegistry:
                                 },
                                 "pitch": {
                                     "type": "string",
-                                    "description": "书页简介，约100–220字。是这本书的入口，不是构思过程，也不是第一章。",
+                                    "description": "书页简介，约100–220字。是这本书的介绍，没有固定写法，不是构思过程，也不是第一章。",
                                 },
                             },
                             "required": [

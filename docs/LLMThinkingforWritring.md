@@ -138,7 +138,7 @@ handler  extract genre
 `sample_one_candidate`：
 
 1. 打 thinking 分隔 `—— 独立采样 ——`
-2. `form_messages(user_text)` 得到 **全新** messages（不带上一发、不带 A 的草稿）
+2. `form_messages(user_text, subject=…)` 得到 **全新** messages（题材已抽定；不带上一发、不带另一本、不带 A 的草稿）
 3. `form_generation()` 带 `response_schema=CANDIDATE_SCHEMA`
 4. 一次 complete
 5. `parse_card`；pitch 以元话语开头则当格式失败
@@ -149,16 +149,20 @@ handler  extract genre
 
 ### 5.2 两个 sample
 
-`asyncio.gather(c01, c02)`。两路并行、互不可见。
+池子是 `writing/subject_pool.py` 里的题材。都市修真、都市异能、都市玄幻共用这一份。一条是对一本书的提炼：世界已经如何，谁从何处踏入，这本书要问的是什么。
 
-汇合后再按 title / pitch 指纹去重。槽位名 `c01`/`c02` **不是作品身份**：旧池若把 `id` 写成 `c01`，不得把新采样整槽扔掉。排除只看书名和内容指纹。
+1. `draw_subjects` 按 `genre_of` 找到这份名单，`random.sample` 无放回抽 2 条。没有这份名单则这次不交卡。本句只是「我看看」或「我要其他的」时，类型沿用本会话里上一句点过名的话，不把这句当成类型名。
+2. `asyncio.gather(c01, c02)`。每张卡的提示里只有自己抽到的那一条，看不见另一条，也看不见名单上其余的题材。这条是参照：交出来的书名和人物是新的，不要和题材里的那一本相同。
+
+汇合后按 title / pitch 指纹去重。槽位名 `c01`/`c02` **不是作品身份**：旧池若把 `id` 写成 `c01`，不得把新采样整槽扔掉。排除只看书名和内容指纹。撞车则同一题材再交一次，仍看不见另一本。
 
 常数：
 
 | 名 | 值 | 含义 |
 |----|----|------|
-| `_SAMPLE_POOL` | 2 | 每次只采两本 |
-| `_SLOT_RETRIES` | 1 | 每槽格式失败再试 1 次 |
+| 都市修真 / 都市异能 / 都市玄幻 | 51 条 | 共用的题材 |
+| `_SAMPLE_POOL` | 2 | 从池子里均匀抽两本 |
+| `_SLOT_RETRIES` | 1 | 单本格式失败再试 1 次 |
 | `_FORM_MAX_OUTPUT_TOKENS` | 1024 | child 输出上限 |
 | `_FORM_THINK_CHAR_BUDGET` | 4000 | 思考字符预算，超了且尚无正文则 abort |
 | pitch clip | 800 字 | 解析后裁切 |
@@ -171,7 +175,7 @@ handler  extract genre
 - `thinking_enabled=False`
 - `reasoning_effort=none`（DeepSeek 会显式 `thinking: disabled`，否则默认思考模式不能强制 `tool_choice`）
 - `tool_choice=none`（随后由 `response_schema` 覆盖成结构化约束）
-- `response_schema=CANDIDATE_SCHEMA`
+- `response_schema=CANDIDATE_SCHEMA`（题材在进模型之前已经抽定）
 
 ### 5.4 结构化输出（不要靠「请输出 JSON」）
 

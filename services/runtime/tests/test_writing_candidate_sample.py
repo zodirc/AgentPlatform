@@ -19,6 +19,8 @@ from app.writing.candidate_sample import (
     sample_independent_pair,
     sample_one_candidate,
 )
+from app.writing.excerpt_job import book_level_low, premise_cohesion_low
+from app.writing.subject_pool import draw_subjects, pool_for
 from app.writing.work_reconstruction import (
     CANDIDATE_SCHEMA,
     build_candidate_context,
@@ -26,6 +28,7 @@ from app.writing.work_reconstruction import (
     parse_candidate,
     parse_card,
     project_candidate_context,
+    sample_user_text,
 )
 
 
@@ -35,6 +38,13 @@ _PITCH = (
     "他明天还得去领粮，也还得决定跟哪一路人站在一起。"
 )
 _TITLES = ["余烬", "潮汐"]
+
+
+def _drawn_subject(text: str) -> str:
+    for line in text.splitlines():
+        if line.startswith("题材："):
+            return line.removeprefix("题材：")
+    return ""
 
 
 def _card(title: str, pitch: str | None = None) -> str:
@@ -94,9 +104,20 @@ def test_form_is_a_direct_candidate_job() -> None:
         "genre": "都市修真",
         "fresh_work": True,
     }
-    blob = _content_text(form_messages("写一篇长篇都市修真小说"))
-    assert "题材：都市修真" in blob
-    assert "根据题材直接生成一个小说候选" in blob
+    blob = _content_text(
+        form_messages(
+            "写一篇长篇都市修真小说",
+            subject=pool_for("都市修真")[0],
+        )
+    )
+    assert "类型：都市修真" in blob
+    assert "不要和题材里的那一本相同" in blob
+    assert f"题材：{pool_for('都市修真')[0]}" in blob
+    assert "抽签：" not in blob
+    assert "均匀取一本" not in blob
+    assert "根据题材交一本书的书名和简介" in blob
+    assert "没有固定写法" in blob
+    assert "那只是其中一种介绍" in blob
     assert "只交一个结果" in blob
     assert "不需要寻找更好的方向" in blob
     assert "大概是什么样子" not in blob
@@ -137,6 +158,42 @@ def test_projection_ignores_workspace_writing_state(tmp_path) -> None:
     assert "旧书" not in blob
 
 
+def test_owned_subject_pool_is_the_draw_support() -> None:
+    pool = pool_for("都市修真")
+    assert len(pool) >= 36
+    assert len(set(pool)) == len(pool)
+    for index, left in enumerate(pool):
+        assert book_level_low(left) is False
+        assert premise_cohesion_low(left) is False
+        for right in pool[index + 1 :]:
+            assert left not in right
+            assert right not in left
+    drawn = draw_subjects("都市修真", 2)
+    assert len(set(drawn)) == 2
+    assert set(drawn) <= set(pool)
+    assert draw_subjects("历史", 2) == []
+    assert pool_for("都市修真") == pool_for("都市异能") == pool_for("都市玄幻")
+    assert draw_subjects("都市玄幻", 2)
+
+
+@pytest.mark.asyncio
+async def test_missing_pool_does_not_call_the_model() -> None:
+    async def complete(messages):
+        raise AssertionError(messages)
+
+    pair = await sample_independent_pair("写一篇历史小说", complete=complete)
+    assert pair == []
+
+
+def test_choice_turn_keeps_the_named_genre() -> None:
+    named = "写一篇长篇的都市修真小说"
+    assert sample_user_text("我要其他的", [named]) == named
+    assert sample_user_text("我看看", [named]) == named
+    assert sample_user_text(named, ["写一篇历史小说"]) == named
+    history = "写一篇历史小说"
+    assert sample_user_text("我看看", [history]) == history
+
+
 def test_parse_card_and_meta_guard() -> None:
     card = parse_card(_card("余烬"))
     assert card is not None
@@ -173,10 +230,11 @@ async def test_two_independent_sketches_then_cards() -> None:
     async def complete(messages):
         nonlocal form_i
         text = _content_text(messages)
-        seen.append(text)
         assert "《人间未醒》" not in text
         assert "previous_attempt_discarded" not in text
         assert "已经冻结的候选概貌" not in text
+        assert "渡劫要报备" not in text
+        seen.append(text)
         async with lock:
             idx = form_i
             form_i += 1
@@ -191,8 +249,16 @@ async def test_two_independent_sketches_then_cards() -> None:
     assert {it["pitch"][:2] for it in pair} == {"余烬", "潮汐"}
     assert form_i == 2
     assert len(seen) == 2
-    assert len(set(seen)) == 1
-    assert not any("渡劫要报备" in s for s in seen)
+    drawn = [_drawn_subject(s) for s in seen]
+    assert len(set(drawn)) == 2
+    assert set(drawn) <= set(pool_for("都市修真"))
+    for text, subject in zip(seen, drawn):
+        assert "抽签：" not in text
+        assert "均匀取一本" not in text
+        for other in drawn:
+            if other != subject:
+                assert other not in text
+    assert not any("《余烬》" in s or "已经写过" in s for s in seen)
 
 
 @pytest.mark.asyncio
@@ -252,6 +318,7 @@ async def test_pair_thinking_stays_on_one_sample_at_a_time(monkeypatch) -> None:
         need=2,
     )
     assert len(pair) == 2
+    assert deltas.count("\n—— 题材池 ——\n") == 1
     assert deltas.count("\n—— 独立采样 ——\n") == 2
     stages = [d for d in deltas if d.startswith("<")]
     assert stages == ["<form>", "<form>"]

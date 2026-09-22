@@ -1221,8 +1221,13 @@ async def propose_book_candidates(
 
     if _use_independent_candidate_sample(_kwargs):
         exclude = load_candidate_excludes(workspace_root=root)
+        from app.writing.candidate_sample import resolve_sample_user_text
+
+        sample_text = await resolve_sample_user_text(
+            message, _kwargs.get("session_id")
+        )
         sampled = await sample_independent_pair(
-            message,
+            sample_text,
             complete=_kwargs.get("sample_complete"),
             gate=False,
             turn_id=turn_id,

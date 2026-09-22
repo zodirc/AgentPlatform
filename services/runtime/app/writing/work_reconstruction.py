@@ -41,11 +41,14 @@ CANDIDATE_SCHEMA: dict[str, Any] = {
     },
 }
 
-_FORM_SYSTEM = """根据题材直接生成一个小说候选。
+_FORM_SYSTEM = """根据题材交一本书的书名和简介。
+
+题材是参照。交出来的是另一本，书名和人物是这本新书自己的，不要和题材里的那一本相同。
+
+书名是这本作品的名字，可以不解释题材。
+简介是这本作品的介绍，没有固定写法。不要默认把设定焊进书名，再在简介里把对照点完。那只是其中一种介绍。
 
 只交一个结果，不需要寻找更好的方向。"""
-
-_FORM_USER = """题材：{genre}"""
 
 
 @dataclass(frozen=True)
@@ -73,6 +76,32 @@ def genre_label(user_text: str) -> str:
 
 def genre_of(user_text: str) -> str:
     return genre_label(user_text) or (user_text or "").strip() or "都市修真"
+
+
+# 换一组 / 再看看本身不是类型名。「我要其他的」剥掉尾字后会变成「我要其他」。
+_CHOICE_ONLY = frozenset({"我看看", "看看", "先看", "我要其他的", "我要其他"})
+
+
+def names_genre(user_text: str) -> bool:
+    """这句话有没有点出一个类型。换卡令牌不算。"""
+    label = genre_label(user_text)
+    if not label or label in _CHOICE_ONLY:
+        return False
+    if (user_text or "").strip() in _CHOICE_ONLY:
+        return False
+    from app.writing.subject_pool import pool_for
+
+    return label != (user_text or "").strip() or bool(pool_for(label))
+
+
+def sample_user_text(current: str, prior: list[str] | None = None) -> str:
+    """抽题材用的那句话。本句没点类型时，沿用会话里上一句点过名的。"""
+    if names_genre(current):
+        return current
+    for text in prior or ():
+        if names_genre(text):
+            return text
+    return current
 
 
 def topic_of(user_text: str) -> str:
@@ -194,10 +223,18 @@ def parse_title_pitch(raw: str) -> dict[str, str] | None:
     return {"title": parsed["title"], "pitch": parsed["pitch"]}
 
 
-def form_messages(user_text: str = "") -> list[dict[str, Any]]:
+def form_messages(
+    user_text: str = "",
+    *,
+    subject: str = "",
+) -> list[dict[str, Any]]:
     ctx = project_candidate_context(user_text)
-    body = _FORM_USER.replace("{genre}", ctx.genre)
+    lines = [f"类型：{ctx.genre}"]
+    drawn = subject.strip()
+    if drawn:
+        lines.append(f"题材：{drawn}")
+    lines.extend(["", "交这本书的书名和简介。"])
     return [
         {"role": "system", "content": [{"type": "text", "text": _FORM_SYSTEM}]},
-        user_message(body),
+        user_message("\n".join(lines)),
     ]

@@ -12,11 +12,13 @@ from uuid import UUID
 
 from app.model.gateway import ModelResponse, StreamActivity
 from app.model.generation import GenerationParams
+from app.writing.subject_pool import draw_subjects
 from app.writing.work_reconstruction import (
     CANDIDATE_SCHEMA,
     candidate_fingerprint,
     form_messages,
     genre_label,
+    genre_of,
     obvious_meta_text,
     parse_card,
     topic_of,
@@ -338,16 +340,17 @@ async def sample_one_candidate(
     *,
     complete: CompleteFn | None = None,
     sample_id: str = "c01",
+    subject: str = "",
     exclude_ids: set[str] | None = None,
     exclude_fingerprints: set[str] | None = None,
     exclude_titles: set[str] | None = None,
 ) -> dict[str, Any] | None:
-    """一个 sample job：结构化 {title, pitch}。格式失败丢弃后再新开一发。"""
+    """一个 sample job：题材已经抽定，只交这本书的 {title, pitch}。格式失败或撞车后再交一次。"""
     await _emit_thinking_delta("\n—— 独立采样 ——\n")
     last_raw = ""
     for _attempt in range(_SLOT_RETRIES + 1):
         formed = await _run_complete(
-            form_messages(user_text),
+            form_messages(user_text, subject=subject),
             complete=complete,
             generation=form_generation(),
             think_char_budget=_FORM_THINK_CHAR_BUDGET,
@@ -381,7 +384,7 @@ async def sample_one_candidate(
             sample_id=sample_id,
         ):
             logger.info("candidate excluded id=%s title=%s", sample_id, parsed["title"])
-            return None
+            continue
         card = _card_payload(sample_id=sample_id, raw=last_raw, parsed=parsed)
         _log_candidate_trace(
             sample_id=sample_id,
@@ -410,7 +413,7 @@ async def sample_independent_pair(
     exclude_fingerprints: set[str] | None = None,
     exclude_titles: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """恰好两个互不可见的 fresh sample。无 fill、无第三发。"""
+    """从该类型已有的题材池里无放回均匀抽两本。两张卡互不可见。无第三槽。"""
 
     _ = (held, gate)
     token = _sample_turn_id.set(turn_id)
@@ -433,6 +436,27 @@ async def sample_independent_pair(
         _sample_turn_id.reset(token)
 
 
+async def resolve_sample_user_text(user_text: str, session_id: Any = None) -> str:
+    """本句是「我看看 / 我要其他的」时，类型仍用本会话里已经点过名的那一句。"""
+    from app.writing.work_reconstruction import names_genre, sample_user_text
+
+    if names_genre(user_text):
+        return user_text
+    priors: list[str] = []
+    if session_id:
+        try:
+            sid = session_id if isinstance(session_id, UUID) else UUID(str(session_id))
+            from app.controller.session_compact import load_session_turn_history
+
+            rows = await load_session_turn_history(sid, limit=20)
+            priors = [str(row.get("user_input") or "") for row in rows]
+        except (TypeError, ValueError):
+            priors = []
+        except Exception:
+            logger.debug("sample genre history failed", exc_info=True)
+    return sample_user_text(user_text, priors)
+
+
 async def _sample_independent_pair_body(
     user_text: str,
     *,
@@ -443,11 +467,16 @@ async def _sample_independent_pair_body(
     exclude_titles: set[str],
 ) -> list[dict[str, Any]]:
     _ = need
+    chosen = draw_subjects(genre_of(user_text), _SAMPLE_POOL)
+    if len(chosen) < _SAMPLE_POOL:
+        return []
+    await _emit_thinking_delta("\n—— 题材池 ——\n")
     sampled = await asyncio.gather(
         sample_one_candidate(
             user_text,
             complete=complete,
             sample_id="c01",
+            subject=chosen[0],
             exclude_ids=exclude_ids,
             exclude_fingerprints=exclude_fingerprints,
             exclude_titles=exclude_titles,
@@ -456,6 +485,7 @@ async def _sample_independent_pair_body(
             user_text,
             complete=complete,
             sample_id="c02",
+            subject=chosen[1],
             exclude_ids=exclude_ids,
             exclude_fingerprints=exclude_fingerprints,
             exclude_titles=exclude_titles,
