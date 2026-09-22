@@ -157,7 +157,12 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
                     user_text = content
                 if user_text:
                     break
-            focus = infer_focus_section_id(user_text, available) or (
+            focus = infer_focus_section_id(
+                user_text,
+                available,
+                workspace_root=Path(settings.workspace_root),
+                outline=outline_text,
+            ) or (
                 available[-1] if available else ""
             )
             chapter_text = extract_section(doc, focus) if focus else doc
@@ -266,13 +271,19 @@ def _writing_focus_bookmark(
 
     doc, _rel = load_manuscript_doc(Path(settings.workspace_root))
     sections = list_section_ids(doc) if doc else []
-    focus = infer_focus_section_id(last_user_message, sections)
+    focus = infer_focus_section_id(
+        last_user_message,
+        sections,
+        workspace_root=Path(settings.workspace_root),
+    )
     if not focus and sections:
         focus = sections[-1]
     recent_user = last_user_message
     if (not recent_user or recent_user.strip() in {"/compact", "compact"}) and rows:
         recent_user = str(rows[0].get("user_input") or "")
-        focus = infer_focus_section_id(recent_user, sections) or focus
+        focus = infer_focus_section_id(
+            recent_user, sections, workspace_root=Path(settings.workspace_root)
+        ) or focus
 
     narrative = strip_delivery_playbook(getattr(summary, "narrative", "") or "")
     preview = manuscript_preview_for_compact()

@@ -74,13 +74,15 @@ def test_continue_when_pond_committed(tmp_path: Path) -> None:
         book_scope="long",
         workspace_root=tmp_path,
     )
-    assert phase["outline_phase"] == "continue"
+    assert phase["outline_phase"] == "open"
+    assert "纲" in str(phase["outline_phase_note"])
     write_style_lock(outline, workspace_root=tmp_path)
     phase_locked = resolve_outline_phase(
         "写第一章",
         outline=outline,
         book_scope="long",
         workspace_root=tmp_path,
+        manuscript_chapters=1,
     )
     assert phase_locked["outline_phase"] == "continue"
     assert phase_locked["style_locked"] is True

@@ -12,7 +12,10 @@ BookScopeSource = Literal["auto", "user"]
 _SHORT = re.compile(r"短篇|短篇小说|小小说|微型小说|闪小说")
 _MEDIUM = re.compile(r"中篇|中篇小说")
 # 尺度词：明确要写长、写章、连载。题材词（玄幻/修仙）不单独把「一篇」抬成长篇。
-_EXPLICIT_LONG_SCALE = re.compile(r"长篇|网文|连载|写一章|写个章|写一回")
+_EXPLICIT_LONG_SCALE = re.compile(
+    r"长篇|网文|连载|写一章|写个章|写一回|写一部|一部小说"
+)
+_BROWSE_LONG = re.compile(r"看看|我要其他的")
 _CHAPTER_REF = re.compile(
     r"第\s*[一二三四五六七八九十百千零〇两\d]+\s*章"
 )
@@ -64,6 +67,8 @@ def explicit_book_scope(message: str = "") -> BookScope | None:
     if _MEDIUM.search(blob):
         return "single"
     if _EXPLICIT_LONG_SCALE.search(blob):
+        return "long"
+    if _BROWSE_LONG.search(blob):
         return "long"
     return None
 

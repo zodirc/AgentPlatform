@@ -15,6 +15,8 @@ def test_infer_focus_chinese_and_ch() -> None:
     assert infer_focus_section_id("写第三章", available) == "ch3"
     assert infer_focus_section_id("继续写 ch2", available) == "ch2"
     assert infer_focus_section_id("接着写", available) == "ch3"
+    assert infer_focus_section_id("下一章", available) == "ch4"
+    assert infer_focus_section_id("把这章写完", available) == "ch3"
 
 
 def test_work_surface_includes_prev_tail(tmp_path: Path) -> None:

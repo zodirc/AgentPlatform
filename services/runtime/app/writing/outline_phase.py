@@ -21,13 +21,6 @@ _USER_DIRECTION = re.compile(
     r"不要.{0,8}写|勿写|忌|"
     r"像.{1,10}写|风格.{0,4}是"
 )
-_BROWSE_OPENING_RE = re.compile(r"看看|发散|几种|换个开|什么风格|先看|我要其他的|都不合适")
-_COMMIT_POND_RE = re.compile(r"按开篇候选|采用此开篇|按此开篇")
-_POND_ALREADY_NAMED_RE = re.compile(
-    r"名叫|叫[\u4e00-\u9fff]{1,8}|像.{1,10}写|风格.{0,4}是|"
-    r"凡人流|系统流|克系|灵异|探案"
-)
-_OPENING_SCALE_RE = re.compile(r"长篇|第一章|写一章|修真|玄幻|都市|仙侠|修仙")
 
 
 def _workspace_root(workspace_root: Path | None) -> Path:
@@ -134,27 +127,9 @@ def wants_opening_candidates(
     workspace_root: Path | None = None,
 ) -> bool:
     """长篇未立定近池、只给题材或说看看：先交候选，不交章。"""
-    from app.writing.opening_ponds import wants_more_ponds
-    from app.writing.outline_arc import outline_style_committed
+    from app.writing.turn_phase import picking
 
-    text = (message or "").strip()
-    if wants_more_ponds(text):
-        return True
-    if outline_style_committed(outline or ""):
-        return False
-    if not text:
-        return False
-    if _COMMIT_POND_RE.search(text):
-        return False
-    if _BROWSE_OPENING_RE.search(text):
-        return True
-    from app.writing.opening_ponds import load_committed_pond
-
-    if load_committed_pond(workspace_root=workspace_root):
-        return False
-    if _POND_ALREADY_NAMED_RE.search(text):
-        return False
-    return bool(_OPENING_SCALE_RE.search(text))
+    return picking(message, outline=outline, workspace_root=workspace_root)
 
 
 def outline_contract_ready(
@@ -235,12 +210,13 @@ def resolve_outline_phase(
     workspace_root: Path | None = None,
     manuscript_chapters: int = 0,
 ) -> dict[str, Any]:
-    from app.writing.book_scope import normalize_book_scope, resolve_book_scope
+    from app.writing.book_scope import normalize_book_scope
+    from app.writing.turn_phase import has_chapter_jobs, resolve_scope, write_intent
 
     scope = (
         normalize_book_scope(book_scope)
         if book_scope
-        else resolve_book_scope(message, outline=outline, workspace_root=workspace_root)[0]
+        else resolve_scope(message, outline=outline, workspace_root=workspace_root)
     )
     user_dir = user_specified_writing_direction(message)
     ready = outline_contract_ready(
@@ -254,6 +230,15 @@ def resolve_outline_phase(
 
     style_in_outline = outline_style_committed(outline)
 
+    jobs = has_chapter_jobs(outline)
+    prose = manuscript_chapters >= 1
+    is_picking = wants_opening_candidates(
+        message, outline=outline, workspace_root=workspace_root
+    )
+    intent = write_intent(
+        message, has_chapter_jobs_flag=jobs, has_manuscript_flag=prose
+    )
+
     if scope in {"short", "single"}:
         phase: OutlinePhase = "ready"
         note = (
@@ -261,34 +246,23 @@ def resolve_outline_phase(
             if scope == "single"
             else "短篇：直接成稿，微型弧收束；不必订长篇纲"
         )
-    elif style_in_outline or ready or manuscript_chapters >= 1:
+    elif prose:
         phase = "continue"
         note = "池子已立：按章职写这场，海先藏着；本 Turn 只交一章"
+    elif is_picking:
+        phase = "open"
+        note = (
+            "长篇开写：propose_book_candidates 出作品候选（工具内部两本独立采样，交两张书页简介）；不要写进聊天"
+        )
+    elif not jobs:
+        phase = "open"
+        note = "长篇先 update_outline 写下这一场干什么，写完停；不要先 draft_section"
+    elif intent:
+        phase = "open"
+        note = "纲已在：按章职写这一章；开篇就是章首，不要另起一场"
     else:
         phase = "open"
-        if wants_opening_candidates(message, outline=outline):
-            note = (
-                "长篇开写：propose_book_candidates 出作品候选（工具内部两本独立采样，交两张书页简介）；不要写进聊天"
-            )
-        else:
-            from app.writing.work_mode import serial_opening_compass
-
-            compass = serial_opening_compass(message=message, outline=outline)
-            fantasy = bool(
-                _FANTASY_HINT.search("\n".join(x for x in (message, outline) if x))
-            )
-            if user_dir:
-                note = (
-                    f"长篇开篇：棋盘位还是凡人；这一章{compass}，不要写终局宇宙"
-                    if fantasy
-                    else "长篇开篇：按用户方向写这场，不要写终局宇宙"
-                )
-            else:
-                note = (
-                    f"长篇开篇：{compass}；一章通常一场，长篇约一千八到四千五；不要把后面的海写进第一章"
-                    if fantasy
-                    else "长篇开篇：站住眼前的日子和人；一章通常一场，长篇约一千八到四千五；不要把后面的海写进第一章"
-                )
+        note = "纲已写入 outline.md。可以说写第一章、改纲，或先把前三章写细"
 
     labels = {"ready": "成稿", "open": "开写", "continue": "续写"}
     return {

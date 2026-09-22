@@ -19,7 +19,6 @@ _CHAPTER_ARABIC = re.compile(
     re.I,
 )
 _CHAPTER_CN = re.compile(r"第\s*([一二三四五六七八九十百零两]+)\s*章")
-_CONTINUE = re.compile(r"(接着写|继续写|往下写|续写|下一章|下章)")
 
 _CN_NUM = {
     "零": 0,
@@ -71,19 +70,18 @@ def _candidate_ids_for_number(n: int, available: list[str]) -> list[str]:
     return out
 
 
-def infer_focus_section_id(message: str, available: list[str]) -> str | None:
-    """推断 focus 章。
-    
-    参数:
-        message/available。
-    
-    返回:
-        str|None。"""
+def infer_focus_section_id(
+    message: str,
+    available: list[str],
+    *,
+    workspace_root: Path | None = None,
+    outline: str | None = None,
+) -> str | None:
+    """推断 focus 章。下一章开新节；续写本章落在已有最后一章。"""
     text = (message or "").strip()
     if not text:
         return available[-1] if available else None
 
-    # Exact id mention
     for sid in sorted(available, key=len, reverse=True):
         if re.search(rf"(?:^|\b){re.escape(sid)}(?:\b|$)", text, re.I):
             return sid
@@ -107,9 +105,20 @@ def infer_focus_section_id(message: str, available: list[str]) -> str | None:
                 return hits[0]
             return f"ch{n}"
 
-    if _CONTINUE.search(text):
-        return available[-1] if available else None
+    from app.writing.turn_phase import continue_kind, last_chapter_num, _read_outline
 
+    md = _read_outline(workspace_root, outline)
+    kind = continue_kind(
+        text,
+        has_manuscript_flag=bool(available),
+        outline=md,
+        section_ids=available,
+    )
+    if kind == "new_chapter":
+        n = last_chapter_num(available)
+        return f"ch{n + 1}" if n else "ch1"
+    if kind == "append_this":
+        return available[-1] if available else None
     return None
 
 
@@ -167,7 +176,9 @@ def build_work_surface_block(
         return text if len(text) <= budget else text[: budget - 1] + "…"
 
     available = list_section_ids(doc) if doc else []
-    focus = infer_focus_section_id(message, available)
+    focus = infer_focus_section_id(
+        message, available, workspace_root=workspace_root
+    )
 
     lines = [
         "## Work surface",

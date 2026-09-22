@@ -97,7 +97,16 @@ def build_writing_spec_block(
     )
     fresh = starting_new and manuscript_is_occupied(doc)
     ids = list_section_ids(doc) if doc and not fresh else []
-    focus = "ch1" if fresh or starting_new or not ids else (infer_focus_section_id(message, ids) or "")
+    focus = (
+        "ch1"
+        if fresh or starting_new or not ids
+        else (
+            infer_focus_section_id(
+                message, ids, workspace_root=workspace_root, outline=outline
+            )
+            or ""
+        )
+    )
     duty = extract_outline_job(outline, focus) if outline and focus else ""
     if not duty and outline and not focus:
         duty = extract_outline_job(outline, "ch1")

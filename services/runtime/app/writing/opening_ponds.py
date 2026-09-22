@@ -405,7 +405,9 @@ def should_gate_opening_choice(
             text = ""
     from app.writing.outline_phase import wants_opening_candidates
 
-    return wants_opening_candidates(message, outline=text)
+    return wants_opening_candidates(
+        message, outline=text, workspace_root=workspace_root
+    )
 
 
 def _workspace(workspace_root: Path | None = None) -> Path:
