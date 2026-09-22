@@ -258,17 +258,25 @@ def serial_opening_compass(*, message: str = "", outline: str = "") -> str:
 
 
 SERIAL_AFTER_LOCK_CRAFT = (
-    "点选之后按这本书写。落地随这本书。展开随这本书。"
-    "已选的是作品简介，不是正文。先写开篇，再写第一章；不要把简介粘进稿。"
+    "点选之后先写大纲，写完停。开篇就是将来第一章的开头，不是另一份交付。"
+    "已选的是作品简介，不是正文。不要把简介粘进稿。"
     "一章通常一场，长篇约一千八到四千五。"
 )
 
 
-def format_after_lock_craft_block(*, picking: bool, work_mode: str) -> str:
-    """成章配方只在点选之后灌；选书回合不灌。"""
+def format_after_lock_craft_block(
+    *,
+    picking: bool,
+    work_mode: str = "",
+    book_scope: str = "",
+) -> str:
+    """成章/写纲配方只在点选之后灌；选书回合不灌。按长篇尺度，不按网文模式。"""
+    del work_mode
     if picking:
         return ""
-    if normalize_work_mode(work_mode) != "web_serial":
+    from app.writing.book_scope import normalize_book_scope
+
+    if normalize_book_scope(book_scope) != "long":
         return ""
     return "## 点选之后\n" + SERIAL_AFTER_LOCK_CRAFT
 

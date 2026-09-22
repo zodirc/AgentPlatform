@@ -949,6 +949,11 @@ def prepare_writing_system_prompt(
     from app.writing.subtype import serial_subtype_block
 
     work_mode, _src = resolve_work_mode(message, workspace_root=workspace_root)
+    from app.writing.turn_phase import resolve_scope
+
+    scope = resolve_scope(
+        message, outline=outline_text, workspace_root=workspace_root
+    )
     if not author:
         extras.append(format_commitment_block(work_mode=work_mode, workspace_root=workspace_root))
     from app.writing.story_state import format_story_state_block
@@ -959,7 +964,9 @@ def prepare_writing_system_prompt(
 
     doc, _rel = load_manuscript_doc(workspace_root)
     ids = list_section_ids(doc) if doc else []
-    focus = infer_focus_section_id(message, ids) or (ids[-1] if ids else "")
+    focus = infer_focus_section_id(
+        message, ids, workspace_root=workspace_root, outline=outline_text
+    ) or (ids[-1] if ids else "")
     story_block = format_story_state_block(workspace_root=workspace_root)
     if story_block:
         extras.append(story_block)
@@ -1010,7 +1017,9 @@ def prepare_writing_system_prompt(
         from app.writing.work_mode import format_after_lock_craft_block
 
         after_lock = format_after_lock_craft_block(
-            picking=False, work_mode=work_mode
+            picking=False,
+            work_mode=work_mode,
+            book_scope=scope,
         )
         if after_lock:
             extras.append(after_lock)

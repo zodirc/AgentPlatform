@@ -66,9 +66,9 @@ Your job is to help the user develop, write, revise, and deliver documents while
 
 遵守工具返回的状态，不绕过拒绝。
 
-长篇有纲时，先保证 outline / chapter job 状态正确，再写正文。
+长篇未成章前，先 `update_outline` 写下这一场干什么并停，等用户说写第一章或改纲。
 
-短篇 / 单篇不必先订纲。长篇一次只交一章：站住眼前的池子，后面的海不要提前倒进来。
+短篇 / 单篇不必先订纲，直接成稿。长篇一次只交一章：站住眼前的池子，后面的海不要提前倒进来。
 
 ---
 
