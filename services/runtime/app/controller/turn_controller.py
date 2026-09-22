@@ -109,12 +109,17 @@ def _tools_for_turn(
     opening_choice = False
     editor_phase = False
     reread_phase = False
+    outline_wait = False
     if (plan_phase or "").strip().lower() != "planning":
         opening_choice = should_gate_opening_choice(
             message or "",
             tool_names=list(profile.tool_names),
         )
         if not opening_choice:
+            from app.writing.turn_phase import should_gate_outline_wait
+
+            outline_wait = should_gate_outline_wait(message or "")
+        if not opening_choice and not outline_wait:
             editor_phase = should_gate_editor_phase(message or "")
             if not editor_phase:
                 reread_phase = should_gate_reread_phase(message or "")
@@ -123,6 +128,7 @@ def _tools_for_turn(
         registry,
         plan_phase=plan_phase,
         opening_choice=opening_choice,
+        outline_wait=outline_wait,
         editor_phase=editor_phase,
         reread_phase=reread_phase,
     )

@@ -430,3 +430,67 @@ async def test_append_allowed_after_l0_cleared(workspace: Path) -> None:
     assert appended.get("mode") == "append"
     text = (workspace / "drafts" / "manuscript.md").read_text(encoding="utf-8")
     assert "柜台上的灰" in text
+
+
+@pytest.mark.asyncio
+async def test_draft_section_need_outline_when_long_no_jobs(workspace: Path) -> None:
+    (workspace / "outline.md").write_text(
+        "## 这本书\n\n《废脉剑声》。边荒少年。\n",
+        encoding="utf-8",
+    )
+    result = await core.draft_section(
+        "ch1",
+        "镇上的钟表铺开在河埠头，门脸窄，里面却深。" * 20,
+        turn_id=uuid4(),
+        turn_user_text="采用此开篇「废脉剑声」",
+    )
+    assert result["status"] == "error"
+    assert result["error"] == "need_outline"
+    assert not (workspace / "drafts" / "manuscript.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_draft_section_next_chapter_refuses_append(workspace: Path) -> None:
+    turn_id = uuid4()
+    body = (
+        "镇上的钟表铺开在河埠头，门脸窄，里面却深，像一只把肚子藏在黑暗里的鱼。" * 12
+        + "\n"
+        + _DUET_CHIP
+    )
+    first = await core.draft_section(
+        "ch1",
+        body,
+        turn_id=turn_id,
+        fragment="dialogue_dyad",
+        turn_user_text="写一章长篇第一章",
+    )
+    assert first["status"] == "drafted"
+    before = (workspace / "drafts" / "manuscript.md").read_text(encoding="utf-8")
+    refused = await core.draft_section(
+        "ch1",
+        "河风从门缝里进来，柜台上的灰被吹成一条细线。",
+        turn_id=turn_id,
+        fragment="mixed",
+        mode="append",
+        turn_user_text="下一章",
+    )
+    assert refused["status"] == "error"
+    assert refused["error"] == "next_chapter_not_append"
+    after = (workspace / "drafts" / "manuscript.md").read_text(encoding="utf-8")
+    assert after == before
+    assert "柜台上的灰" not in after
+
+
+@pytest.mark.asyncio
+async def test_update_outline_awaiting_direction_without_write_intent(
+    workspace: Path,
+) -> None:
+    job = "井底试药，把简介里这场写完，不要另起一场。"
+    md = f"## 这本书\n《废脉剑声》。\n\n## 第一章\n{job}\n"
+    waiting = await core.update_outline(md, turn_user_text="采用此开篇「废脉剑声」")
+    assert waiting.get("awaiting_direction") is True
+    assert "纲已写入" in str(waiting.get("summary") or "")
+    going = await core.update_outline(
+        md, turn_user_text="采用此开篇「废脉剑声」。写第一章", force=True
+    )
+    assert going.get("awaiting_direction") is not True

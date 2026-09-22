@@ -1333,6 +1333,14 @@ OPENING_CHOICE_TOOL_ALLOWLIST = frozenset(
     }
 )
 
+OUTLINE_WAIT_TOOL_ALLOWLIST = frozenset(
+    {
+        "update_outline",
+        "read_file",
+        "stub_echo",
+    }
+)
+
 EDITOR_PHASE_TOOL_ALLOWLIST = frozenset(
     {
         "read_file",
@@ -1368,10 +1376,11 @@ def tool_scope(
     *,
     plan_phase: str | None = None,
     opening_choice: bool = False,
+    outline_wait: bool = False,
     editor_phase: bool = False,
     reread_phase: bool = False,
 ) -> list[ToolSpec]:
-    """按场景 Profile（及可选 Plan 相位 / 开篇点选 / 编辑 / 回读）裁剪本 Turn 可用工具。
+    """按场景 Profile（及可选 Plan 相位 / 开篇点选 / 大纲等人 / 编辑 / 回读）裁剪本 Turn 可用工具。
 
     English: Build the per-turn ToolSpec list from ScenarioProfile.tool_names and
     approval_overrides, then apply plan-phase rules:
@@ -1379,8 +1388,10 @@ def tool_scope(
     - ``executing`` → waive approval for on-write tools (user already approved the plan).
     - ``opening_choice`` → allowlist only (propose_book_candidates / stub_echo);
       ignored when ``planning`` (Plan mode wins).
+    - ``outline_wait`` → allowlist update_outline / read_file; after opening_choice.
     - ``editor_phase`` / ``reread_phase`` → writing role allowlists; ignored when
-      planning or opening_choice. Priority: planning > opening_choice > editor > reread.
+      planning or opening_choice. Priority: planning > opening_choice > outline_wait
+      > editor > reread.
 
     Always ensures ``stub_echo`` is present for ops/debug probes. Does not register
     new handlers — only selects and ``replace()``s approval flags from
@@ -1392,6 +1403,7 @@ def tool_scope(
         plan_phase: 计划相位。``planning`` 时仅清单工具；``executing`` 时对写盘免审。
             为 ``None`` 时按 Profile 默认审批策略。
         opening_choice: 开篇近池点选；仅卡片工具。
+        outline_wait: 长篇点选后等人写纲；仅大纲工具。
         editor_phase: 编辑 Turn；只读 + editor_report。
         reread_phase: 回读 Turn；读工具 + reread_book / author_state / retcon。
 
@@ -1414,6 +1426,12 @@ def tool_scope(
             and registry.get("propose_book_candidates") is not None
         ):
             names.append("propose_book_candidates")
+    elif outline_wait:
+        names = [n for n in names if n in OUTLINE_WAIT_TOOL_ALLOWLIST]
+        if "update_outline" not in names and registry.get("update_outline") is not None:
+            names.append("update_outline")
+        if "read_file" not in names and registry.get("read_file") is not None:
+            names.append("read_file")
     elif editor_phase:
         names = [n for n in names if n in EDITOR_PHASE_TOOL_ALLOWLIST]
         if "editor_report" not in names and registry.get("editor_report") is not None:

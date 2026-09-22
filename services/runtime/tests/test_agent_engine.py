@@ -859,3 +859,47 @@ async def test_propose_retcon_stops_turn() -> None:
     state = _state()
     await engine.run(state)
     assert state.termination_reason == "retcon_awaiting_consent"
+
+
+@pytest.mark.asyncio
+async def test_update_outline_stops_when_awaiting_direction() -> None:
+    async def handler(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "status": "ok",
+            "awaiting_direction": True,
+            "summary": "纲已写入 outline.md。可以说写第一章、改纲，或先把前三章写细。",
+        }
+
+    spec = ToolSpec(
+        name="update_outline",
+        description="outline",
+        parameters={"type": "object", "properties": {"content": {"type": "string"}}},
+        handler=handler,
+    )
+
+    async def write_event(*, event_type: str, payload: dict, step_index: int) -> None:
+        return None
+
+    engine = AgentEngine(
+        gateway=FakeGateway(
+            [
+                ModelResponse(
+                    tool_calls=[
+                        {
+                            "id": "t1",
+                            "name": "update_outline",
+                            "input": {"content": "# 第一章\n井底试药。"},
+                        }
+                    ]
+                )
+            ],
+            one_per_stream=True,
+        ),
+        tools=[spec],
+        system_prompt="sys",
+        write_event=write_event,
+        check_cancel=AsyncMock(return_value=(False, False)),
+    )
+    state = _state()
+    await engine.run(state)
+    assert state.termination_reason == "outline_awaiting_direction"

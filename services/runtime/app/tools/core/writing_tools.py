@@ -623,12 +623,23 @@ async def draft_section(
         "layout": layout,
     }
     turn_user_text = str(_kwargs.get("turn_user_text") or "")
+    from app.writing.turn_phase import (
+        draft_need_outline_error,
+        draft_next_chapter_append_error,
+    )
+
+    blocked_outline = draft_need_outline_error(turn_user_text)
+    if blocked_outline:
+        return blocked_outline
     work_mode = _draft_work_mode(turn_user_text)
     regime = _draft_regime(turn_user_text, section_id=section_id)
     author = regime == "author"
     archived: list[str] = []
     occupy_fresh = False
     mode = _parse_draft_mode(_kwargs.get("mode"))
+    blocked_next = draft_next_chapter_append_error(turn_user_text, mode=mode)
+    if blocked_next:
+        return blocked_next
     from app.writing.commitment import fulfillment_facts, gate_draft_commitment, save_commitment
 
     commit = None
@@ -1694,6 +1705,16 @@ async def update_outline(
         prev = str(result.get("summary") or summary)
         if "卷问题" not in prev:
             result["summary"] = f"{prev}；纲里 3 章已经写死了事件；这本书的卷问题还没定。"
+    from app.writing.turn_phase import (
+        OUTLINE_AWAIT_HINT,
+        should_await_outline_direction,
+    )
+
+    if should_await_outline_direction(user_text, outline=final):
+        result["awaiting_direction"] = True
+        prev = str(result.get("summary") or summary)
+        if "纲已写入" not in prev:
+            result["summary"] = f"{prev}；{OUTLINE_AWAIT_HINT}"
     return result
 
 

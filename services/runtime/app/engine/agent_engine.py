@@ -2032,6 +2032,13 @@ class AgentEngine:
         ):
             state.termination_reason = "opening_ponds_retry_exhausted"
             return "TERMINATE"
+        if (
+            tool_name == "update_outline"
+            and not is_error
+            and result.get("awaiting_direction")
+        ):
+            state.termination_reason = "outline_awaiting_direction"
+            return "TERMINATE"
         return _tool_batch_outcome(str(summary))
 
     def _ingest_evidence(self, tool_name: str, result: dict[str, Any]) -> None:
