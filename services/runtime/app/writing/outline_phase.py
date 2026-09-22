@@ -262,7 +262,10 @@ def resolve_outline_phase(
         note = "纲已在：按章职写这一章；开篇就是章首，不要另起一场"
     else:
         phase = "open"
-        note = "纲已写入 outline.md。可以说写第一章、改纲，或先把前三章写细"
+        note = (
+            "纲已写入 outline.md。主线写人怎么变；近处这一章要有两三句章职。"
+            "可以说写第一章、改纲，或先把后几章写细"
+        )
 
     labels = {"ready": "成稿", "open": "开写", "continue": "续写"}
     return {

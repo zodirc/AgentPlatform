@@ -49,7 +49,10 @@ STYLE_CONTRACT_OUTLINE_TEMPLATE = """## 这本书（长篇·眼前这一池）
 换人换事就是另一本书。
 
 ## 主线一句话
-（往哪走即可。顶点可以后补。）
+人怎么变，往哪走。两三句。顶点可以后补。
+
+## 近处
+眼前这一章写两三句：这场要干什么、卡在哪、章末落在哪。后面两三章可先各留一句，写到那章再补成章职。再远只留备忘。
 """
 
 OPENING_TRILOGY_OUTLINE_TEMPLATE = """## 这本书（长篇·眼前这一池）
@@ -58,15 +61,11 @@ OPENING_TRILOGY_OUTLINE_TEMPLATE = """## 这本书（长篇·眼前这一池）
 
 换人换事就是另一本书。
 
-## 开篇几章（纲上备忘，不是正文交卷清单）
-
-每章两三句这场干什么。前几章还在同一池子里往前，不要把后面的海写进来。
-
 ## 主线一句话
-（往哪走即可。顶点可以后补。）
+人怎么变，往哪走。两三句。顶点可以后补。
 
-## 章节备忘
-（ch4 起写这场推进什么即可）
+## 近处章节
+先写眼前这一章，两三句：这场要干什么、卡在哪、章末落在哪。后面两三章可先一句，写到再补成章职。再远的章只留一句备忘。前几章还在同一池子里，不要把后面的海写进来。
 """
 
 
@@ -270,10 +269,10 @@ def opening_trilogy_fields(md: str, user_text: str) -> dict[str, Any]:
         len(jobs.get(sid, "").strip()) >= _TRILOGY_MIN_CHARS for sid in ("ch1", "ch2", "ch3")
     )
     if not _OPENING_TRILOGY_HEAD.search(text) and not trilogy_jobs_ok:
-        notes.append("缺 ch1 章纲（几句这场干什么即可；ch2/ch3 可后补）。")
+        notes.append("缺 ch1 章纲（两三句：这场要干什么、卡在哪、章末落在哪；后面的章可先一句）。")
     blob = jobs.get("ch1", "")
     if len(blob.strip()) < _TRILOGY_MIN_CHARS:
-        notes.append("缺 ch1 章纲（几句这场干什么即可）。")
+        notes.append("缺 ch1 章纲（两三句：这场要干什么、卡在哪、章末落在哪）。")
     if not notes:
         return {}
     return {
@@ -413,7 +412,7 @@ def outline_arc_fields(md: str, user_text: str) -> dict[str, Any]:
     if not has_spine:
         out["outline_no_spine"] = True
         notes.append(
-            "未点明主线（故事往哪走即可，跟这本走）。"
+            "未点明主线（人怎么变、往哪走，顶点可后补）。"
         )
     if not peak_chapters:
         out["outline_no_peak"] = True

@@ -624,6 +624,7 @@ async def draft_section(
     }
     turn_user_text = str(_kwargs.get("turn_user_text") or "")
     from app.writing.turn_phase import (
+        draft_need_chapter_job_error,
         draft_need_outline_error,
         draft_next_chapter_append_error,
     )
@@ -631,6 +632,9 @@ async def draft_section(
     blocked_outline = draft_need_outline_error(turn_user_text)
     if blocked_outline:
         return blocked_outline
+    blocked_job = draft_need_chapter_job_error(turn_user_text)
+    if blocked_job:
+        return blocked_job
     work_mode = _draft_work_mode(turn_user_text)
     regime = _draft_regime(turn_user_text, section_id=section_id)
     author = regime == "author"

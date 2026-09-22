@@ -794,7 +794,7 @@ def seed_outline_from_pond(
             block += f"\n简介：{opening}\n"
     text = (existing or "").strip()
     if not text:
-        new = block + "\n## 主线一句话\n（往哪走即可。顶点可以后补。）\n"
+        new = block + "\n## 主线一句话\n（人怎么变，往哪走。顶点可以后补。）\n"
     elif re.search(r"^#{1,3}\s*这本书", text, re.M):
         new = re.sub(
             r"^#{1,3}\s*这本书[^\n]*\n(?:.*?)(?=^#{1,3}\s|\Z)",

@@ -40,13 +40,19 @@ _NOT_JOB_HEAD_RE = re.compile(
 )
 _CH_ID_RE = re.compile(r"^ch(\d+)$", re.I)
 OUTLINE_AWAIT_HINT = (
-    "纲已写入 outline.md。可以说写第一章、改纲，或先把前三章写细。"
+    "纲已写入 outline.md。主线写人怎么变；近处这一章要有两三句章职。"
+    "可以说写第一章、改纲，或先把后几章写细。"
 )
+NEAR_JOB_MIN = 40
 NEED_OUTLINE_SUMMARY = (
     "长篇还没有章职。先 update_outline 写下这一场干什么，再 draft_section。"
 )
 NEXT_CHAPTER_NOT_APPEND = (
     "下一章用新的 section_id 写，不要 mode=append 接到上一章末尾。"
+)
+NEED_CHAPTER_JOB = (
+    "这一章还没有章职。先在大纲里写两三句：这场要干什么、卡在哪、章末落在哪，再写正文。"
+    "一句备忘不能开写。"
 )
 
 
@@ -114,13 +120,17 @@ def has_chapter_jobs(outline: str = "") -> bool:
     return False
 
 
-def has_next_chapter_job(outline: str, last_n: int) -> bool:
+def chapter_job_visible(outline: str, section_id: str) -> int:
     from app.writing.outline_arc import extract_outline_job
 
-    nxt = f"ch{last_n + 1}" if last_n else "ch2"
-    job = extract_outline_job(outline or "", nxt)
+    job = extract_outline_job(outline or "", section_id)
     cleaned = _JOB_STUB_RE.sub("", job or "")
-    return visible_chars(cleaned) >= 16
+    return visible_chars(cleaned)
+
+
+def has_next_chapter_job(outline: str, last_n: int) -> bool:
+    nxt = f"ch{last_n + 1}" if last_n else "ch2"
+    return chapter_job_visible(outline, nxt) >= NEAR_JOB_MIN
 
 
 def write_intent(
@@ -293,6 +303,52 @@ def draft_need_outline_error(
         "status": "error",
         "error": "need_outline",
         "summary": NEED_OUTLINE_SUMMARY,
+    }
+
+
+def _opening_section_id(message: str, snap: dict[str, Any]) -> str:
+    """要新开的那一章。章尾续写、以及还没有大纲的探测稿，返回空。"""
+    if snap.get("continue_kind") == "append_this" or snap.get("picking"):
+        return ""
+    if snap.get("scope") != "long":
+        return ""
+    ids = list(snap.get("section_ids") or [])
+    outline = str(snap.get("outline") or "")
+    from app.writing.focus import infer_focus_section_id
+
+    focus = infer_focus_section_id(message, ids, outline=outline) or ""
+    if snap.get("continue_kind") == "new_chapter":
+        if focus and focus not in ids:
+            return focus
+        n = last_chapter_num(ids)
+        return f"ch{n + 1}" if n else "ch2"
+    if snap.get("has_manuscript") and focus and focus not in ids:
+        return focus
+    if (
+        snap.get("write_intent")
+        and not snap.get("has_manuscript")
+        and outline.strip()
+    ):
+        return focus or "ch1"
+    return ""
+
+
+def draft_need_chapter_job_error(
+    message: str = "",
+    *,
+    workspace_root: Path | None = None,
+) -> dict[str, Any] | None:
+    snap = snapshot(message, workspace_root=workspace_root)
+    sid = _opening_section_id(message, snap)
+    if not sid:
+        return None
+    if chapter_job_visible(str(snap.get("outline") or ""), sid) >= NEAR_JOB_MIN:
+        return None
+    return {
+        "status": "error",
+        "error": "need_chapter_job",
+        "section_id": sid,
+        "summary": NEED_CHAPTER_JOB,
     }
 
 

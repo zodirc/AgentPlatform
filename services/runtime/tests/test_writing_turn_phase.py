@@ -8,6 +8,7 @@ from app.writing.outline_phase import resolve_outline_phase, wants_opening_candi
 from app.writing.turn_phase import (
     OUTLINE_AWAIT_HINT,
     continue_kind,
+    draft_need_chapter_job_error,
     draft_need_outline_error,
     has_chapter_jobs,
     picking,
@@ -130,7 +131,7 @@ def test_next_chapter_not_append() -> None:
 def test_bare_continue_uses_next_outline_job() -> None:
     outline = (
         "# 第一章\n井底试药，把简介里这场写完。\n\n"
-        "# 第二章\n上井之后看见别人的井，还要把这场写满到能站住。\n"
+        "# 第二章\n上井之后看见别人的井，少年要把这场写满到能站住，章末仍停在井口，风还没停，他不打算回去。\n"
     )
     available = ["ch1"]
     assert (
@@ -143,6 +144,71 @@ def test_bare_continue_uses_next_outline_job() -> None:
         == "new_chapter"
     )
     assert infer_focus_section_id("接着写", available, outline=outline) == "ch2"
+
+
+_FAT_JOB = (
+    "井底少年要把今晚这场试药写完，旧伤让他不敢下第二趟，章末人还坐在井沿上喘气，药味不散。"
+)
+
+
+def test_next_chapter_needs_a_near_job(tmp_path: Path, monkeypatch) -> None:
+    from app.settings import settings
+    from app.writing.manuscript import upsert_section
+
+    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
+    drafts = tmp_path / "drafts"
+    drafts.mkdir()
+    (drafts / "manuscript.md").write_text(
+        upsert_section("", "ch1", "井底已经写过一场。"),
+        encoding="utf-8",
+    )
+    thin = "## 这本书\n《废脉剑声》。\n\n## 第一章\n井底试药。\n\n## 第二章\n上井看看。\n"
+    (tmp_path / "outline.md").write_text(thin, encoding="utf-8")
+    err = draft_need_chapter_job_error("下一章", workspace_root=tmp_path)
+    assert err and err["error"] == "need_chapter_job"
+    assert err["section_id"] == "ch2"
+    assert (
+        continue_kind(
+            "接着写",
+            has_manuscript_flag=True,
+            outline=thin,
+            section_ids=["ch1"],
+        )
+        == "append_this"
+    )
+    fat = (
+        "## 这本书\n《废脉剑声》。人怎么变：从怕井到肯再下一次。\n\n"
+        f"## 第二章\n{_FAT_JOB}\n"
+    )
+    (tmp_path / "outline.md").write_text(fat, encoding="utf-8")
+    assert draft_need_chapter_job_error("下一章", workspace_root=tmp_path) is None
+    assert draft_need_chapter_job_error("写第二章", workspace_root=tmp_path) is None
+
+
+def test_first_chapter_thin_job_is_not_enough(tmp_path: Path, monkeypatch) -> None:
+    from app.settings import settings
+
+    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
+    (tmp_path / "outline.md").write_text(
+        "## 这本书\n《废脉剑声》。\n\n## 第一章\n井底试药，把这场写完。\n",
+        encoding="utf-8",
+    )
+    err = draft_need_chapter_job_error("写第一章", workspace_root=tmp_path)
+    assert err and err["error"] == "need_chapter_job"
+    assert err["section_id"] == "ch1"
+    (tmp_path / "outline.md").write_text(
+        f"## 这本书\n《废脉剑声》。\n\n## 主线一句话\n人怎么变，从怕井到肯再下去。\n\n"
+        f"## 第一章\n{_FAT_JOB}\n",
+        encoding="utf-8",
+    )
+    assert draft_need_chapter_job_error("写第一章", workspace_root=tmp_path) is None
+    assert draft_need_chapter_job_error("写一篇都市故事", workspace_root=tmp_path) is None
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    assert (
+        draft_need_chapter_job_error("写一章长篇第二章 作者模式", workspace_root=bare)
+        is None
+    )
 
 
 def test_short_skips_picking() -> None:
