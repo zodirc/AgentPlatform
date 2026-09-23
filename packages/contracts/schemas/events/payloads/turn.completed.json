@@ -16,7 +16,8 @@
         "plan_awaiting_consent",
         "opening_ponds_awaiting_choice",
         "opening_ponds_retry_exhausted",
-        "retcon_awaiting_consent"
+        "retcon_awaiting_consent",
+        "outline_awaiting_direction"
       ]
     },
     "step_count": { "type": "integer", "minimum": 0 },

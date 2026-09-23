@@ -3,6 +3,10 @@
 版本规则见 [README.md](README.md) §版本化。每次改动 `schemas/`、`openapi/`、
 `python/agent_contracts` 时,在此追加一条并按规则调整版本号。
 
+## 0.3.22 — 2026-09-22
+
+- `turn.completed.termination_reason` 增补 `outline_awaiting_direction`（长篇大纲写完后停转，等用户说写第一章或改纲）。向后兼容。
+
 ## 2026-09-17 runtime
 
 - `opening.ponds` items `maxItems` 4→6，`opening` `maxLength` 400→800。给独立采样更长的 pitch，并允许最多 6 条载荷。旧载荷 2～4 条仍合法。

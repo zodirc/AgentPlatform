@@ -309,6 +309,14 @@ def test_terminal_turn_payloads_allow_post_turn_jobs() -> None:
         schemas_dir=SCHEMAS_DIR,
     )
     validate_event_payload(
+        "turn.completed",
+        {
+            "summary": "纲已写入，等用户说写第一章或改纲",
+            "termination_reason": "outline_awaiting_direction",
+        },
+        schemas_dir=SCHEMAS_DIR,
+    )
+    validate_event_payload(
         "turn.failed",
         {
             "termination_reason": "fatal_error",
