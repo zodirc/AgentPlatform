@@ -130,10 +130,7 @@ def test_local_beats_go_in_volatile_after_spec(tmp_path: Path) -> None:
         "写一份生活的文章",
         workspace_root=tmp_path,
     )
-    assert "## Local beats" in pin.volatile_block
-    spec_at = pin.volatile_block.find("## Writing spec")
-    beats_at = pin.volatile_block.find("## Local beats")
-    assert spec_at != -1 and beats_at != -1 and spec_at < beats_at
+    assert "## Local beats" not in pin.volatile_block
     assert "## Local beats" not in pin.prompt
     assert "Local beats" not in extract_cards_block(pin.volatile_block)
 

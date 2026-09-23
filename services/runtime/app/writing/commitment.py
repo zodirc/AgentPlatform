@@ -42,7 +42,7 @@ COMMIT_MIN_VISIBLE = 800
 DRAFT_COMMITMENT_PROPERTY: dict[str, Any] = {
     "type": "object",
     "description": (
-        "Required on chapter-length upsert (≥800 visible chars). "
+        "Optional. Not a gate. "
         "Slots: time_order, subplot, resolution_agency, moral_polarity, "
         "affect_mode, locations. Fill from what this chapter actually does."
     ),
@@ -263,9 +263,19 @@ def gate_draft_commitment(
     raw: Any,
     workspace_root: Path,
 ) -> tuple[dict[str, Any] | None, dict[str, str] | None]:
-    """长章 upsert 才硬要承诺。append / rewrite_window / 短稿不挡。"""
+    """长章 upsert 才硬要承诺。append / rewrite_window / 短稿不挡。corrected 不挡。"""
+    from app.writing.architecture import commitment_hard_gate
     from app.writing.text_metrics import visible_chars
 
+    if not commitment_hard_gate():
+        if isinstance(raw, dict) and visible_chars(content) >= COMMIT_MIN_VISIBLE and mode not in {
+            "append",
+            "rewrite_window",
+        }:
+            commit = normalize_commitment(raw)
+            save_commitment(section_id, commit, workspace_root=workspace_root)
+            return None, commit
+        return None, None
     if mode in {"append", "rewrite_window"}:
         return None, None
     if visible_chars(content) < COMMIT_MIN_VISIBLE:

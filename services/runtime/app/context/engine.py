@@ -662,7 +662,9 @@ def _system_message(system_prompt: str) -> dict[str, Any]:
 
 def _volatile_user_message(volatile_context: str) -> dict[str, Any] | None:
     """将 volatile 写作上下文包装为带 ``[writing_context]`` 前缀的 user 消息。"""
-    text = (volatile_context or "").strip()
+    from app.writing.architecture import strip_leaked_control
+
+    text = strip_leaked_control((volatile_context or "").strip())
     if not text:
         return None
     if not text.startswith("[writing_context]"):

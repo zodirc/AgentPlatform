@@ -50,7 +50,8 @@ def test_cold_start_spec_plus_voice_skips_shop_attractor(tmp_path: Path, monkeyp
 
     monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
     spec = build_writing_spec_block("写一篇故事", workspace_root=tmp_path)
-    assert "fragment: `mixed`" in spec
+    assert "book_scope: `single`" in spec
+    assert "fragment:" not in spec
     assert "worldview_texture" not in spec
     pin = prepare_writing_system_prompt(
         "You are a writing assistant.",
@@ -64,7 +65,8 @@ def test_cold_start_spec_plus_voice_skips_shop_attractor(tmp_path: Path, monkeyp
 
 def test_long_opening_without_outline_spec_is_plot_progress_not_texture() -> None:
     spec = build_writing_spec_block("写一章长篇玄幻小说里的第一章")
-    assert "fragment: `plot_progress`" in spec
+    assert "book_scope: `long`" in spec
+    assert "fragment:" not in spec
     assert "worldview_texture" not in spec
     assert _hits(spec) == []
     assert "另起人与事" in spec
@@ -83,14 +85,14 @@ def test_standing_priors_do_not_force_same_book_under_new_coat() -> None:
     assert "新信息、新对手、新代价、新抉择" not in system
     assert "看见代价" not in system
     assert "由谁承担" not in system
-    assert "这一本书自己的身份" in system
+    assert "不解释计划" in system
     assert " contract" not in system
     assert "contract" not in system.lower()
     assert "不是换皮" not in system
-    assert "类型不是模板" in system
+    assert "小说是人物" not in system
     assert "读者追悬念、冲突、信息差、变强台阶" not in voice
-    assert "眼前的池子" in voice
-    assert "一千八" in voice
+    assert "不解释计划" in voice
+    assert "台阶" not in voice
     assert "得到了什么" not in voice
     assert "前三分之一" not in voice
     assert "烟火" not in voice
@@ -119,7 +121,7 @@ def test_standing_priors_do_not_force_same_book_under_new_coat() -> None:
     assert "沈砚" not in STYLE_CONTRACT_OUTLINE_TEMPLATE
     assert "查父失踪" not in system
     assert "水路渡口+灵灯" not in system
-    assert "一千八" in SERIAL_AFTER_LOCK_CRAFT
+    assert "三千" in SERIAL_AFTER_LOCK_CRAFT
     choice = (root / "templates" / "opening_choice.md").read_text(encoding="utf-8")
     assert "pitch" in choice
     assert "propose_book_candidates" in choice
@@ -138,8 +140,8 @@ def test_urban_cultivation_opening_spec_asks_early_gain(tmp_path: Path, monkeypa
         workspace_root=tmp_path,
     )
     assert "work_mode: `web_serial`" in spec
-    assert "候选" in spec
-    assert "独立采样" in spec
+    assert "候选" not in spec
+    assert "独立采样" not in spec
     assert "两本不同的书" not in spec
     assert "互不换皮" not in spec
     assert "发觉/系统/过日子" not in spec

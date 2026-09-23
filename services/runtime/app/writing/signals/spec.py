@@ -162,6 +162,25 @@ def build_writing_spec_block(
         manuscript_chapters=0 if fresh else len(ids),
     )
 
+    from app.writing.architecture import writer_sees_control_plane
+
+    if not writer_sees_control_plane():
+        phase = str(phase_info.get("outline_phase") or "open")
+        scope_tail = " · 手动" if scope_source == "user" else ""
+        mode_tail = "（手动）" if mode_source == "user" else ""
+        quiet = [
+            "## 作品",
+            f"- book_scope: `{scope}`（{scope_label}{scope_tail}）",
+            f"- work_mode: `{work_mode}`{mode_tail}",
+            f"- outline_phase: `{phase}`",
+        ]
+        if focus:
+            quiet.append(f"- focus: `{focus}`")
+        if not outline_style_committed(outline) or starting_new:
+            quiet.append("- 新篇另起人与事")
+        text = "\n".join(quiet)
+        return text if len(text) <= 620 else text[:619] + "…"
+
     lines = [
         "## Writing spec",
         f"- book_scope: `{scope}`（{scope_label} · {scope_note}）",

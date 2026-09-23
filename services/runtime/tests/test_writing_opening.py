@@ -50,7 +50,10 @@ def test_opening_skips_later_chapters() -> None:
     assert opening_fields(text, "ch2") == {}
 
 
-def test_opening_receipt_once() -> None:
+def test_opening_receipt_once(monkeypatch) -> None:
+    from app.settings import settings
+
+    monkeypatch.setattr(settings, "writing_architecture", "legacy")
     uid = uuid4()
     state = TurnState(
         turn_id=uid,

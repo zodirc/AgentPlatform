@@ -52,20 +52,20 @@ def test_draft_quota_by_scope() -> None:
 def test_spec_block_short_vs_long() -> None:
     short = build_writing_spec_block("写一篇短篇小说")
     assert "book_scope: `short`" in short
-    assert "微型弧" in short
+    assert "微型弧" not in short
     assert "开篇窗口" not in short
     assert "开篇三章" not in short
 
     long = build_writing_spec_block("写一章长篇玄幻小说里的第一章")
     assert "book_scope: `long`" in long
     assert "outline_phase: `open`" in long
-    assert "开篇" in long or "开写" in long
-    assert "候选" in long or "眼前的日子" in long or "海" in long
+    assert "海" not in long
 
 
 def test_spec_climax_line() -> None:
     spec = build_writing_spec_block("写高潮章，摊牌")
-    assert "高潮" in spec
+    assert "book_scope" in spec
+    assert "高潮" not in spec
 
 
 def test_resolve_role_short_mixed() -> None:
@@ -87,7 +87,7 @@ def test_scope_spec_mid_and_climax() -> None:
     )
     assert "眼前这场" in opening
     assert "前三分之一" not in opening
-    assert "一千八" in opening
+    assert "三千" in opening
     picking = scope_spec_line(
         "long",
         position="opening",
@@ -106,12 +106,11 @@ def test_scope_spec_mid_and_climax() -> None:
 def test_short_spec_is_ready_not_open() -> None:
     spec = build_writing_spec_block("写一篇故事")
     assert "outline_phase: `ready`" in spec
-    assert "订长篇纲" in spec or "近池身份" in spec
     spec = build_writing_spec_block("写一篇故事")
     assert "book_scope: `single`" in spec
     assert "这一场" not in spec
     assert "主项" not in spec
-    assert "评分切片" in spec
+    assert "评分切片" not in spec
     assert "world_rule" not in spec
     assert "live_character" not in spec
     assert "worldview_texture" not in spec
@@ -123,7 +122,7 @@ def test_short_spec_is_ready_not_open() -> None:
 def test_spec_long_opening_without_outline_is_plot_progress() -> None:
     spec = build_writing_spec_block("写一章长篇玄幻小说里的第一章")
     assert "book_scope: `long`" in spec
-    assert "fragment: `plot_progress`" in spec
+    assert "fragment:" not in spec
     assert "worldview_texture" not in spec
     assert "这一场" not in spec
     assert "格局" not in spec

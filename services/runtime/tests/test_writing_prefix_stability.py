@@ -156,7 +156,7 @@ def test_wn3_stable_system_excludes_volatile_and_assemble_postposes(tmp_path: Pa
     assert vtext.startswith("[writing_context]")
     assert "平台旁注" in vtext.split("\n", 2)[1]
     assert "Writing cards" in vtext
-    assert "## Writing spec" in vtext
+    assert "## 作品" in vtext
 
 
 def test_writing_spec_is_volatile_not_system(tmp_path: Path) -> None:
@@ -170,10 +170,9 @@ def test_writing_spec_is_volatile_not_system(tmp_path: Path) -> None:
         "写第一章 严格模式",
         workspace_root=tmp_path,
     )
-    assert "## Writing spec" in pin.volatile_block
-    assert "worldview_texture" in pin.volatile_block
-    assert "propose_patch" in pin.volatile_block
-    assert "勿" not in pin.volatile_block.split("## Writing spec", 1)[-1].split("##", 1)[0]
+    assert "## 作品" in pin.volatile_block
+    assert "worldview_texture" not in pin.volatile_block
+    assert "propose_patch" not in pin.volatile_block.split("## 作品", 1)[-1]
     assert "## Writing spec" not in pin.prompt
     assert "Writing spec" not in extract_cards_block(pin.volatile_block)
 
@@ -186,7 +185,7 @@ def test_xuanhuan_diverge_styles_no_longer_injected(tmp_path: Path) -> None:
     )
     assert "## 题材发散" not in pin.volatile_block
     assert "都市怪谈" not in pin.volatile_block
-    assert "## Narrative commitment" in pin.volatile_block
+    assert "## Narrative commitment" not in pin.volatile_block
     assert "outline_phase: `open`" in pin.volatile_block
 
 

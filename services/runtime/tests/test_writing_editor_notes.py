@@ -49,4 +49,4 @@ def test_editor_notes_only_enter_next_turn(tmp_path: Path) -> None:
         workspace_root=tmp_path,
     )
     assert "## Editor notes" not in pin_same.volatile_block
-    assert "## Editor notes" in pin_next.volatile_block
+    assert "## Editor notes" not in pin_next.volatile_block

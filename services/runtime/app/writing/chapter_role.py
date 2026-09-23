@@ -228,6 +228,10 @@ def chapter_kind_obligation(
     message: str = "",
     outline: str = "",
 ) -> str:
+    from app.writing.architecture import writer_sees_control_plane
+
+    if not writer_sees_control_plane():
+        return ""
     k = normalize_chapter_kind(kind)
     pos = normalize_chapter_position(position)
     mode = normalize_work_mode(work_mode)
@@ -258,7 +262,7 @@ def chapter_kind_obligation(
                 )
             return (
                 "这场偏站住这个人：读者先看见他眼下怎么过；"
-                "一章通常一场，长篇约一千八到四千五。后面的海（境界总纲、全书规则、结局）不要写进这一章。"
+                "一章通常一场，长篇约三千到五千个可见字。后面的海（境界总纲、全书规则、结局）不要写进这一章。"
                 "物件从他站着的地方长出来。"
                 + extra
             )

@@ -184,7 +184,8 @@ def test_builtin_voice_when_no_style_inventory(tmp_path: Path) -> None:
     assert "却说" not in sections["Samples"]
     assert not (sections.get("Don't") or "").strip()
     assert "经典文学" in sections["Voice"] or "现代白话" in sections["Voice"]
-    assert "随这场戏" in sections["Do"] or "三要素" in sections["Do"]
+    assert "不解释计划" in sections["Voice"]
+    assert "三要素" not in sections["Do"]
     assert "长篇 ch1" not in sections["Do"]
     assert "ch1 环境" not in sections["Do"]
     style_card = next(c for c in pin.cards if c.kind == "style")

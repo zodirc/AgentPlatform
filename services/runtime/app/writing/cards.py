@@ -725,8 +725,16 @@ def _load_builtin_voice(
     if not body.strip():
         return None
     body = apply_style_meta_for_pin(body.strip(), meta)
-    if rotate_samples:
+    from app.writing.architecture import public_exemplar_rotation
+
+    if rotate_samples and public_exemplar_rotation():
         body = rotate_builtin_samples(body, workspace_root=workspace_root)
+    elif not public_exemplar_rotation():
+        body = merge_style_section(
+            body,
+            "Samples",
+            "用户认可的本书原文优先。平台不自动轮换公版。",
+        )
     return WritingCard(
         path=builtin_path,
         title=_card_title(path, meta, body) or fallback_title,
@@ -954,7 +962,9 @@ def prepare_writing_system_prompt(
     scope = resolve_scope(
         message, outline=outline_text, workspace_root=workspace_root
     )
-    if not author:
+    from app.writing.architecture import writer_sees_control_plane
+
+    if not author and writer_sees_control_plane():
         extras.append(format_commitment_block(work_mode=work_mode, workspace_root=workspace_root))
     from app.writing.editor_notes import format_editor_notes_block
     from app.writing.author_notes import format_author_notes_block
@@ -977,7 +987,7 @@ def prepare_writing_system_prompt(
         if taste_block:
             extras.append(taste_block)
     editor_block = format_editor_notes_block(focus=focus, workspace_root=workspace_root)
-    if editor_block:
+    if editor_block and writer_sees_control_plane():
         extras.append(editor_block)
     if not author:
         author_block = format_author_notes_block(workspace_root=workspace_root)
@@ -1017,8 +1027,12 @@ def prepare_writing_system_prompt(
             work_mode=work_mode,
             book_scope=scope,
         )
-        if after_lock:
+        if after_lock and writer_sees_control_plane():
             extras.append(after_lock)
+        elif scope == "long":
+            extras.append(
+                "## 点选之后\n已选的是作品简介，不是正文。不要把简介粘进稿。"
+            )
     from app.writing.signals.beats import format_local_beats_block
 
     spec_frag = None
@@ -1029,7 +1043,7 @@ def prepare_writing_system_prompt(
     beats = format_local_beats_block(
         message, workspace_root=workspace_root, fragment=spec_frag
     )
-    if beats:
+    if beats and writer_sees_control_plane():
         extras.append(beats)
     from app.writing.reread import should_gate_editor_phase, should_gate_reread_phase
 

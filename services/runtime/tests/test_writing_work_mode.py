@@ -47,7 +47,7 @@ def test_default_opening_duty_differs_by_mode() -> None:
     web = default_opening_duty("web_serial")
     assert "机构" in lit or "可先站" in lit
     assert "这一场" in web or "眼前这场" in web
-    assert "一千八" in web
+    assert "三千" in web
     assert "ch2" not in web and "ch3" not in web
     hook = default_opening_duty("web_serial", chapter_kind="conflict_hook")
     assert "强钩" in hook or "麻烦" in hook
@@ -81,13 +81,12 @@ def test_spec_block_opening_live_character(
     spec = build_writing_spec_block("写一章长篇玄幻小说里的第一章 严格模式")
     assert "work_mode: `web_serial`" in spec
     assert "book_scope: `long`" in spec
-    assert "作品候选" in spec
-    assert "评分切片" in spec
-    assert "fragment: `plot_progress`" in spec
+    assert "作品候选" not in spec
+    assert "评分切片" not in spec
+    assert "fragment:" not in spec
     assert "world_rule" not in spec
     assert "live_character" not in spec
     assert "过日子—加压—落下" not in spec
-    assert "一两句" in spec
     assert "勿" not in spec
 
 

@@ -254,15 +254,15 @@ def is_urban_cultivation(*parts: str) -> bool:
 def serial_opening_compass(*, message: str = "", outline: str = "") -> str:
     """开篇只兑眼前这场。陈述，不是禁令，也不规定得到/发现。"""
     _ = (message, outline)
-    return "只兑眼前这场，长篇约一千八到四千五"
+    return "只兑眼前这场，长篇约三千到五千个可见字"
 
 
 SERIAL_AFTER_LOCK_CRAFT = (
     "点选之后先写大纲，写完停。开篇就是将来第一章的开头，不是另一份交付。"
     "已选的是作品简介，不是正文。不要把简介粘进稿。"
-    "大纲两层：主线写人怎么变、往哪走；近处这一章两三句（这场要干什么、卡在哪、章末落在哪），远处一句备忘。"
-    "没有这一章的章职就不要写正文。"
-    "一章通常一场，长篇约一千八到四千五。"
+    "大纲先写世界入口和当前阶段，近处章节各写一句作用：这一章之后，哪一件此前不成立的事成立了。"
+    "远处只写阶段变化，不排满章节。没有这一章的当前章段就不要写正文。"
+    "一章通常一场，长篇约三千到五千个可见字。"
 )
 
 
@@ -305,7 +305,11 @@ def default_opening_duty(
 
 
 def fragment_obligations(work_mode: str) -> dict[str, str]:
-    """按 work_mode 的 fragment 写作义务（陈述，不是禁令清单）。"""
+    """按 work_mode 的 fragment 写作义务。corrected 不生成，只留给 legacy。"""
+    from app.writing.architecture import writer_sees_control_plane
+
+    if not writer_sees_control_plane():
+        return {}
     mode = normalize_work_mode(work_mode)
     if mode == "web_serial":
         return {
@@ -316,7 +320,7 @@ def fragment_obligations(work_mode: str) -> dict[str, str]:
             "dialogue_dyad": "对白露出人物选择与关系；允许直白；已知的名字直接用；空问收成一两句或动手。",
             "mixed": (
                 "人物+情节+环境谁响一点随这场戏；"
-                "一章通常一场，长篇约一千八到四千五；"
+                "一章通常一场，长篇约三千到五千个可见字；"
                 "物件从当前空间长出来；空问收成一两句或动手。"
             ),
         }
@@ -331,8 +335,10 @@ def fragment_obligations(work_mode: str) -> dict[str, str]:
 
 
 def element_obligation(element: str | None, work_mode: str) -> str:
-    """三要素职务补充句。"""
-    if not element:
+    """三要素职务补充句。corrected 不生成。"""
+    from app.writing.architecture import writer_sees_control_plane
+
+    if not writer_sees_control_plane() or not element:
         return ""
     mode = normalize_work_mode(work_mode)
     label = _ELEMENT_LABELS.get(element, element)
