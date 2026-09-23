@@ -246,7 +246,7 @@ def resolve_outline_phase(
         )
     elif prose:
         phase = "continue"
-        note = "池子已立：按章职写这场，海先藏着；本 Turn 只交一章"
+        note = "池子已立：按当前章段写这场，海先藏着；本 Turn 只交一章"
     elif is_picking:
         phase = "open"
         note = (
@@ -254,15 +254,15 @@ def resolve_outline_phase(
         )
     elif not jobs:
         phase = "open"
-        note = "长篇先 update_outline 写下这一场干什么，写完停；不要先 draft_section"
+        note = "长篇先 update_outline：世界入口、当前阶段、近处章节作用，写完停；不要先 draft_section"
     elif intent:
         phase = "open"
-        note = "纲已在：按章职写这一章；开篇就是章首，不要另起一场"
+        note = "纲已在：按当前章段写这一章；开篇就是章首，不要另起一场"
     else:
         phase = "open"
         note = (
-            "纲已写入 outline.md。主线写人怎么变；近处这一章要有两三句章职。"
-            "可以说写第一章、改纲，或先把后几章写细"
+            "纲已写入 outline.md。世界入口和当前阶段说明读者怎么进入、这一段留下什么变化；"
+            "近处章节各有一句作用。可以说写第一章、改纲，或先补当前章段。"
         )
 
     labels = {"ready": "成稿", "open": "开写", "continue": "续写"}

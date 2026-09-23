@@ -42,31 +42,40 @@ _STYLE_PERSON_SLOT = re.compile(
 _MIN_STYLE_CONTRACT_CHARS = 80
 STYLE_CONTRACT_TEMPLATE_VERSION = "book-pond-v1"
 
-STYLE_CONTRACT_OUTLINE_TEMPLATE = """## 这本书（长篇·眼前这一池）
+_OUTLINE_LAYER_TEMPLATE = """## 这本书（长篇·眼前这一池）
 
-先 propose_book_candidates 出作品候选。用户点选后，把卡片上的书名和简介写入这一段。后面的海（终局宇宙、境界总纲）不要写进这段。
+先 propose_book_candidates 出作品候选。用户点选后，把卡片上的书名和简介原文写入这一段。不为配合章段另写一版。后面的海不要写进这段。
 
 换人换事就是另一本书。
 
-## 主线一句话
-人怎么变，往哪走。两三句。顶点可以后补。
+## 世界入口
+
+读者跟谁进入，人物起初把异常当作什么。先看见规则、后果还是解释，按这本书自己的选择写。
+
+## 当前阶段
+
+这一段开始时人物在什么位置，逐渐确认什么，阶段结束时留下什么持久变化。
+
+## 远处
+
+只写后面阶段的变化，不排章节。
 
 ## 近处
-眼前这一章写两三句：这场要干什么、卡在哪、章末落在哪。后面两三章可先各留一句，写到那章再补成章职。再远只留备忘。
+
+眼前这一章先写一句章节作用：这一章之后，哪一件此前不成立的事成立了。写实际的状态变化，不用铺垫、升级、承上启下代替。章节顺序要有依赖：前一章建立的事实、关系或认知，使后一章成立。后面一两章可先各留一句作用，写到再补章段。
+
+给当前章节写一段开写便条。写清本章主要面对的一件事，以及几项会互相影响的具体事实；前一件事发生后，人物对后一件事的判断或做法应当有所改变。需要时写出人与人的分歧或现实限制。
+不要把秘密、期限和反转并排堆成清单。不要概括世界观，不要解释主题，不要按步骤安排正文，也不要预定章末画面。
+通常写一百二十到二百五十字。情节还没确定的地方留白，不用抽象句补足。
 """
 
-OPENING_TRILOGY_OUTLINE_TEMPLATE = """## 这本书（长篇·眼前这一池）
+STYLE_CONTRACT_OUTLINE_TEMPLATE = _OUTLINE_LAYER_TEMPLATE
+OPENING_TRILOGY_OUTLINE_TEMPLATE = _OUTLINE_LAYER_TEMPLATE
 
-先 propose_book_candidates 出作品候选。用户点选后，把卡片上的书名和简介写入这一段。后面的海不要写进这段。
-
-换人换事就是另一本书。
-
-## 主线一句话
-人怎么变，往哪走。两三句。顶点可以后补。
-
-## 近处章节
-先写眼前这一章，两三句：这场要干什么、卡在哪、章末落在哪。后面两三章可先一句，写到再补成章职。再远的章只留一句备忘。前几章还在同一池子里，不要把后面的海写进来。
-"""
+_WORLD_ENTRY_HEAD = re.compile(r"^#{1,3}\s*世界入口\b", re.M)
+_CURRENT_STAGE_HEAD = re.compile(r"^#{1,3}\s*当前阶段\b", re.M)
+_ROLE_MARK = re.compile(r"章节作用\s*[：:]")
+_BRIEF_MARK = re.compile(r"当前章段\s*[：:]")
 
 
 def _chapter_spans(md: str) -> list[tuple[str, str]]:
@@ -269,10 +278,10 @@ def opening_trilogy_fields(md: str, user_text: str) -> dict[str, Any]:
         len(jobs.get(sid, "").strip()) >= _TRILOGY_MIN_CHARS for sid in ("ch1", "ch2", "ch3")
     )
     if not _OPENING_TRILOGY_HEAD.search(text) and not trilogy_jobs_ok:
-        notes.append("缺 ch1 章纲（两三句：这场要干什么、卡在哪、章末落在哪；后面的章可先一句）。")
+        notes.append("缺第一章的章节作用和当前章段（后面的章可先留一句作用）。")
     blob = jobs.get("ch1", "")
     if len(blob.strip()) < _TRILOGY_MIN_CHARS:
-        notes.append("缺 ch1 章纲（两三句：这场要干什么、卡在哪、章末落在哪）。")
+        notes.append("缺第一章的当前章段。")
     if not notes:
         return {}
     return {
@@ -281,13 +290,74 @@ def opening_trilogy_fields(md: str, user_text: str) -> dict[str, Any]:
     }
 
 
+def extract_world_entry(md: str, *, max_chars: int = _SPINE_CHARS) -> str:
+    """世界入口。只在开篇注入，不每章重复。"""
+    blob = _section_body(md, _WORLD_ENTRY_HEAD)
+    if not blob:
+        return ""
+    return blob if len(blob) <= max_chars else blob[: max_chars - 1] + "…"
+
+
+def extract_current_stage(md: str, *, max_chars: int = _SPINE_CHARS) -> str:
+    """当前阶段。远处阶段不从这里取出。"""
+    blob = _section_body(md, _CURRENT_STAGE_HEAD)
+    if not blob:
+        return ""
+    return blob if len(blob) <= max_chars else blob[: max_chars - 1] + "…"
+
+
+def _marked_slice(
+    body: str,
+    start: re.Pattern[str],
+    stops: tuple[re.Pattern[str], ...],
+) -> str:
+    match = start.search(body or "")
+    if not match:
+        return ""
+    rest = body[match.end() :]
+    cut = len(rest)
+    for stop in stops:
+        nxt = stop.search(rest)
+        if nxt:
+            cut = min(cut, nxt.start())
+    return rest[:cut].strip()
+
+
+def _chapter_body(md: str, section_id: str) -> str:
+    from app.writing.manuscript import human_section_title
+
+    sid = (section_id or "").strip()
+    if not sid:
+        return ""
+    title_want = human_section_title(sid)
+    for title, body in _chapter_spans(md):
+        if title == sid or title == title_want:
+            return body or ""
+        if sid.lower() in title.lower() or (title_want and title_want in title):
+            return body or ""
+    return ""
+
+
+def extract_chapter_role(
+    md: str,
+    section_id: str,
+    *,
+    max_chars: int = _JOB_CHARS,
+) -> str:
+    """章节作用。没有标记时不把整段章段当成作用。"""
+    blob = _marked_slice(_chapter_body(md, section_id), _ROLE_MARK, (_BRIEF_MARK,))
+    if not blob:
+        return ""
+    return blob if len(blob) <= max_chars else blob[: max_chars - 1] + "…"
+
+
 def extract_outline_neighbors(
     md: str,
     section_id: str,
     *,
     max_chars: int = 280,
 ) -> dict[str, str]:
-    """相邻章章纲（中后段广度参照）。"""
+    """相邻章的章节作用。不传递邻章的当前章段。"""
     sid = (section_id or "").strip().lower()
     m = re.match(r"ch(\d+)", sid)
     if not m:
@@ -296,9 +366,9 @@ def extract_outline_neighbors(
     out: dict[str, str] = {}
     for delta in (-1, 1):
         neighbor = f"ch{n + delta}"
-        job = extract_outline_job(md, neighbor, max_chars=max_chars)
-        if job:
-            out[neighbor] = job
+        role = extract_chapter_role(md, neighbor, max_chars=max_chars)
+        if role:
+            out[neighbor] = role
     return out
 
 
@@ -308,30 +378,13 @@ def extract_outline_job(
     *,
     max_chars: int = _JOB_CHARS,
 ) -> str:
-    """章纲 duty。
-    
-    参数:
-        md/section_id/max_chars。
-    
-    返回:
-        str。"""
-    from app.writing.manuscript import human_section_title
-
-    sid = (section_id or "").strip()
-    if not sid:
+    """当前章段。有「当前章段」标记时只取该段；否则整段正文（旧纲）。"""
+    body = _chapter_body(md, section_id)
+    if not body:
         return ""
-    title_want = human_section_title(sid)
-    for title, body in _chapter_spans(md):
-        if title == sid or title == title_want:
-            hit = body
-        elif sid.lower() in title.lower() or title_want in title:
-            hit = body
-        else:
-            continue
-        if not hit:
-            return ""
-        return hit if len(hit) <= max_chars else hit[: max_chars - 1] + "…"
-    return ""
+    brief = _marked_slice(body, _BRIEF_MARK, ())
+    hit = brief or body
+    return hit if len(hit) <= max_chars else hit[: max_chars - 1] + "…"
 
 
 def opening_sea_spill(md: str) -> str:
@@ -342,7 +395,7 @@ def opening_sea_spill(md: str) -> str:
     if not text:
         return ""
     if len(text) > 900:
-        return "开篇章职过长，像在写全书梗概。缩到这场干什么，海先藏着。"
+        return "开篇章段过长，像在写全书梗概。海先藏着。"
     if _OPENING_SEA.search(text):
         return "开篇纲写进了后面的海（结局/总纲）。删掉，海先藏着。"
     return ""

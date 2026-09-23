@@ -143,6 +143,29 @@ def test_opening_trilogy_fields_long_form() -> None:
     assert opening_trilogy_fields(ch1_only, "写长篇") == {}
 
 
+def test_extract_stage_role_and_brief_separately() -> None:
+    from app.writing.outline_arc import (
+        extract_chapter_role,
+        extract_current_stage,
+        extract_outline_job,
+        extract_world_entry,
+    )
+
+    md = (
+        "## 世界入口\n读者跟着陆沉舟进入。\n\n"
+        "## 当前阶段\n工坊只收拾边角异常。\n\n"
+        "## 远处\n记忆开始在城里流通。\n\n"
+        "## 第一章\n章节作用：心相变成关系里的现实。\n"
+        "当前章段：孩子每天醒来都叫母亲阿姨，却记得煮粥忘关小火。\n"
+    )
+    assert "陆沉舟" in extract_world_entry(md)
+    assert "边角异常" in extract_current_stage(md)
+    assert "城里流通" not in extract_current_stage(md)
+    assert extract_chapter_role(md, "ch1") == "心相变成关系里的现实。"
+    assert "煮粥" in extract_outline_job(md, "ch1")
+    assert "心相变成" not in extract_outline_job(md, "ch1")
+
+
 def test_extract_spine_and_job() -> None:
     md = (
         "主线：沈禾要保住铺子，挡着的是粮行的账。\n\n"
