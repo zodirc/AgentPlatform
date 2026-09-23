@@ -1708,8 +1708,15 @@ class AgentEngine:
                     payload=proposed_payload,
                     step_index=step_index,
                 )
+            from app.writing.architecture import aesthetic_auto_patch
+
+            repair_class = str(result.get("repair_class") or "")
+            aesthetic_patch = repair_class in {"aesthetic", "structural"} or bool(
+                result.get("suggest_only")
+            )
             if (
                 settings.writing_patch_auto_apply
+                and (aesthetic_auto_patch() or not aesthetic_patch)
                 and str(result.get("status") or "") == "pending"
                 and not result.get("error")
             ):

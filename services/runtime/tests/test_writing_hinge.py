@@ -51,7 +51,10 @@ def test_hinge_skips_que_without_limma() -> None:
     assert "hinge_dense" not in hinge_fields(text)
 
 
-def test_hinge_receipt_once() -> None:
+def test_hinge_receipt_once(monkeypatch) -> None:
+    from app.settings import settings
+
+    monkeypatch.setattr(settings, "writing_architecture", "legacy")
     uid = uuid4()
     state = TurnState(
         turn_id=uid,
@@ -180,6 +183,10 @@ async def test_agent_engine_injects_hinge_receipt_once(
     monkeypatch.setattr(
         "app.engine.agent_engine.settings.verify_receipt_reserve_steps", 2
     )
+    monkeypatch.setattr(
+        "app.engine.agent_engine.settings.writing_architecture", "legacy"
+    )
+    monkeypatch.setattr("app.writing.architecture.writing_architecture", lambda: "legacy")
     engine = AgentEngine(
         gateway=FakeGateway(),
         tools=[spec],

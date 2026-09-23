@@ -546,19 +546,39 @@ async def writing_rubric(
             ),
             "neighbors": bank_titles,
         },
-        "obligations": [
-            "权重在写作工具内按 work_mode 切换，不在设置页",
-            "rewards 为观测，不进入 net_signal",
-            (
-                f"work_mode={work_mode}（{mode_label}）· "
-                f"fragment={declared}（评分切片，不是章职）"
-            ),
-            (kind_obl if duty else "")
-            or obligations.get(declared, obligations["mixed"]),
-            "拟合该类范本原型的节奏与质地，禁止搬用其故事核",
-            "有 repair_span 时同轮 propose_patch；多轮空问收成一两句或动手，勿改成旁白",
-        ],
+        "obligations": _writer_obligations(
+            work_mode=work_mode,
+            mode_label=mode_label,
+            declared=declared,
+            kind_obl=kind_obl if duty else "",
+            obligations=obligations,
+        ),
     }
+
+
+def _writer_obligations(
+    *,
+    work_mode: str,
+    mode_label: str,
+    declared: str,
+    kind_obl: str,
+    obligations: dict[str, str],
+) -> list[str]:
+    from app.writing.architecture import writer_sees_control_plane
+
+    if not writer_sees_control_plane():
+        return []
+    return [
+        "权重在写作工具内按 work_mode 切换，不在设置页",
+        "rewards 为观测，不进入 net_signal",
+        (
+            f"work_mode={work_mode}（{mode_label}）· "
+            f"fragment={declared}（评分切片，不是章职）"
+        ),
+        kind_obl or obligations.get(declared) or obligations.get("mixed") or "",
+        "拟合该类范本原型的节奏与质地，禁止搬用其故事核",
+        "有 repair_span 时同轮 propose_patch；多轮空问收成一两句或动手，勿改成旁白",
+    ]
 
 
 async def evaluate_writing_fragment(

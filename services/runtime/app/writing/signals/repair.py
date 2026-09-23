@@ -10,7 +10,7 @@ from app.writing.opening import find_opening_span
 from app.writing.patch_hygiene import close_span_in_body
 from app.writing.staccato import find_staccato_span, short_quote_inners
 from app.writing.signals.windows import REPAIR_MIN_VISIBLE, REPAIR_SPAN_MAX, TextWindow
-from app.writing.text_metrics import visible_chars
+from app.writing.text_metrics import LENGTH_SHORT_FLOOR, visible_chars
 
 REWRITE_PATCH = "propose_patch"
 REWRITE_DRAFT = "draft_ok"
@@ -61,7 +61,7 @@ _HINTS: dict[str, str] = {
     "opening_institution": "第一句就是机构名，读者还没地方站。",
     "lore_dump": "这里成了「N年前」的案情提要。",
     "length_short": (
-        "这场实体字还低于门槛（<1500，或用户点名配额的 85%）。"
+        f"这场实体字还低于门槛（<{LENGTH_SHORT_FLOOR}，或用户点名配额的 85%）。"
         "用 draft_section 把同一场写到门槛，不要另起一场或灌无关说明。"
     ),
     "meta_knowing_high": "「心里清楚」出现过多。",
@@ -431,11 +431,21 @@ def build_repair_span(
     if not old or old not in body:
         return None
     hint_key = key or "weak_window"
+    from app.writing.architecture import AESTHETIC_SIGNAL_KEYS, aesthetic_auto_patch
+
+    from app.writing.staccato import drives_patch
+
+    aesthetic = hint_key in AESTHETIC_SIGNAL_KEYS or (
+        hint_key == "staccato_uniform" and not drives_patch()
+    )
+    repair_class = "aesthetic" if aesthetic else "mechanical"
     payload = {
         "old_text": old,
         "key": key or "weak_window",
         "hint": repair_hint(hint_key, work_mode),
         "visible_chars": visible_chars(old),
+        "repair_class": repair_class,
+        "suggest_only": repair_class == "aesthetic" and not aesthetic_auto_patch(),
     }
     return payload
 

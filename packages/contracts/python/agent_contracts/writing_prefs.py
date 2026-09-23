@@ -312,7 +312,7 @@ PLATFORM_SIGNAL_PENALTIES_BY_MODE: dict[str, dict[str, float]] = {
 PLATFORM_SIGNAL_REWARDS: dict[str, float] = {
     "scene_ratio_high": 0.08,
     "dialogue_rhythm_varied": 0.10,
-    "exemplar_alignment_high": 0.12,
+    "exemplar_alignment_high": 0.0,
     "outline_duty_match": 0.10,
     "character_card_action": 0.08,
     "plot_step_visible": 0.0,
@@ -322,9 +322,9 @@ PLATFORM_SIGNAL_REWARDS: dict[str, float] = {
 
 PLATFORM_SIGNAL_REWARDS_WEB: dict[str, float] = {
     **PLATFORM_SIGNAL_REWARDS,
-    "plot_step_visible": 0.10,
-    "price_paid_visible": 0.14,
-    "world_layer_visible": 0.10,
+    "plot_step_visible": 0.0,
+    "price_paid_visible": 0.0,
+    "world_layer_visible": 0.0,
 }
 
 PLATFORM_SIGNAL_REWARDS_BY_MODE: dict[str, dict[str, float]] = {

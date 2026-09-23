@@ -284,7 +284,7 @@ async def propose_patch(
             "summary": precheck.get("apply_check_error") or "patch does not apply",
         }
     patch_id = f"patch-{uuid4().hex[:12]}"
-    return {
+    result = {
         "patch_id": patch_id,
         "path": path,
         "old_text": old,
@@ -294,6 +294,16 @@ async def propose_patch(
         "applies": True,
         "apply_check": precheck.get("apply_check"),
     }
+    span = prior.get("repair_span") if isinstance(prior, dict) else None
+    if isinstance(span, dict) and (
+        span.get("suggest_only") or span.get("repair_class") == "aesthetic"
+    ):
+        from app.writing.architecture import aesthetic_auto_patch
+
+        if not aesthetic_auto_patch():
+            result["suggest_only"] = True
+            result["repair_class"] = "aesthetic"
+    return result
 
 
 async def apply_patch(

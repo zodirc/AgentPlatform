@@ -121,7 +121,7 @@ def test_pond_vector_prefers_declared_price_axis() -> None:
     assert encode_vector({"price_class": "body_tax"})["price_class"] == "lifespan"
 
 
-def test_commitment_quota_and_min_visible(tmp_path: Path) -> None:
+def test_commitment_quota_and_min_visible(tmp_path: Path, monkeypatch) -> None:
     default = normalize_commitment({})
     assert default["affect_mode"] == "embodied"
     err, commit = gate_draft_commitment(
@@ -134,6 +134,18 @@ def test_commitment_quota_and_min_visible(tmp_path: Path) -> None:
     )
     assert err is None and commit is None
     long = "柜门空了。" * (COMMIT_MIN_VISIBLE // 4)
+    err, commit = gate_draft_commitment(
+        content=long,
+        mode="upsert",
+        work_mode="literary",
+        section_id="ch1",
+        raw=None,
+        workspace_root=tmp_path,
+    )
+    assert err is None and commit is None
+    from app.settings import settings
+
+    monkeypatch.setattr(settings, "writing_architecture", "legacy")
     err, commit = gate_draft_commitment(
         content=long,
         mode="upsert",

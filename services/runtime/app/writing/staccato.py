@@ -1,9 +1,19 @@
-"""检测 uniform 短拍（三字问答/空应声/接词干也还/收场目录）；仅 soft facts。"""
+"""检测 uniform 短拍（三字问答/空应声/接词干也还/收场目录）。
+
+检测结果只进遥测。corrected 不据此自动改稿。
+"""
 
 from __future__ import annotations
 
 import re
 from typing import Any
+
+def drives_patch() -> bool:
+    """碎拍只在 legacy 控制链里驱动自动补丁。"""
+    from app.writing.architecture import aesthetic_auto_patch
+
+    return aesthetic_auto_patch()
+
 
 _QUOTE_ONLY = re.compile(r"^「([^」]*)」[。！？!?,，.]?$")
 _QUOTE_SPAN = re.compile(r"「([^」]*)」")

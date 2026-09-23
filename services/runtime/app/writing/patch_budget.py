@@ -486,7 +486,14 @@ def check_propose_patch_allowed(
                 net = float(net_raw)
             except (TypeError, ValueError):
                 net = None
-            if net is not None and net >= 0.0 and not _process_l0_open(prior):
+            from app.writing.architecture import net_signal_controls_patch
+
+            if (
+                net_signal_controls_patch()
+                and net is not None
+                and net >= 0.0
+                and not _process_l0_open(prior)
+            ):
                 return _budget_error(
                     error="patch_unnecessary",
                     penalty_key=penalty_key,
