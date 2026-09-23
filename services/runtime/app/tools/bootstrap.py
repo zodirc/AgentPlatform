@@ -162,31 +162,13 @@ def build_registry() -> ToolRegistry:
                 "call this Turn (archives the old file to drafts/archive/, then writes only "
                 "this story). Inferred from the user text when occupy is omitted. "
                 "Pass layout=sections for one-file-per-chapter under drafts/. "
-                "Promote into manuscript.md via propose_patch. History stays under "
-                ".agent/work/history/. After a section has ≥800 visible chars this Turn, "
-                "do not upsert the whole chapter: propose_patch a thin existing beat if the "
-                "user pointed at one. Do not draft_section mode=append a second climax, "
-                "new cast, or new place to hit a quota. A web-serial chapter is usually "
-                "one scene in the 1800–4500 visible-char band; leftover plot stations belong "
-                "in the next chapter. Chapter-length upsert (≥800 visible chars) must pass "
-                "narrative_commitment (time_order/subplot/resolution_agency/"
-                "moral_polarity/affect_mode/locations); fill from what this "
-                "chapter actually does. "
-                "If repair_span.neighbor is set (this work's own beat), follow "
-                "that beat's rhythm — do not copy its plot, and do not strip "
-                "quotes into narration. "
-                "wild_card=true is allowed once per 5 chapters in strict regime; "
-                "that chapter's L1 observations are silenced. "
-                "In author regime pass optional swerve=true to record a debt "
-                "(no quota) and optional choices instead of narrative_commitment. "
-                f"After {MAX_PATCHES_PER_PENALTY_KEY} applied propose_patch per penalty_key, "
-                "only a chip-sized repair_span (≤160 visible chars) may use "
-                "mode=rewrite_window once. A window-sized span, an untouched-island "
-                "patch, or rewrite_window already exhausted means stop repairing this Turn "
-                "(long-form chapter can be delivered). "
-                "Append is rejected while chapter process L0 is still open "
-                "(staccato_uniform / hinge_dense / opening_institution / lore_dump), "
-                "and rejected if the new slice itself hits staccato_uniform."
+                "History stays under .agent/work/history/. "
+                "Default visible length is 3000–5000 characters unless the user named "
+                "another quota. If the scene's facts cannot fill that, go back to the "
+                "chapter note. Do not mode=append a second scene to hit the number. "
+                "narrative_commitment is optional and does not block the draft. "
+                "Mechanical fixes (duplicated paragraphs, broken quotes, bad headings) "
+                "may be patched. Style notes are suggestions and do not auto-apply."
             ),
             parameters={
                 "type": "object",
@@ -223,15 +205,9 @@ def build_registry() -> ToolRegistry:
                         "type": "string",
                         "enum": ["upsert", "append", "rewrite_window"],
                         "description": (
-                            "append: add content after the existing chapter body "
-                            "(thicken). upsert: replace the chapter. rewrite_window: "
-                            "replace a chip-sized repair_span.old_text in one shot "
-                            "(staccato island only; not an opening score window). "
-                            "After ≥800 visible chars this Turn, do not upsert the whole "
-                            "chapter. Append only to dwell in the same scene — never a second "
-                            "act, new cast, or new place to hit quota — and only after chapter "
-                            "process L0 is clear; the new slice must not reintroduce "
-                            "staccato_uniform."
+                            "append: continue the same scene. Do not open a second scene "
+                            "to reach a length. upsert: replace the chapter. "
+                            "rewrite_window: replace one already located span."
                         ),
                     },
                     "narrative_commitment": DRAFT_COMMITMENT_PROPERTY,

@@ -1763,15 +1763,21 @@ async def _run_turn(
             else f"{choice_block}\n"
         )
     elif editor_phase:
-        from app.writing.editor import editor_phase_block
+        from app.writing.architecture import writer_sees_control_plane
+        from app.writing.editor import editor_phase_block, format_observations_block
 
         edit_block = editor_phase_block()
-        if edit_block:
-            volatile_context = (
-                f"{volatile_context.rstrip()}\n\n{edit_block}\n"
-                if volatile_context.strip()
-                else f"{edit_block}\n"
-            )
+        if writer_sees_control_plane():
+            if edit_block:
+                volatile_context = (
+                    f"{volatile_context.rstrip()}\n\n{edit_block}\n"
+                    if volatile_context.strip()
+                    else f"{edit_block}\n"
+                )
+        else:
+            system_prompt = edit_block or system_prompt
+            obs = format_observations_block()
+            volatile_context = obs or ""
     elif reread_phase:
         from app.writing.reread import reread_phase_block
 

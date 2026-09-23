@@ -77,10 +77,9 @@ def test_draft_section_description_follows_repair_neighbor() -> None:
     spec = registry.get("draft_section")
     assert spec is not None
     desc = spec.description
-    assert "this work's own beat" in desc
-    assert "do not upsert the whole chapter" in desc
+    assert "do not auto-apply" in desc
     assert "mode=append" in desc
-    assert "narration" in desc
+    assert "second scene" in desc
     assert "Creates drafts/" in desc
     assert "empty workspace is allowed" in desc
 

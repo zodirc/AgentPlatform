@@ -19,6 +19,11 @@ FLAG_TYPES = (
     "reader_confusion",
     "author_state_stale",
     "surface_observation",
+    "mechanical",
+    "local_language",
+    "continuity",
+    "structure",
+    "user_pref",
 )
 SEVERITIES = ("hard", "soft", "info")
 KEEP_MAX = 3
@@ -101,6 +106,10 @@ def normalize_editor_report(
         keep_items.append(text[:400])
         if len(keep_items) >= KEEP_MAX:
             break
+    from app.writing.architecture import writer_sees_control_plane
+
+    if not writer_sees_control_plane():
+        cleaned_flags = cleaned_flags[:3]
     return {
         "section_id": section_id,
         "flags": cleaned_flags,
@@ -174,6 +183,64 @@ def format_typed_editor_block(
     return block
 
 
+def structural_return_payload(
+    *,
+    length_short: bool = False,
+    has_material: bool = False,
+    conflict: bool = False,
+) -> dict[str, Any] | None:
+    """结构问题交给 Editor 的三个出口。不生成小岛补丁。"""
+    if not length_short and not conflict:
+        return None
+    because: list[str] = []
+    if conflict:
+        because.append("与已成立事实冲突，不覆盖")
+    if length_short and not has_material:
+        because.append("材料不足，先改纲")
+    elif length_short:
+        because.append("材料够，重写同一场")
+    return {
+        "options": ["改纲", "重写", "保留"],
+        "because": "；".join(because),
+    }
+
+
+def structural_observation_lines(root: Path) -> list[str]:
+    sessions = root / ".agent" / "sessions"
+    if not sessions.is_dir():
+        return []
+    files = sorted(
+        sessions.glob("*/turns/*/manifest.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    lines: list[str] = []
+    seen: set[str] = set()
+    for path in files[:8]:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        drafts = data.get("section_drafts") if isinstance(data, dict) else None
+        if not isinstance(drafts, dict):
+            continue
+        for sid, row in drafts.items():
+            if not isinstance(row, dict) or sid in seen:
+                continue
+            handoff = row.get("structural_return")
+            if not isinstance(handoff, dict):
+                continue
+            seen.add(str(sid))
+            options = "、".join(str(x) for x in (handoff.get("options") or []))
+            because = str(handoff.get("because") or "").strip()
+            lines.append(
+                f"- 结构问题（{sid}）：{because}。返回 {options}。不要用补丁掩盖。"
+            )
+            if len(lines) >= 3:
+                return lines
+    return lines
+
+
 def format_observations_block(*, workspace_root: Path | None = None) -> str:
     """编辑 Turn 才进窗：L0/L1/表面层 sidecar 作观测材料。"""
     from app.settings import settings
@@ -194,7 +261,11 @@ def format_observations_block(*, workspace_root: Path | None = None) -> str:
             keys = [k for k, v in data.items() if v]
             if keys:
                 lines.append(f"- {path.stem}: {', '.join(str(k) for k in keys[:8])}")
+    from app.writing.canon import format_conflict_lines
+
     lines.extend(_recent_l0_l1_lines(root))
+    lines.extend(format_conflict_lines(workspace_root=root))
+    lines.extend(structural_observation_lines(root))
     if stance_is_stale(workspace_root=root):
         lines.append("- author_state_stale: 立场连续 3 次高度相似")
     cap = int(getattr(settings, "writing_editor_observations_max_chars", 1200) or 1200)

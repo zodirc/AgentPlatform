@@ -89,7 +89,7 @@ async def test_draft_section_length_short_on_padded_quota(workspace: Path) -> No
     assert short["quota_chars"] == 300
     assert short["length_short"] is True
     assert "低于门槛" in short["summary"]
-    assert "1800" in short["summary"]
+    assert "3000" in short["summary"]
     assert (workspace / "drafts" / "manuscript.md").is_file()
 
     met = await core.draft_section(
@@ -398,10 +398,9 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "export_document" in writing.system_prompt
     assert "遵守工具返回的状态" in writing.system_prompt
     assert "不提供 `write_file`" in writing.system_prompt
-    assert "# FINAL JUDGMENT" in writing.system_prompt
     assert "# WRITING" in writing.system_prompt
-    assert "# EDITOR" in writing.system_prompt
-    assert "# REREAD" in writing.system_prompt
+    assert "不解释计划" in writing.system_prompt
+    assert "小说是人物" not in writing.system_prompt
     assert "# WORK STATE" in writing.system_prompt
     assert "# TOOLS" in writing.system_prompt
     assert "# DELIVERY" in writing.system_prompt

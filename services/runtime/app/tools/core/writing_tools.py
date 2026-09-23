@@ -478,6 +478,22 @@ def _reject_append_gate(
     """章级过程 L0 未清，或新切片自带碎拍 → 拒 append（不落盘）。长篇 L0 不挡加厚。"""
     if occupy_fresh or mode != "append":
         return None
+    from app.writing.architecture import writer_sees_control_plane
+
+    prior_row = (manifest.get("section_drafts") or {}).get(section_id)
+    if (
+        not writer_sees_control_plane()
+        and isinstance(prior_row, dict)
+        and prior_row.get("length_short")
+    ):
+        return {
+            "status": "error",
+            "error": "append_second_scene",
+            "summary": (
+                "这场还没写满。不要 append 第二场。"
+                "事实不够就回到章段；事实够就用 upsert 把同一场写开。"
+            ),
+        }
     from app.writing.book_scope import resolve_book_scope
     from app.writing.signals.repair import (
         REWRITE_PATCH,
@@ -1030,6 +1046,8 @@ async def draft_section(
         penalties = signals_block.get("penalties")
         if signals_block.get("repair_span") and not author:
             entry["repair_span"] = signals_block["repair_span"]
+        if signals_block.get("telemetry_repair_span") and not author:
+            entry["telemetry_repair_span"] = signals_block["telemetry_repair_span"]
         if signals_block.get("rewrite_policy") and not author:
             entry["rewrite_policy"] = signals_block["rewrite_policy"]
         if signals_block.get("composite") is not None:
@@ -1044,6 +1062,45 @@ async def draft_section(
     drafts[section_id] = entry
     result["manifest_path"] = _write_manifest(turn_id, manifest, session_id=session_id)
     result["regime"] = regime
+    from app.writing.canon import note_chapter_candidate
+
+    if mode != "rewrite_window":
+        note_chapter_candidate(
+            section_id,
+            scored,
+            workspace_root=Path(settings.workspace_root),
+        )
+    from app.writing.architecture import writer_sees_control_plane
+
+    if not writer_sees_control_plane():
+        from app.writing.canon import chapter_candidates, load_canon
+        from app.writing.editor import structural_return_payload
+
+        kinds = {
+            row["kind"]
+            for row in chapter_candidates(section_id, scored)
+            if row["kind"] != "change"
+        }
+        conflict = any(
+            isinstance(row, dict) and row.get("source_section") == section_id
+            for row in load_canon(workspace_root=Path(settings.workspace_root)).get(
+                "conflicts"
+            )
+            or []
+        )
+        handoff = structural_return_payload(
+            length_short=bool(result.get("length_short")),
+            has_material=bool(kinds),
+            conflict=conflict,
+        )
+        if handoff:
+            entry["structural_return"] = handoff
+            drafts[section_id] = entry
+        result.pop("writing_signals", None)
+        result.pop("consistency_flags", None)
+        result.pop("thread_stale", None)
+        result.pop("repair_span", None)
+        result.pop("rewrite_policy", None)
     if not author:
         return result
     from app.writing.commitment import choice_history
@@ -1061,12 +1118,15 @@ async def draft_section(
     }
     if flags:
         shrunk["continuity_flags"] = flags
-    due = overdue_promises(
-        load_story_state(workspace_root=Path(settings.workspace_root)),
-        current_ch=chapter_num(section_id),
-    )
-    if due:
-        shrunk["promises_due"] = due[:3]
+    from app.writing.architecture import writer_sees_control_plane
+
+    if writer_sees_control_plane():
+        due = overdue_promises(
+            load_story_state(workspace_root=Path(settings.workspace_root)),
+            current_ch=chapter_num(section_id),
+        )
+        if due:
+            shrunk["promises_due"] = due[:3]
     hist = choice_history(workspace_root=Path(settings.workspace_root))
     if hist:
         shrunk["choice_history"] = hist

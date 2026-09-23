@@ -44,7 +44,7 @@ async def test_author_draft_result_has_no_signals(workspace: Path) -> None:
     assert "repair_span" not in result
     assert "rewrite_policy" not in result
     assert "visible_chars" in result
-    assert result.get("target_range") == [1800, 4500]
+    assert result.get("target_range") == [3000, 5000]
     assert "length_short" not in result
     assert "低于门槛" not in str(result.get("summary") or "")
 
@@ -61,7 +61,8 @@ async def test_strict_draft_keeps_signals(workspace: Path) -> None:
     )
     assert result["status"] == "drafted"
     assert result.get("regime") == "strict"
-    assert isinstance(result.get("writing_signals"), dict)
+    assert "writing_signals" not in result
+    assert "repair_span" not in result
 
 
 @pytest.mark.asyncio
@@ -70,7 +71,7 @@ async def test_author_full_redraft_keeps_previous(workspace: Path) -> None:
     turn_id = uuid4()
     first = await core.draft_section(
         "ch2",
-        _chapter(),
+        _chapter(52),
         turn_id=turn_id,
         turn_user_text="写一章长篇第二章 作者模式",
         fragment="mixed",
@@ -79,7 +80,7 @@ async def test_author_full_redraft_keeps_previous(workspace: Path) -> None:
     assert first["status"] == "drafted"
     second = await core.draft_section(
         "ch2",
-        _chapter() + "整章重交一遍。",
+        _chapter(52) + "整章重交一遍。",
         turn_id=turn_id,
         turn_user_text="写一章长篇第二章 作者模式",
         fragment="mixed",
