@@ -170,6 +170,8 @@ class Settings(BaseSettings):
     writing_cards_plot_max_chars: int = 600
     writing_cards_general_max_chars: int = 400
     writing_export_profile: str = "novel-zh"  # novel-zh | essay | none
+    # legacy 恢复冻结时的评分/承诺/审美修复链。默认 corrected。
+    writing_architecture: str = "corrected"
     # Writing: propose_patch auto-writes to disk (natural UX); UI still shows diff as applied.
     writing_patch_auto_apply: bool = True
     # WW1/WW2: work-scoped drafts (docs/23); history snapshots per section (0 disables).

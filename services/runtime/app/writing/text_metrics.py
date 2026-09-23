@@ -5,14 +5,16 @@ from __future__ import annotations
 import re
 
 LENGTH_SHORT_RATIO = 0.85
-OUTLINE_MIN_VISIBLE = 40
-# 长篇默认区间 1800–4500。无名额时 length_short 只在 <1500 记。
-DEFAULT_CHAPTER_MIN = 1800
-DEFAULT_CHAPTER_MAX = 4500
-LENGTH_SHORT_FLOOR = 1500
+# 与 turn_phase.NEAR_JOB_MIN 同一道「章段过薄」门槛。
+OUTLINE_MIN_VISIBLE = 80
+# 长篇默认区间 3000–5000 个可见字。无名额时低于 3000 记 length_short。
+# 输出预算 context_output_reserve_tokens 默认 30000。5000 个中文可见字按约 2 token/字仍低于该预算。
+DEFAULT_CHAPTER_MIN = 3000
+DEFAULT_CHAPTER_MAX = 5000
+LENGTH_SHORT_FLOOR = 3000
 CHAPTER_DWELL_HINT = (
-    "一章通常一场，长篇约一千八到四千五；两场并置或半场留到下章都可以。"
-    "不要预告片再粘无关的下一场。第二条线若与本场主题对位或共享时空，可以写"
+    "一章通常一场，长篇约三千到五千个可见字；两场并置或半场留到下章都可以。"
+    "不要为凑字另开无关冲突、重复解释设定或追加预告片。第二条线若与本场主题对位或共享时空，可以写"
 )
 
 # Prefer these stems when several numbers appear in one Turn message.
@@ -59,6 +61,15 @@ _CHAPTER_LINE = re.compile(
     r"^第[一二三四五六七八九十百千零〇两\d]+章\b.*$",
     re.M,
 )
+
+
+_HEADING_LINE = re.compile(r"(?m)^#{1,6}\s+.*$")
+
+
+def chapter_visible_chars(text: str) -> int:
+    """正文可见字。不计空白，不计 Markdown 标题行。"""
+    body = _HEADING_LINE.sub("", text or "")
+    return visible_chars(body)
 
 
 def visible_chars(text: str) -> int:
@@ -215,8 +226,8 @@ def outline_thin_chapters(md: str, *, min_visible: int = OUTLINE_MIN_VISIBLE) ->
 
 
 def draft_length_fields(content: str, user_text: str) -> dict[str, object]:
-    """长度软事实。无名额：<1500 才记 length_short；点名配额仍用 85%。"""
-    vis = visible_chars(content)
+    """长度软事实。无名额：低于 LENGTH_SHORT_FLOOR 才记 length_short；点名配额仍用 85%。"""
+    vis = chapter_visible_chars(content)
     out: dict[str, object] = {"visible_chars": vis}
     named = parse_char_quota(user_text)
     if named is not None:
@@ -249,11 +260,20 @@ def draft_length_fields(content: str, user_text: str) -> dict[str, object]:
 
 
 def length_short_summary(vis: int, quota: int) -> str:
-    """篇幅不足时的提示：只说现在多短。"""
+    """篇幅不足时先看容量。字数不是质量，也不另开一场。"""
+    from app.writing.architecture import writer_sees_control_plane
+
+    if writer_sees_control_plane():
+        return (
+            f"实体文字 {vis} 字，低于门槛 {quota} 字"
+            f"（长篇区间 {DEFAULT_CHAPTER_MIN}–{DEFAULT_CHAPTER_MAX}）。"
+            "若这场已经收住，下一站留给下一章。"
+        )
     return (
-        f"实体文字 {vis} 字，低于门槛 {quota} 字"
-        f"（长篇区间 {DEFAULT_CHAPTER_MIN}–{DEFAULT_CHAPTER_MAX}）。"
-        "若这场已经收住，下一站留给下一章。"
+        f"可见字 {vis}，低于门槛 {quota}"
+        f"（默认 {DEFAULT_CHAPTER_MIN}–{DEFAULT_CHAPTER_MAX}，用户点名的字数优先）。"
+        "先看这一场的事实够不够写开：不够就回到章段补会互相改变做法的事实，不要另开一场。"
+        "事实够而正文跳过了，才把同一场写开。"
     )
 
 
@@ -275,7 +295,7 @@ def outline_thin_fields(scored_md: str, user_text: str) -> dict[str, object]:
         "outline_thin": True,
         "thin_chapters": thin,
         "summary_suffix": (
-            f"以下章节标题下几乎没有这场要干什么：{listed}。"
+            f"以下章节标题下的当前章段太薄：{listed}。"
             "点明即可，不必写成小正文。"
         ),
     }

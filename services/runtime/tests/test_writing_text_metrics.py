@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.writing.text_metrics import (
     DEFAULT_CHAPTER_MIN,
+    OUTLINE_MIN_VISIBLE,
     draft_length_fields,
     looks_like_chapter_draft,
     outline_thin_chapters,
@@ -68,18 +69,29 @@ def test_default_chapter_quota_for_chengpian() -> None:
     assert resolve_draft_quota("成篇") == DEFAULT_CHAPTER_MIN
     assert resolve_draft_quota("采用此开篇「早高峰系统」") == DEFAULT_CHAPTER_MIN
     assert resolve_draft_quota("写 300 字成篇") == 300
-    assert DEFAULT_CHAPTER_MIN == 1800
+    from app.writing.turn_phase import NEAR_JOB_MIN
 
-    short = draft_length_fields("甲" * 1400, "成篇，默认章节")
+    assert DEFAULT_CHAPTER_MIN == 3000
+    assert OUTLINE_MIN_VISIBLE == NEAR_JOB_MIN == 80
+
+    short = draft_length_fields("甲" * 2999, "写第三章")
     assert short["quota_min"] == DEFAULT_CHAPTER_MIN
     assert short["length_short"] is True
 
-    mid = draft_length_fields("甲" * 2000, "成篇，默认章节")
-    assert mid.get("length_short") is not True
-
-    met = draft_length_fields("甲" * DEFAULT_CHAPTER_MIN, "写第三章")
+    met = draft_length_fields("甲" * 3000, "写第三章")
     assert met.get("quota_min") == DEFAULT_CHAPTER_MIN
     assert "length_short" not in met
+
+    named = draft_length_fields("甲" * 500, "写第三章，约500字")
+    assert named["quota_chars"] == 500
+    assert "length_short" not in named
+
+
+def test_chapter_length_ignores_markdown_headings() -> None:
+    body = "# 第一章\n" + ("甲" * 2996)
+    fields = draft_length_fields(body, "写第三章")
+    assert fields["visible_chars"] == 2996
+    assert fields["length_short"] is True
 
 
 def test_outline_thin_fields_toc_skip() -> None:
