@@ -290,21 +290,19 @@ _DUET_CHIP = (
 @pytest.mark.asyncio
 async def test_append_blocked_while_chapter_staccato(workspace: Path) -> None:
     turn_id = uuid4()
-    body = (
-        "镇上的钟表铺开在河埠头，门脸窄，里面却深，像一只把肚子藏在黑暗里的鱼。" * 12
-        + "\n"
-        + _DUET_CHIP
-    )
+    shop = "镇上的钟表铺开在河埠头，门脸窄，里面却深，像一只把肚子藏在黑暗里的鱼。"
+    body = shop * 100 + "\n" + _DUET_CHIP
     first = await core.draft_section(
         "ch1",
         body,
         turn_id=turn_id,
         fragment="dialogue_dyad",
-        turn_user_text="写一篇故事，6000字",
+        turn_user_text="写一篇故事",
         narrative_commitment=_COMMIT,
     )
     assert first["status"] == "drafted"
     assert first.get("staccato_uniform") is True
+    assert not first.get("length_short")
     before = (workspace / "drafts" / "manuscript.md").read_text(encoding="utf-8")
     rejected = await core.draft_section(
         "ch1",
@@ -312,7 +310,7 @@ async def test_append_blocked_while_chapter_staccato(workspace: Path) -> None:
         turn_id=turn_id,
         fragment="mixed",
         mode="append",
-        turn_user_text="写一篇故事，6000字",
+        turn_user_text="写一篇故事",
     )
     assert rejected["status"] == "error"
     assert rejected["error"] == "append_while_l0"
@@ -359,17 +357,18 @@ async def test_append_slice_staccato_rejected(workspace: Path) -> None:
     clean = (
         "鲁镇的酒店的格局，是和别处不同的：都是当街一个曲尺形的大柜台，"
         "柜里面预备着热水，可以随时温酒。"
-    ) * 20
+    ) * 100
     first = await core.draft_section(
         "ch1",
         clean,
         turn_id=turn_id,
         fragment="mixed",
-        turn_user_text="写一篇故事，6000字",
+        turn_user_text="写一篇故事",
         narrative_commitment=_COMMIT,
     )
     assert first["status"] == "drafted"
     assert not first.get("staccato_uniform")
+    assert not first.get("length_short")
     before = (workspace / "drafts" / "manuscript.md").read_text(encoding="utf-8")
     rejected = await core.draft_section(
         "ch1",
@@ -377,7 +376,7 @@ async def test_append_slice_staccato_rejected(workspace: Path) -> None:
         turn_id=turn_id,
         fragment="dialogue_dyad",
         mode="append",
-        turn_user_text="写一篇故事，6000字",
+        turn_user_text="写一篇故事",
     )
     assert rejected["status"] == "error"
     assert rejected["error"] == "append_slice_weak"
@@ -390,17 +389,14 @@ async def test_append_slice_staccato_rejected(workspace: Path) -> None:
 @pytest.mark.asyncio
 async def test_append_allowed_after_l0_cleared(workspace: Path) -> None:
     turn_id = uuid4()
-    body = (
-        "镇上的钟表铺开在河埠头，门脸窄，里面却深，像一只把肚子藏在黑暗里的鱼。" * 12
-        + "\n"
-        + _DUET_CHIP
-    )
+    shop = "镇上的钟表铺开在河埠头，门脸窄，里面却深，像一只把肚子藏在黑暗里的鱼。"
+    body = shop * 100 + "\n" + _DUET_CHIP
     first = await core.draft_section(
         "ch1",
         body,
         turn_id=turn_id,
         fragment="dialogue_dyad",
-        turn_user_text="写一篇故事，6000字",
+        turn_user_text="写一篇故事",
         narrative_commitment=_COMMIT,
     )
     assert first["status"] == "drafted"
@@ -424,7 +420,7 @@ async def test_append_allowed_after_l0_cleared(workspace: Path) -> None:
         turn_id=turn_id,
         fragment="mixed",
         mode="append",
-        turn_user_text="写一篇故事，6000字",
+        turn_user_text="写一篇故事",
     )
     assert appended["status"] == "drafted"
     assert appended.get("mode") == "append"

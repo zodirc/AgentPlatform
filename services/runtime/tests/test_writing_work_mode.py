@@ -168,8 +168,8 @@ def test_apply_work_mode_overlay() -> None:
     assert web["signal_penalties"]["mixed"]["all_explained"] < 0
     assert web["signal_penalties"]["mixed"]["escalation_flat"] < 0
     assert web["signal_penalties"]["mixed"]["premise_novella"] < 0
-    assert web["signal_rewards"]["mixed"]["price_paid_visible"] > 0
-    assert web["signal_rewards"]["mixed"]["world_layer_visible"] > 0
+    assert web["signal_rewards"]["mixed"]["price_paid_visible"] == 0
+    assert web["signal_rewards"]["mixed"]["world_layer_visible"] == 0
 
 
 def test_fragment_obligations_are_statements() -> None:
@@ -389,7 +389,7 @@ def test_premise_novella_and_world_layer_signals() -> None:
         prefs=prefs,
         chapter_position="opening",
     )
-    assert any(r["key"] == "world_layer_visible" for r in good["rewards"])
+    assert not any(r["key"] == "world_layer_visible" for r in good["rewards"])
     quiet = score_writing_fragment(
         layered,
         fragment_declared="mixed",

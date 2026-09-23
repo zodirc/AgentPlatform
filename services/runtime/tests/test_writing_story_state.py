@@ -27,13 +27,15 @@ def test_empty_state_has_no_plan_fields() -> None:
 
 
 def test_mechanical_update_records_death(tmp_path: Path) -> None:
+    from app.writing.canon import load_canon
+
     apply_mechanical_update("老钟落水死了。江照站在码头。", section_id="ch6", workspace_root=tmp_path)
-    raw = (tmp_path / ".agent" / "work" / "story_state.json").read_text(encoding="utf-8")
-    data = json.loads(raw)
-    kinds = [f.get("kind") for f in data.get("facts") or []]
-    assert "death" in kinds
-    md = (tmp_path / ".agent" / "work" / "story_state.md").read_text(encoding="utf-8")
-    assert "老钟" in md
+    facts = load_canon(workspace_root=tmp_path)["facts"]
+    assert any(
+        fact.get("kind") == "character" and fact.get("subject") == "老钟" and "已死" in str(fact.get("text"))
+        for fact in facts
+    )
+    assert not (tmp_path / ".agent" / "work" / "story_state.json").is_file()
 
 
 def test_author_delta_and_window_block(tmp_path: Path) -> None:
@@ -88,11 +90,14 @@ def test_author_delta_and_window_block(tmp_path: Path) -> None:
 
 
 def test_consistency_flag_dead_person_speaks(tmp_path: Path) -> None:
-    save_story_state(
-        {
-            **empty_state(),
-            "facts": [{"kind": "death", "name": "老钟", "text": "老钟在第 6 章死了", "ch": 6}],
-        },
+    from app.writing.canon import record_fact
+
+    record_fact(
+        kind="character",
+        text="老钟已死",
+        source_section="ch6",
+        evidence="老钟落水死了",
+        subject="老钟",
         workspace_root=tmp_path,
     )
     flags = consistency_flags("老钟说：把船撑回来。", section_id="ch7", workspace_root=tmp_path)

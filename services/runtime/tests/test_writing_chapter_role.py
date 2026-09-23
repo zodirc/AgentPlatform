@@ -72,7 +72,7 @@ def test_resolve_role_opening(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert role["chapter_position"] == "opening"
     assert role["book_scope"] == "long"
     assert role["chapter_kind"] == "conflict_hook"
-    assert "事故" in role["obligation"] or "强钩" in role["obligation"]
+    assert role["obligation"] == ""
     assert role["preferred_fragment"] == "plot_progress"
 
 

@@ -25,8 +25,8 @@ _KIND_LABEL = {
 }
 _SENTENCE = re.compile(r"[^。！？\n]+[。！？]")
 _NAME = r"[\u4e00-\u9fff]{2,4}"
-_DEATH = re.compile(rf"({_NAME})(?:落水死|阵亡|被杀|死了)")
-_LEFT = re.compile(rf"({_NAME})(?:离开|走了|出城)")
+_DEATH = re.compile(rf"([\u4e00-\u9fff]{{2,4}}?)(?:落水死|阵亡|被杀|死了)")
+_LEFT = re.compile(rf"([\u4e00-\u9fff]{{2,4}}?)(?:离开|走了|出城)")
 _RELATION = re.compile(rf"({_NAME})(?:不再|开始)(?:叫|认|当)({_NAME})")
 _OBJECT = re.compile(rf"把({_NAME})(?:放进|收进|交给|取出|藏进|留下)")
 _RULE = re.compile(r"(?:规矩是|不能再|不许)[^。！？]{2,24}")
@@ -135,7 +135,7 @@ def _sentences(prose: str) -> list[str]:
     out: list[str] = []
     for match in _SENTENCE.finditer(prose or ""):
         sentence = match.group(0).strip()
-        if len(sentence) >= 8:
+        if len(sentence) >= 4:
             out.append(sentence)
     return out
 

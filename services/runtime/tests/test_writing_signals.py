@@ -359,7 +359,7 @@ def test_exemplars_earn_alignment_and_avoid_mismatch() -> None:
                 shown_hits += 1
     assert n == 31
     assert mismatch_hits == 0
-    assert align_hits >= 23
+    assert align_hits == 0
     assert shown_hits >= 20
 
 
@@ -404,7 +404,7 @@ def test_anti_patterns_score_below_class_exemplars() -> None:
 
 
 def test_align_reward_floor_rejects_cosmetic_centroid() -> None:
-    """0.80：凑合稿对齐度不再叠满 exemplar_alignment_high；青剑金标仍拿得到。"""
+    """0.80 仍是对齐门槛。该奖励权重为 0，达标也不记分。"""
     assert _wp.ALIGN_REWARD_FLOOR == 0.80
     bank = load_platform_exemplars()
     prefs = platform_prefs_payload()
@@ -424,7 +424,7 @@ def test_align_reward_floor_rejects_cosmetic_centroid() -> None:
         sword.text, fragment_declared="battle_action", prefs=prefs
     )
     assert sword_out["dimensions"]["exemplar_alignment"] >= _wp.ALIGN_REWARD_FLOOR
-    assert "exemplar_alignment_high" in {r["key"] for r in sword_out["rewards"]}
+    assert "exemplar_alignment_high" not in {r["key"] for r in sword_out["rewards"]}
 
 
 def test_detect_cast_sword_as_battle() -> None:
@@ -436,7 +436,7 @@ def test_detect_cast_sword_as_battle() -> None:
         sample.text, fragment_declared="battle_action", prefs=prefs
     )
     assert out["fragment"]["mismatch"] is False
-    assert "exemplar_alignment_high" in {r["key"] for r in out["rewards"]}
+    assert "exemplar_alignment_high" not in {r["key"] for r in out["rewards"]}
 
 
 def test_nested_signal_lookup_zero_disables() -> None:
@@ -503,8 +503,8 @@ def test_long_chapter_window_points_repair_span_at_staccato_island() -> None:
         text, fragment_declared="worldview_texture", prefs=prefs
     )
     assert out["windows"]["n"] >= 2
-    assert out["rewrite_policy"] == "propose_patch"
-    span = out["repair_span"]
+    assert out["rewrite_policy"] == "draft_ok"
+    span = out["telemetry_repair_span"]
     assert "跑完了" in span["old_text"]
     assert span["old_text"] in text
     assert span["key"] == "staccato_uniform"
@@ -538,8 +538,8 @@ def test_ai_dialogue_requests_patch_under_repair_min_visible() -> None:
     assert visible_chars(text) < 800
     out = score_writing_fragment(text, fragment_declared="mixed", prefs=prefs)
     assert out["writing_weak"] is True
-    assert out["rewrite_policy"] == "propose_patch"
-    assert "repair_span" in out
+    assert out["rewrite_policy"] == "draft_ok"
+    assert "telemetry_repair_span" in out
 
 
 def test_meta_hit_does_not_request_patch() -> None:
@@ -586,8 +586,8 @@ def test_staccato_stall_tries_next_island_or_keeps_weak() -> None:
         + "「那是旧账，旧账碎了也只管旧账。」\n"
     )
     first = score_writing_fragment(text, fragment_declared="mixed", prefs=prefs)
-    assert first["rewrite_policy"] == "propose_patch"
-    span = first["repair_span"]
+    assert first["rewrite_policy"] == "draft_ok"
+    span = first["telemetry_repair_span"]
     assert span["key"] == "staccato_uniform"
     second = score_writing_fragment(
         text,
@@ -673,7 +673,7 @@ def test_maybe_attach_scores_updated_chapter_not_span(workspace: Path) -> None:
     vis = int((signals.get("length_fields") or {}).get("visible_chars") or 0)
     assert vis >= 800
     assert vis != len(new_span)
-    assert signals.get("rewrite_policy") == "propose_patch"
+    assert signals.get("rewrite_policy") == "draft_ok"
     assert (signals.get("fragment") or {}).get("declared") == "mixed"
     span_only = score_writing_fragment(
         new_span, fragment_declared="dialogue_dyad", prefs=platform_prefs_payload()
@@ -807,7 +807,7 @@ def test_repair_span_hint_follows_work_mode() -> None:
         fragment_declared="worldview_texture",
         prefs=platform_prefs_payload(work_mode="web_serial"),
     )
-    span = web["repair_span"]
+    span = web["telemetry_repair_span"]
     assert span["key"] == "staccato_uniform"
     assert "空问" in span["hint"] or "短对白" in span["hint"]
 
