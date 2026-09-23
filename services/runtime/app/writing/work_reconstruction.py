@@ -41,14 +41,13 @@ CANDIDATE_SCHEMA: dict[str, Any] = {
     },
 }
 
-_FORM_SYSTEM = """根据题材交一本书的书名和简介。
+_FORM_SYSTEM = """根据用户原话，借题材参照交一本新书的书名和简介。
 
-题材是参照。交出来的是另一本，书名和人物是这本新书自己的，不要和题材里的那一本相同。
+用户原话优先。题材只供参照，不是模板；另起人物、世界和故事，不要换名复述。
 
-书名是这本作品的名字，可以不解释题材。
-简介是这本作品的介绍，没有固定写法。不要默认把设定焊进书名，再在简介里把对照点完。那只是其中一种介绍。
+简介按书页上的作品介绍来写，让人知道这本书主要写什么。不要解释创作思路，不要罗列卖点，也不要写成预告片。
 
-只交一个结果，不需要寻找更好的方向。"""
+只交一本。"""
 
 
 @dataclass(frozen=True)
@@ -229,7 +228,8 @@ def form_messages(
     subject: str = "",
 ) -> list[dict[str, Any]]:
     ctx = project_candidate_context(user_text)
-    lines = [f"类型：{ctx.genre}"]
+    raw_request = (user_text or "").strip()
+    lines = [f"用户原话：{raw_request}", f"类型参考：{ctx.genre}"]
     drawn = subject.strip()
     if drawn:
         lines.append(f"题材：{drawn}")

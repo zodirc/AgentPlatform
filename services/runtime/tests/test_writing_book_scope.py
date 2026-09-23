@@ -20,6 +20,12 @@ def test_infer_book_scope_short_and_long() -> None:
     assert infer_book_scope("写一篇玄幻") == "single"
     assert infer_book_scope("写一篇故事第一章") == "single"
     assert infer_book_scope("写玄幻") == "long"
+    assert infer_book_scope("写一部历史小说") == "long"
+    assert (
+        infer_book_scope("我期望你给我的是一本，传统都市+一些异能（只有主角有系统）的小说")
+        == "long"
+    )
+    assert infer_book_scope("写一篇都市故事") == "single"
     assert infer_book_scope("", section_id="ch5") == "long"
 
 

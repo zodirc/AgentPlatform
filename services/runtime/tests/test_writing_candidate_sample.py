@@ -18,9 +18,16 @@ from app.writing.candidate_sample import (
     form_messages,
     sample_independent_pair,
     sample_one_candidate,
+    pitches_too_close,
 )
 from app.writing.excerpt_job import book_level_low, premise_cohesion_low
-from app.writing.subject_pool import draw_subjects, pool_for
+from app.writing.subject_pool import (
+    draw_subjects,
+    family_of,
+    pool_for,
+    request_is_long_novel,
+    select_seeds,
+)
 from app.writing.work_reconstruction import (
     CANDIDATE_SCHEMA,
     build_candidate_context,
@@ -37,6 +44,10 @@ _PITCH = (
     "秦禹只想要活下去。但现实一步步把他推向了更大的舞台。"
     "他明天还得去领粮，也还得决定跟哪一路人站在一起。"
 )
+_DISTINCT = [
+    "柜台上的账今晚必须对上，否则铺子开不了门。",
+    "船要在天亮前离港，她还没决定人留在哪一岸。",
+]
 _TITLES = ["余烬", "潮汐"]
 
 
@@ -110,16 +121,21 @@ def test_form_is_a_direct_candidate_job() -> None:
             subject=pool_for("都市修真")[0],
         )
     )
-    assert "类型：都市修真" in blob
-    assert "不要和题材里的那一本相同" in blob
+    assert "用户原话：写一篇长篇都市修真小说" in blob
+    assert "类型参考：都市修真" in blob
+    assert "用户原话优先" in blob
+    assert "题材只供参照，不是模板" in blob
+    assert "简介按书页上的作品介绍来写" in blob
+    assert "不要罗列卖点" in blob
+    assert "持续兑现" not in blob
+    assert "因果核心" not in blob
+    assert "结构不同的落法" not in blob
+    assert "不需要寻找更好的方向" not in blob
     assert f"题材：{pool_for('都市修真')[0]}" in blob
     assert "抽签：" not in blob
     assert "均匀取一本" not in blob
-    assert "根据题材交一本书的书名和简介" in blob
-    assert "没有固定写法" in blob
-    assert "那只是其中一种介绍" in blob
-    assert "只交一个结果" in blob
-    assert "不需要寻找更好的方向" in blob
+    assert "根据用户原话，借题材参照交一本新书的书名和简介" in blob
+    assert "只交一本" in blob
     assert "大概是什么样子" not in blob
     assert "不用寻找最优方案" not in blob
     assert "大概成立" not in blob
@@ -133,6 +149,15 @@ def test_form_is_a_direct_candidate_job() -> None:
     assert "book_scope" not in blob
     assert "work_mode" not in blob
     assert "You are a writing assistant" not in blob
+    another = _content_text(
+        form_messages(
+            "写一篇长篇都市修真小说",
+            subject=pool_for("都市修真")[1],
+        )
+    )
+    assert "以下作品已经出现过" not in another
+    assert "结构签名" not in another
+    assert pool_for("都市修真")[1] in another
     assert "先写正在发生的事" not in blob
     _banned_theory(blob)
     assert "[writing_context]" not in blob
@@ -160,8 +185,9 @@ def test_projection_ignores_workspace_writing_state(tmp_path) -> None:
 
 def test_owned_subject_pool_is_the_draw_support() -> None:
     pool = pool_for("都市修真")
-    assert len(pool) >= 36
+    assert 72 <= len(pool) <= 96
     assert len(set(pool)) == len(pool)
+    assert "庆尘" not in "".join(pool)
     for index, left in enumerate(pool):
         assert book_level_low(left) is False
         assert premise_cohesion_low(left) is False
@@ -171,9 +197,38 @@ def test_owned_subject_pool_is_the_draw_support() -> None:
     drawn = draw_subjects("都市修真", 2)
     assert len(set(drawn)) == 2
     assert set(drawn) <= set(pool)
+    assert family_of(drawn[0]) != family_of(drawn[1])
     assert draw_subjects("历史", 2) == []
+    assert draw_subjects("写一篇历史小说", 2) == []
+    assert draw_subjects("写一篇都市故事", 2) == []
+    assert draw_subjects("写一部历史小说", 2) == []
+    urban_ask = "我期望你给我的是一本，传统都市+一些异能（只有主角有系统）的小说"
+    assert draw_subjects(urban_ask, 2) == []
     assert pool_for("都市修真") == pool_for("都市异能") == pool_for("都市玄幻")
     assert draw_subjects("都市玄幻", 2)
+    assert len(draw_subjects("写一篇长篇的异能小说", 2)) == 2
+    assert select_seeds("写一部历史小说", 2) == []
+    assert request_is_long_novel("写一部历史小说") is True
+
+
+def test_specific_requests_bypass_random_references() -> None:
+    directed = (
+        "写一本类似滚开的加点武道系统文",
+        "参考全职猎人的念能力做一套能力体系",
+        "世界很平凡，只有主角有异能",
+        "我期望是，更金手指，世界本平凡的那种，只有主角有一个超级系统这样",
+        "系统、金手指、爽文的异能小说",
+    )
+    assert all(select_seeds(request, 2) == [] for request in directed)
+    assert len(select_seeds("写一本系统文", 2)) == 2
+    urban = select_seeds("写一本都市文", 2)
+    assert len(urban) == 2
+    assert {seed.shelf for seed in urban} <= {
+        "现代人生",
+        "都市生活",
+        "都市隐秘",
+        "都市异变",
+    }
 
 
 @pytest.mark.asyncio
@@ -183,6 +238,87 @@ async def test_missing_pool_does_not_call_the_model() -> None:
 
     pair = await sample_independent_pair("写一篇历史小说", complete=complete)
     assert pair == []
+
+
+@pytest.mark.asyncio
+async def test_generic_ability_request_reaches_model_with_seed_and_raw_request() -> None:
+    seen: list[str] = []
+
+    async def complete(messages):
+        text = _content_text(messages)
+        seen.append(text)
+        return _card(_TITLES[len(seen) - 1], _DISTINCT[len(seen) - 1])
+
+    pair = await sample_independent_pair("写一篇长篇的异能小说", complete=complete)
+    assert len(pair) == 2
+    assert len(seen) == 2
+    assert all("用户原话：写一篇长篇的异能小说" in text for text in seen)
+    assert all(_drawn_subject(text) for text in seen)
+    assert len({_drawn_subject(text) for text in seen}) == 2
+
+
+@pytest.mark.asyncio
+async def test_specific_system_request_reaches_model_without_conflicting_seed() -> None:
+    request = "我期望是，更金手指，世界本平凡的那种，只有主角有一个超级系统这样"
+    seen: list[str] = []
+
+    async def complete(messages):
+        text = _content_text(messages)
+        seen.append(text)
+        return _card(_TITLES[len(seen) - 1], _DISTINCT[len(seen) - 1])
+
+    pair = await sample_independent_pair(request, complete=complete)
+    assert len(pair) == 2
+    assert len(seen) == 2
+    assert all(f"用户原话：{request}" in text for text in seen)
+    assert all("题材：" not in text for text in seen)
+    assert all("大乾北地" not in text and "录音" not in text for text in seen)
+
+
+@pytest.mark.asyncio
+async def test_other_long_genre_samples_without_a_fake_subject() -> None:
+    calls = 0
+
+    async def complete(messages):
+        nonlocal calls
+        text = _content_text(messages)
+        assert "用户原话：写一篇长篇历史小说" in text
+        assert "类型参考：历史" in text
+        assert "题材：" not in text
+        assert "只继承用户这句话" not in text
+        calls += 1
+        return _card(_TITLES[calls - 1], _DISTINCT[calls - 1])
+
+    pair = await sample_independent_pair("写一篇长篇历史小说", complete=complete)
+    assert len(pair) == 2
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_close_second_card_is_resampled_once() -> None:
+    shared = "他在夜里检修城中的阵法，工资交给房租，进阶要付出代价。" * 2
+    calls = 0
+    subjects: list[str] = []
+
+    async def complete(messages):
+        nonlocal calls
+        calls += 1
+        text = _content_text(messages)
+        subjects.append(_drawn_subject(text))
+        assert "结构族：" not in text
+        assert "至少在两个维度上不同" not in text
+        if calls == 1:
+            return _card("余烬", shared)
+        if calls == 2:
+            return _card("潮汐", shared)
+        return _card("潮汐", "船要离港，人还留在北岸，这件事只跟这一船人有关。")
+
+    pair = await sample_independent_pair("写一篇长篇都市修真小说", complete=complete)
+    assert calls == 3
+    assert pitches_too_close(shared, shared) is True
+    assert [it["title"] for it in pair] == ["余烬", "潮汐"]
+    assert shared not in pair[1]["pitch"]
+    assert len(set(subjects)) == 3
 
 
 def test_choice_turn_keeps_the_named_genre() -> None:
@@ -238,7 +374,7 @@ async def test_two_independent_sketches_then_cards() -> None:
         async with lock:
             idx = form_i
             form_i += 1
-        return _card(_TITLES[idx], f"{_TITLES[idx]} {_PITCH}")
+        return _card(_TITLES[idx], f"{_TITLES[idx]} {_DISTINCT[idx]}")
 
     pair = await sample_independent_pair(
         "写一篇长篇都市修真小说",
@@ -273,7 +409,8 @@ async def test_missing_title_retries_this_sample_once() -> None:
             form_i += 1
         if idx == 0:
             return "短。"
-        return _card(_TITLES[min(idx - 1, 1)])
+        slot = min(idx - 1, 1)
+        return _card(_TITLES[slot], _DISTINCT[slot])
 
     pair = await sample_independent_pair(
         "写一篇长篇都市修真小说",
@@ -310,7 +447,7 @@ async def test_pair_thinking_stays_on_one_sample_at_a_time(monkeypatch) -> None:
         async with lock:
             idx = form_i
             form_i += 1
-        return _card(_TITLES[idx])
+        return _card(_TITLES[idx], _DISTINCT[idx])
 
     pair = await sample_independent_pair(
         "写一篇长篇都市修真小说",
@@ -360,13 +497,17 @@ async def test_independent_sample_does_not_resurrect_held_cards(
     async def complete(messages):
         nonlocal form_i
         text = _content_text(messages)
+        assert "以下作品已经出现过" not in text
+        assert "结构签名" not in text
         assert "渡劫要报备" not in text
         assert "城隍夜巡" not in text
+        assert "题材：渡劫要报备" not in text
+        assert "题材：城隍夜巡" not in text
         assert "previous_attempt_discarded" not in text
         async with lock:
             idx = form_i
             form_i += 1
-        return _card(_TITLES[idx], f"NEW{idx} {_PITCH}")
+        return _card(_TITLES[idx], f"NEW{idx} {_DISTINCT[idx]}")
 
     result = await propose_book_candidates(
         [],
@@ -442,7 +583,7 @@ async def test_slot_ids_in_old_pond_do_not_drop_new_samples(workspace, monkeypat
         async with lock:
             idx = form_i
             form_i += 1
-        return _card(_TITLES[idx], f"NEW{idx} {_PITCH}")
+        return _card(_TITLES[idx], f"NEW{idx} {_DISTINCT[idx]}")
 
     result = await propose_book_candidates(
         [],

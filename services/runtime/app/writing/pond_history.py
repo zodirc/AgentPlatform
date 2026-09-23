@@ -142,7 +142,7 @@ def load_candidate_excludes(*, workspace_root: Path | None = None) -> CandidateE
 
 
 def seen_pond_title_keys(*, workspace_root: Path | None = None) -> set[str]:
-    """当前池 + 已拒池的书名。新采样硬排除，不靠 prompt 换方向。"""
+    """当前池 + 已拒池的书名。新采样按书名硬排除。"""
     keys: set[str] = set()
     from app.writing.opening_ponds import load_opening_ponds
 

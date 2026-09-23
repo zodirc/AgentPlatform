@@ -12,13 +12,17 @@ from uuid import UUID
 
 from app.model.gateway import ModelResponse, StreamActivity
 from app.model.generation import GenerationParams
-from app.writing.subject_pool import draw_subjects
+from app.writing.subject_pool import (
+    SubjectSeed,
+    request_is_long_novel,
+    select_seeds,
+    serves_urban_pool,
+)
 from app.writing.work_reconstruction import (
     CANDIDATE_SCHEMA,
     candidate_fingerprint,
     form_messages,
     genre_label,
-    genre_of,
     obvious_meta_text,
     parse_card,
     topic_of,
@@ -164,11 +168,11 @@ async def _mark_candidate_thinking() -> None:
 
 
 def _buffered_writer():
-    from app.controller.event_writer import get_event_writer as get_buffered
-
     raw = _sample_turn_id.get()
     if raw is None:
         return None
+    from app.controller.event_writer import get_event_writer as get_buffered
+
     try:
         turn_id = raw if isinstance(raw, UUID) else UUID(str(raw))
     except (TypeError, ValueError):
@@ -401,6 +405,37 @@ async def sample_one_candidate(
     return None
 
 
+def _longest_common(left: str, right: str) -> int:
+    a = "".join(left.split())
+    b = "".join(right.split())
+    if len(a) < 12 or len(b) < 12:
+        return 0
+    best = 0
+    for size in range(min(len(a), len(b), 48), 11, -1):
+        if best >= size:
+            break
+        window = {a[i : i + size] for i in range(len(a) - size + 1)}
+        if any(b[i : i + size] in window for i in range(len(b) - size + 1)):
+            return size
+    return best
+
+
+def pitches_too_close(left: str, right: str) -> bool:
+    """语义过近才重采。词法回退时，连续相同超过 40 字也算同一本书。"""
+    from app.writing.pond_similarity import compute_pond_similarity, same_book_reject
+
+    snap = compute_pond_similarity(
+        [
+            {"title": "left", "opening": left},
+            {"title": "right", "opening": right},
+        ],
+        shadow=False,
+    )
+    if snap.get("usable") and same_book_reject(snap):
+        return True
+    return _longest_common(left, right) >= 40
+
+
 async def sample_independent_pair(
     user_text: str,
     *,
@@ -413,7 +448,7 @@ async def sample_independent_pair(
     exclude_fingerprints: set[str] | None = None,
     exclude_titles: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """从该类型已有的题材池里无放回均匀抽两本。两张卡互不可见。无第三槽。"""
+    """独立抽两本；候选之间不传结构分析，过近时换题材重抽第二本。"""
 
     _ = (held, gate)
     token = _sample_turn_id.set(turn_id)
@@ -457,6 +492,27 @@ async def resolve_sample_user_text(user_text: str, session_id: Any = None) -> st
     return sample_user_text(user_text, priors)
 
 
+async def _sample_with_seed(
+    user_text: str,
+    *,
+    complete: CompleteFn | None,
+    sample_id: str,
+    seed: SubjectSeed | None,
+    exclude_ids: set[str],
+    exclude_fingerprints: set[str],
+    exclude_titles: set[str],
+) -> dict[str, Any] | None:
+    return await sample_one_candidate(
+        user_text,
+        complete=complete,
+        sample_id=sample_id,
+        subject=seed.text if seed is not None else "",
+        exclude_ids=exclude_ids,
+        exclude_fingerprints=exclude_fingerprints,
+        exclude_titles=exclude_titles,
+    )
+
+
 async def _sample_independent_pair_body(
     user_text: str,
     *,
@@ -467,30 +523,62 @@ async def _sample_independent_pair_body(
     exclude_titles: set[str],
 ) -> list[dict[str, Any]]:
     _ = need
-    chosen = draw_subjects(genre_of(user_text), _SAMPLE_POOL)
+    chosen: list[SubjectSeed | None] = list(select_seeds(user_text, _SAMPLE_POOL))
     if len(chosen) < _SAMPLE_POOL:
-        return []
+        if not (request_is_long_novel(user_text) or serves_urban_pool(user_text)):
+            return []
+        # 具体要求已经足够，或没有对应题材池：直接依据用户原话独立抽取。
+        chosen = [None] * _SAMPLE_POOL
     await _emit_thinking_delta("\n—— 题材池 ——\n")
-    sampled = await asyncio.gather(
-        sample_one_candidate(
-            user_text,
-            complete=complete,
-            sample_id="c01",
-            subject=chosen[0],
-            exclude_ids=exclude_ids,
-            exclude_fingerprints=exclude_fingerprints,
-            exclude_titles=exclude_titles,
-        ),
-        sample_one_candidate(
+    first = await _sample_with_seed(
+        user_text,
+        complete=complete,
+        sample_id="c01",
+        seed=chosen[0],
+        exclude_ids=exclude_ids,
+        exclude_fingerprints=exclude_fingerprints,
+        exclude_titles=exclude_titles,
+    )
+    second_exclude_titles = set(exclude_titles)
+    if first is not None:
+        first_title = str(first.get("title") or "").strip()
+        if first_title:
+            second_exclude_titles.add(first_title.casefold())
+    second = await _sample_with_seed(
+        user_text,
+        complete=complete,
+        sample_id="c02",
+        seed=chosen[1],
+        exclude_ids=exclude_ids,
+        exclude_fingerprints=exclude_fingerprints,
+        exclude_titles=second_exclude_titles,
+    )
+    if (
+        first is not None
+        and second is not None
+        and pitches_too_close(str(first.get("pitch") or ""), str(second.get("pitch") or ""))
+    ):
+        replacement = chosen[1]
+        used_seeds = [seed for seed in chosen if seed is not None]
+        if used_seeds:
+            alternatives = select_seeds(
+                user_text,
+                1,
+                exclude_texts={seed.text for seed in used_seeds},
+                exclude_families={seed.family for seed in used_seeds},
+            )
+            if alternatives:
+                replacement = alternatives[0]
+        second = await _sample_with_seed(
             user_text,
             complete=complete,
             sample_id="c02",
-            subject=chosen[1],
+            seed=replacement,
             exclude_ids=exclude_ids,
             exclude_fingerprints=exclude_fingerprints,
-            exclude_titles=exclude_titles,
-        ),
-    )
+            exclude_titles=second_exclude_titles,
+        )
+    sampled = [first, second]
     seen_fps = set(exclude_fingerprints)
     seen_titles = set(exclude_titles)
     cards: list[dict[str, Any]] = []
