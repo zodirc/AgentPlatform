@@ -53,7 +53,7 @@ def test_work_surface_pins_outline_job(tmp_path: Path) -> None:
     )
     block = build_work_surface_block("写第三章", workspace_root=tmp_path)
     assert "### 写作包" in block
-    assert "保住铺子" in block
+    assert "保住铺子" not in block
     assert "当前章段" not in block
     assert "核秤" in block
     assert "铺垫" not in block
@@ -91,15 +91,15 @@ def test_write_surface_splits_stage_role_and_brief(tmp_path: Path) -> None:
     assert "### 写作包" in ch1
     assert "### 世界入口" not in ch1
     assert "### 章节作用" not in ch1
-    assert "生意" in ch1
-    assert "边角异常" in ch1
+    assert "生意" not in ch1
+    assert "边角异常" not in ch1
     assert "煮粥" in ch1
     assert "城里流通" not in ch1
 
     ch2 = build_work_surface_block("写第二章", workspace_root=tmp_path, max_chars=8000)
     assert "### 世界入口" not in ch2
     assert "不体面的生意" not in ch2
-    assert "边角异常" in ch2
+    assert "边角异常" not in ch2
     assert "抽屉" in ch2
     assert "煮粥" not in ch2
     assert "职业背景" not in ch2
@@ -108,7 +108,7 @@ def test_write_surface_splits_stage_role_and_brief(tmp_path: Path) -> None:
 
     ch3 = build_work_surface_block("写第三章", workspace_root=tmp_path, max_chars=8000)
     assert "不体面的生意" not in ch3
-    assert "边角异常" in ch3
+    assert "边角异常" not in ch3
     assert "空盒" in ch3
     assert "煮粥" not in ch3
     assert "城里流通" not in ch3

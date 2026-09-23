@@ -37,10 +37,9 @@ def infer_serial_subtype(message: str = "", outline: str = "") -> str | None:
 
 
 def serial_subtype_block(message: str = "", outline: str = "") -> str:
-    key = infer_serial_subtype(message, outline)
-    if not key:
-        return ""
-    return _CARDS[key]
+    """子类型写法不进入 Writer。推断结果只留在函数里，不组成提示。"""
+    infer_serial_subtype(message, outline)
+    return ""
 
 
 def subtype_template_dir() -> Path:

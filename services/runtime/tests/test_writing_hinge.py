@@ -51,10 +51,7 @@ def test_hinge_skips_que_without_limma() -> None:
     assert "hinge_dense" not in hinge_fields(text)
 
 
-def test_hinge_receipt_once(monkeypatch) -> None:
-    from app.settings import settings
-
-    monkeypatch.setattr(settings, "writing_architecture", "legacy")
+def test_hinge_receipt_once() -> None:
     uid = uuid4()
     state = TurnState(
         turn_id=uid,
@@ -70,7 +67,7 @@ def test_hinge_receipt_once(monkeypatch) -> None:
         tool_name="draft_section",
         result={"status": "drafted", "hinge_dense": True, "hinge_chain_count": 1},
     )
-    assert should_inject_verify_receipt(state, reserve_steps=10) is True
+    assert should_inject_verify_receipt(state, reserve_steps=10) is False
     assert verify_receipt_kind(state) == "hinge"
     text = build_verify_receipt_text(state)
     assert "不要补转折" in text
@@ -183,10 +180,6 @@ async def test_agent_engine_injects_hinge_receipt_once(
     monkeypatch.setattr(
         "app.engine.agent_engine.settings.verify_receipt_reserve_steps", 2
     )
-    monkeypatch.setattr(
-        "app.engine.agent_engine.settings.writing_architecture", "legacy"
-    )
-    monkeypatch.setattr("app.writing.architecture.writing_architecture", lambda: "legacy")
     engine = AgentEngine(
         gateway=FakeGateway(),
         tools=[spec],
@@ -205,16 +198,5 @@ async def test_agent_engine_injects_hinge_receipt_once(
         step_count=0,
     )
     summary = await engine.run(state)
-    assert state.hinge_receipt_sent is True
-    receipt_msgs = [
-        m
-        for m in state.messages
-        if m.get("role") == "user"
-        and any(
-            "不要补转折" in str(b.get("text", ""))
-            for b in (m.get("content") or [])
-            if isinstance(b, dict)
-        )
-    ]
-    assert len(receipt_msgs) == 1
-    assert summary == "rewrote without hinge"
+    assert state.hinge_receipt_sent is False
+    assert summary == "done without rewrite"

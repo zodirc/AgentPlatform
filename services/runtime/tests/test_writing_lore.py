@@ -45,10 +45,7 @@ def test_lore_skips_later_chapters() -> None:
     assert lore_fields(text, "ch2") == {}
 
 
-def test_lore_receipt_once(monkeypatch) -> None:
-    from app.settings import settings
-
-    monkeypatch.setattr(settings, "writing_architecture", "legacy")
+def test_lore_receipt_once() -> None:
     uid = uuid4()
     state = TurnState(
         turn_id=uid,
@@ -64,7 +61,7 @@ def test_lore_receipt_once(monkeypatch) -> None:
         tool_name="draft_section",
         result={"status": "drafted", "lore_dump": True},
     )
-    assert should_inject_verify_receipt(state, reserve_steps=10) is True
+    assert should_inject_verify_receipt(state, reserve_steps=10) is False
     assert verify_receipt_kind(state) == "lore"
     text = build_verify_receipt_text(state)
     assert "删这段提要" in text

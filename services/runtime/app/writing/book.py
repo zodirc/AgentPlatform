@@ -313,9 +313,7 @@ def load_writing_book(*, workspace_root: Path | None = None) -> dict[str, Any]:
             keep = []
     else:
         keep = []
-    from app.writing.architecture import writer_sees_control_plane
-
-    console = writer_sees_control_plane()
+    console = False
     canon_promises: list[dict[str, Any]] = []
     if not console:
         from app.writing.canon import load_canon

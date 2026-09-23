@@ -536,15 +536,12 @@ def consistency_flags(
     section_id: str = "",
     workspace_root: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """启发式软门。倒叙/回忆是合法矛盾，不硬拒。corrected 只读 canon。"""
-    from app.writing.architecture import writer_sees_control_plane
-
+    """启发式软门。倒叙/回忆是合法矛盾，不硬拒。只读 canon。"""
     body = text or ""
     flags: list[dict[str, Any]] = []
-    if not writer_sees_control_plane():
-        from app.writing.canon import load_canon
+    from app.writing.canon import load_canon
 
-        for fact in load_canon(workspace_root=workspace_root).get("facts") or []:
+    for fact in load_canon(workspace_root=workspace_root).get("facts") or []:
             if not isinstance(fact, dict) or fact.get("status") != "active":
                 continue
             name = str(fact.get("subject") or "").strip()
@@ -560,51 +557,6 @@ def consistency_flags(
                             "section_id": section_id,
                         }
                     )
-        return flags
-    state = load_story_state(workspace_root=workspace_root)
-    body = text or ""
-    flags: list[dict[str, Any]] = []
-    for fact in state.get("facts") or []:
-        if not isinstance(fact, dict):
-            continue
-        kind = str(fact.get("kind") or "")
-        blob = str(fact.get("text") or "")
-        if kind == "death":
-            names = []
-            stored = str(fact.get("name") or "").strip()
-            if stored:
-                names.append(stored)
-            before = re.split(r"在第|死了|阵亡|落水|被杀", blob, maxsplit=1)[0].strip()
-            m = re.match(r"[\u4e00-\u9fff]{2,4}", before)
-            if m and m.group(0) not in names:
-                names.append(m.group(0))
-            for name in names:
-                if name and name in body and re.search(
-                    rf"{re.escape(name)}.{{0,12}}(?:说|道|问)", body
-                ):
-                    flags.append(
-                        {
-                            "kind": "fact_death",
-                            "text": f"{name} 在账本里已死，本章仍在说话",
-                            "ch": fact.get("ch"),
-                            "section_id": section_id,
-                        }
-                    )
-        if kind == "location" and "离开" in blob:
-            pass
-    for item in state.get("spent") or []:
-        token = str(item)
-        name_match = re.match(r"([\u4e00-\u9fff]{2,4})", token)
-        if name_match and "走了" in token:
-            name = name_match.group(1)
-            if name in body and re.search(rf"{re.escape(name)}.{{0,8}}(?:站|走|来)", body):
-                flags.append(
-                    {
-                        "kind": "character_presence",
-                        "text": f"{name} 已离开，本章仍在场",
-                        "section_id": section_id,
-                    }
-                )
     return flags
 
 
@@ -614,57 +566,11 @@ def apply_mechanical_update(
     section_id: str,
     workspace_root: Path | None = None,
 ) -> dict[str, Any]:
-    """post_turn 机械半。corrected 的事实写入 canon，不写入这本控制台。"""
-    from app.writing.architecture import writer_sees_control_plane
+    """落盘后的机械事实写入 canon，不写入故事控制台。"""
+    from app.writing.canon import note_chapter_candidate
 
-    if not writer_sees_control_plane():
-        from app.writing.canon import note_chapter_candidate
-
-        note_chapter_candidate(section_id, text, workspace_root=workspace_root)
-        return load_story_state(workspace_root=workspace_root)
-    state = load_story_state(workspace_root=workspace_root)
-    ch = chapter_num(section_id) or _latest_chapter(state) or 0
-    body = text or ""
-    facts = list(state.get("facts") or [])
-    for match in _DEATH.finditer(body):
-        name = match.group(1)
-        entry = {"kind": "death", "name": name, "text": f"{name} 在第 {ch} 章死了", "ch": ch}
-        if not any(isinstance(f, dict) and f.get("text") == entry["text"] for f in facts):
-            facts.append(entry)
-    for match in _LEFT.finditer(body):
-        name = match.group(1)
-        entry = {"kind": "location", "text": f"{name} 在第 {ch} 章离开", "ch": ch}
-        if not any(isinstance(f, dict) and f.get("text") == entry["text"] for f in facts):
-            facts.append(entry)
-    places = list(dict.fromkeys(_PLACE.findall(body)))[:4]
-    if places:
-        entry = {
-            "kind": "location",
-            "text": "、".join(places) + f"（第 {ch} 章）",
-            "ch": ch,
-        }
-        if not any(isinstance(f, dict) and f.get("text") == entry["text"] for f in facts):
-            facts.append(entry)
-    state["facts"] = facts[-80:]
-
-    names_on_stage = set()
-    for row in state.get("characters") or []:
-        if isinstance(row, dict) and row.get("name") and str(row["name"]) in body:
-            row["last_seen_ch"] = ch
-            names_on_stage.add(str(row["name"]))
-    for row in state.get("open_threads") or []:
-        if not isinstance(row, dict):
-            continue
-        token = str(row.get("id") or "")
-        if token and token in body:
-            row["last_touched_ch"] = ch
-    spent = list(state.get("spent") or [])
-    if _SPENT.search(body):
-        note = f"第 {ch} 章用过/说出去了"
-        if note not in spent:
-            spent.append(note)
-    state["spent"] = spent[-40:]
-    return save_story_state(state, workspace_root=workspace_root)
+    note_chapter_candidate(section_id, text, workspace_root=workspace_root)
+    return load_story_state(workspace_root=workspace_root)
 
 
 def apply_author_delta(

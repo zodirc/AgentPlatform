@@ -305,54 +305,12 @@ def default_opening_duty(
 
 
 def fragment_obligations(work_mode: str) -> dict[str, str]:
-    """按 work_mode 的 fragment 写作义务。corrected 不生成，只留给 legacy。"""
-    from app.writing.architecture import writer_sees_control_plane
-
-    if not writer_sees_control_plane():
-        return {}
-    mode = normalize_work_mode(work_mode)
-    if mode == "web_serial":
-        return {
-            "plot_progress": "情节往前：这场要的那一步可感（信息、对手、选择均可）。",
-            "worldview_texture": "世界质地在场上可感；悬念与规矩随事显露；物件从当前空间长出来。",
-            "climax_beat": "一件主线麻烦顶满；顶点仍落在本卷该落的地方。",
-            "battle_action": "动作来回有力，服务情节台阶。",
-            "dialogue_dyad": "对白露出人物选择与关系；允许直白；已知的名字直接用；空问收成一两句或动手。",
-            "mixed": (
-                "人物+情节+环境谁响一点随这场戏；"
-                "一章通常一场，长篇约三千到五千个可见字；"
-                "物件从当前空间长出来；空问收成一两句或动手。"
-            ),
-        }
-    return {
-        "plot_progress": "把一件事在场面里往前推。",
-        "worldview_texture": "把地方、价钱、规矩写在场上托人物；物件从当前空间长出来。",
-        "climax_beat": "一件主线麻烦顶满再落下；铺垫章停在日子上。",
-        "battle_action": "来回有力，不是电报体。",
-        "dialogue_dyad": "对白长短不齐，问完可以答不上来；已知的名字直接用；空问收成一两句。",
-        "mixed": "人物为中心：环境托举或情节加压，句味优先；物件从当前空间长出来。",
-    }
+    """fragment 不生成写作义务。"""
+    del work_mode
+    return {}
 
 
 def element_obligation(element: str | None, work_mode: str) -> str:
-    """三要素职务补充句。corrected 不生成。"""
-    from app.writing.architecture import writer_sees_control_plane
-
-    if not writer_sees_control_plane() or not element:
-        return ""
-    mode = normalize_work_mode(work_mode)
-    label = _ELEMENT_LABELS.get(element, element)
-    if mode == "web_serial":
-        if element == "character":
-            return f"本章主服务{label}：冲突里见选择与关系"
-        if element == "plot":
-            return f"本章主服务{label}：推进一步，留读者追问"
-        if element == "environment":
-            return f"本章主服务{label}：地方和关系在场上可感"
-    if element == "character":
-        return f"本章主服务{label}：杂取种种合成典型，靠对白/行动/心理显露"
-    if element == "plot":
-        return f"本章主服务{label}：场面里往前，因果落在手上"
-    if element == "environment":
-        return f"本章主服务{label}：物件、价钱、规矩托住人物"
+    """三要素不生成写作义务。"""
+    del element, work_mode
     return ""

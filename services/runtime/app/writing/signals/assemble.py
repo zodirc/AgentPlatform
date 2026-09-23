@@ -564,21 +564,8 @@ def _writer_obligations(
     kind_obl: str,
     obligations: dict[str, str],
 ) -> list[str]:
-    from app.writing.architecture import writer_sees_control_plane
-
-    if not writer_sees_control_plane():
-        return []
-    return [
-        "权重在写作工具内按 work_mode 切换，不在设置页",
-        "rewards 为观测，不进入 net_signal",
-        (
-            f"work_mode={work_mode}（{mode_label}）· "
-            f"fragment={declared}（评分切片，不是章职）"
-        ),
-        kind_obl or obligations.get(declared) or obligations.get("mixed") or "",
-        "拟合该类范本原型的节奏与质地，禁止搬用其故事核",
-        "有 repair_span 时同轮 propose_patch；多轮空问收成一两句或动手，勿改成旁白",
-    ]
+    del work_mode, mode_label, declared, kind_obl, obligations
+    return []
 
 
 async def evaluate_writing_fragment(

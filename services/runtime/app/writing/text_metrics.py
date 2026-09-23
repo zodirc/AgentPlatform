@@ -23,6 +23,7 @@ _PREFERRED_QUOTA = re.compile(
 )
 _AROUND_QUOTA = re.compile(r"(\d{2,6})\s*字(?:左右|以上)")
 _ANY_QUOTA = re.compile(r"(\d{2,6})\s*字")
+_SHORT_CHAPTER = re.compile(r"短章|间章|故意截断|就写到这")
 
 _TOC_MARKERS = (
     "只要目录",
@@ -229,6 +230,9 @@ def draft_length_fields(content: str, user_text: str) -> dict[str, object]:
     """长度软事实。无名额：低于 LENGTH_SHORT_FLOOR 才记 length_short；点名配额仍用 85%。"""
     vis = chapter_visible_chars(content)
     out: dict[str, object] = {"visible_chars": vis}
+    if _SHORT_CHAPTER.search(user_text or ""):
+        out["length_exception"] = "short_chapter"
+        return out
     named = parse_char_quota(user_text)
     if named is not None:
         out["quota_chars"] = named
@@ -261,19 +265,11 @@ def draft_length_fields(content: str, user_text: str) -> dict[str, object]:
 
 def length_short_summary(vis: int, quota: int) -> str:
     """篇幅不足时先看容量。字数不是质量，也不另开一场。"""
-    from app.writing.architecture import writer_sees_control_plane
-
-    if writer_sees_control_plane():
-        return (
-            f"实体文字 {vis} 字，低于门槛 {quota} 字"
-            f"（长篇区间 {DEFAULT_CHAPTER_MIN}–{DEFAULT_CHAPTER_MAX}）。"
-            "若这场已经收住，下一站留给下一章。"
-        )
     return (
         f"可见字 {vis}，低于门槛 {quota}"
         f"（默认 {DEFAULT_CHAPTER_MIN}–{DEFAULT_CHAPTER_MAX}，用户点名的字数优先）。"
-        "先看这一场的事实够不够写开：不够就回到章段补会互相改变做法的事实，不要另开一场。"
-        "事实够而正文跳过了，才把同一场写开。"
+        "先看这一场的事实够不够写开：不够就回到章段，改纲或保留这一短章，不要另开一场。"
+        "事实够而正文跳过了，才在同一场里重写。事实互相打架时交给编辑，不要直接覆盖。"
     )
 
 

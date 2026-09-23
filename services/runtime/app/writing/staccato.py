@@ -9,10 +9,8 @@ import re
 from typing import Any
 
 def drives_patch() -> bool:
-    """碎拍只在 legacy 控制链里驱动自动补丁。"""
-    from app.writing.architecture import aesthetic_auto_patch
-
-    return aesthetic_auto_patch()
+    """碎拍不驱动自动补丁。"""
+    return False
 
 
 _QUOTE_ONLY = re.compile(r"^「([^」]*)」[。！？!?,，.]?$")

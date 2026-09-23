@@ -298,11 +298,8 @@ async def propose_patch(
     if isinstance(span, dict) and (
         span.get("suggest_only") or span.get("repair_class") == "aesthetic"
     ):
-        from app.writing.architecture import aesthetic_auto_patch
-
-        if not aesthetic_auto_patch():
-            result["suggest_only"] = True
-            result["repair_class"] = "aesthetic"
+        result["suggest_only"] = True
+        result["repair_class"] = "aesthetic"
     return result
 
 

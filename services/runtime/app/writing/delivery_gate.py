@@ -78,11 +78,6 @@ def manifest_delivery_blockers(manifest: dict[str, Any] | None) -> list[str]:
             continue
         if row.get("length_short"):
             blockers.append(f"{section_id}: length_short")
-        from app.writing.architecture import style_signals_block_delivery
-
-        l0 = row.get("l0_hits")
-        if style_signals_block_delivery() and isinstance(l0, list) and l0:
-            blockers.append(f"{section_id}: L0 {', '.join(str(x) for x in l0)}")
     return blockers
 
 
@@ -101,31 +96,12 @@ def read_turn_manifest(turn_id: object | None, session_id: object | None) -> dic
 
 def delivery_hold_notice(blockers: list[str], *, book_scope: str = "single") -> str:
     lines = "\n".join(f"- {item}" for item in blockers) or "- （未知）"
-    from app.writing.architecture import writer_sees_control_plane
-
-    if not writer_sees_control_plane():
-        return (
-            "【交付门】这一章还不能当落盘完成。\n"
-            f"turn manifest 仍开：\n{lines}\n"
-            "低于篇幅时先看这场的事实够不够。不够就改章段，够就只写这一场。"
-            "不要为了字数另开一场。"
-        )
-    if book_scope == "long":
-        return (
-            "【交付门】这一章几乎还没写，不能把本章当落盘完成。\n"
-            f"turn manifest 仍开：\n{lines}\n"
-            "长篇本 Turn 只交一章：先把这场写出来。"
-            "配额未满时在已有拍里写满，不要 mode=append 粘第二场；"
-            "不要把「全书没写完」当成失败。"
-        )
+    del book_scope
     return (
-        "【交付门】本章尚未交付，禁止向用户宣称「已完成 / 定稿」。\n"
+        "【交付门】这一章还不能当落盘完成。\n"
         f"turn manifest 仍开：\n{lines}\n"
-        "下一步：L0 岛 → propose_patch（每 penalty_key 本 Turn 至多 "
-        f"{MAX_PATCHES_PER_PENALTY_KEY} 次生效 patch）；"
-        "碎拍预算尽 → draft_section mode=rewrite_window 一次换整窗；"
-        "L0 清且这场还没成形 → 在已有拍里写满；已经收住就不要 mode=append 粘第二场。"
-        "如实说明进度。"
+        "低于篇幅时先看这场的事实够不够。不够就改章段，够就只写这一场。"
+        "不要为了字数另开一场。"
     )
 
 

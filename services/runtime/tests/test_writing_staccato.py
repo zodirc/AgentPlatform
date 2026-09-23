@@ -106,7 +106,7 @@ def test_staccato_ledger_same_line_and_tagged() -> None:
     assert staccato_fields(text).get("staccato_uniform") is True
 
 
-def test_staccato_receipt_beats_hinge(monkeypatch) -> None:
+def test_staccato_receipt_beats_hinge() -> None:
     uid = uuid4()
     state = TurnState(
         turn_id=uid,
@@ -127,10 +127,6 @@ def test_staccato_receipt_beats_hinge(monkeypatch) -> None:
         },
     )
     assert should_inject_verify_receipt(state, reserve_steps=10) is False
-    from app.settings import settings
-
-    monkeypatch.setattr(settings, "writing_architecture", "legacy")
-    assert should_inject_verify_receipt(state, reserve_steps=10) is True
     assert verify_receipt_kind(state) == "staccato"
     text = build_verify_receipt_text(state)
     assert "机械一问一答" in text
@@ -199,10 +195,7 @@ def test_staccato_cleared_by_clean_draft() -> None:
     assert should_inject_verify_receipt(state) is False
 
 
-def test_staccato_cleared_by_clean_patch(monkeypatch) -> None:
-    from app.settings import settings
-
-    monkeypatch.setattr(settings, "writing_architecture", "legacy")
+def test_staccato_cleared_by_clean_patch() -> None:
     uid = uuid4()
     state = TurnState(
         turn_id=uid,
@@ -235,10 +228,7 @@ def test_staccato_cleared_by_clean_patch(monkeypatch) -> None:
     assert should_inject_verify_receipt(state) is False
 
 
-def test_pending_patch_does_not_clear_staccato(monkeypatch) -> None:
-    from app.settings import settings
-
-    monkeypatch.setattr(settings, "writing_architecture", "legacy")
+def test_pending_patch_does_not_clear_staccato() -> None:
     uid = uuid4()
     state = TurnState(
         turn_id=uid,
@@ -260,7 +250,7 @@ def test_pending_patch_does_not_clear_staccato(monkeypatch) -> None:
         result={"status": "pending", "path": "drafts/manuscript.md"},
     )
     assert state.staccato_pending is True
-    assert should_inject_verify_receipt(state, reserve_steps=10) is True
+    assert should_inject_verify_receipt(state, reserve_steps=10) is False
 
 
 def test_staccato_phatic_acks_with_narrative_between() -> None:

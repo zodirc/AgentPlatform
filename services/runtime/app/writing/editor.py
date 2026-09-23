@@ -106,10 +106,7 @@ def normalize_editor_report(
         keep_items.append(text[:400])
         if len(keep_items) >= KEEP_MAX:
             break
-    from app.writing.architecture import writer_sees_control_plane
-
-    if not writer_sees_control_plane():
-        cleaned_flags = cleaned_flags[:3]
+    cleaned_flags = cleaned_flags[:3]
     return {
         "section_id": section_id,
         "flags": cleaned_flags,
@@ -139,6 +136,10 @@ def save_editor_report(
     for item in (report.get("keep") or [])[:1]:
         lines.append(f"这本书的样子：{item}")
     write_editor_notes(section_id, lines, workspace_root=workspace_root)
+    report["telemetry"] = detector_telemetry(section_id, workspace_root=workspace_root)
+    path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     from app.writing.taste import append_taste_mark
 
     for item in report.get("keep") or []:
@@ -194,9 +195,9 @@ def structural_return_payload(
         return None
     because: list[str] = []
     if conflict:
-        because.append("与已成立事实冲突，不覆盖")
+        because.append("与已成立事实冲突，交给编辑回读原文，不覆盖")
     if length_short and not has_material:
-        because.append("材料不足，先改纲")
+        because.append("材料不足，回到 Planner：改纲或保留短章")
     elif length_short:
         because.append("材料够，重写同一场")
     return {
@@ -242,30 +243,20 @@ def structural_observation_lines(root: Path) -> list[str]:
 
 
 def format_observations_block(*, workspace_root: Path | None = None) -> str:
-    """编辑 Turn 才进窗：L0/L1/表面层 sidecar 作观测材料。"""
+    """编辑第一遍只看原文、冲突和用户否过的句子。检测器名称不进这一遍。"""
     from app.settings import settings
     from app.writing.author_state import stance_is_stale
+    from app.writing.canon import format_clue_lines, format_conflict_lines
+    from app.writing.taste import format_taste_block
 
     root = _workspace(workspace_root)
-    surface_dir = root / ".agent" / "work" / "surface"
     lines = ["[observations]"]
-    if surface_dir.is_dir():
-        files = sorted(surface_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-        for path in files[:4]:
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            if not isinstance(data, dict):
-                continue
-            keys = [k for k, v in data.items() if v]
-            if keys:
-                lines.append(f"- {path.stem}: {', '.join(str(k) for k in keys[:8])}")
-    from app.writing.canon import format_conflict_lines
-
-    lines.extend(_recent_l0_l1_lines(root))
     lines.extend(format_conflict_lines(workspace_root=root))
+    lines.extend(format_clue_lines(workspace_root=root))
     lines.extend(structural_observation_lines(root))
+    taste = format_taste_block(workspace_root=root, audience="editor")
+    if taste:
+        lines.append(taste)
     if stance_is_stale(workspace_root=root):
         lines.append("- author_state_stale: 立场连续 3 次高度相似")
     cap = int(getattr(settings, "writing_editor_observations_max_chars", 1200) or 1200)
@@ -308,6 +299,37 @@ def _recent_l0_l1_lines(root: Path) -> list[str]:
             if len(lines) >= 4:
                 return lines
     return lines
+
+
+def detector_telemetry(
+    section_id: str,
+    *,
+    workspace_root: Path | None = None,
+) -> dict[str, Any]:
+    """报告写完之后才抄检测器，供统计。不进入编辑结论。"""
+    root = _workspace(workspace_root)
+    sessions = root / ".agent" / "sessions"
+    if not sessions.is_dir():
+        return {"detectors": [], "net_signal": None}
+    files = sorted(
+        sessions.glob("*/turns/*/manifest.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for path in files[:12]:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        drafts = data.get("section_drafts") if isinstance(data, dict) else None
+        row = drafts.get(section_id) if isinstance(drafts, dict) else None
+        if not isinstance(row, dict):
+            continue
+        hits = row.get("l0_hits") or []
+        net = row.get("net_signal")
+        if hits or net is not None:
+            return {"detectors": list(hits)[:8], "net_signal": net}
+    return {"detectors": [], "net_signal": None}
 
 
 def editor_phase_block() -> str:

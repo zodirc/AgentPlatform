@@ -201,12 +201,7 @@ def build_work_surface_block(
     outline_bits = _writer_plan_parts(focus, workspace_root=workspace_root, message=message)
     if outline_bits:
         body_parts.extend(outline_bits)
-        from app.writing.architecture import writer_sees_control_plane
-
-        if writer_sees_control_plane():
-            lines.append("- outline job: (当前阶段、章节作用、当前章段)")
-        else:
-            lines.append("- writing pack")
+        lines.append("- writing pack")
 
     if prev:
         prev_body = extract_section(doc, prev) or ""
@@ -214,7 +209,7 @@ def build_work_surface_block(
         if tail:
             body_parts.append(
                 f"### 上一章已发生的结尾 (`{prev}`)\n{tail}\n"
-                "只用来核对连续性。本章另起一场；不复述前情，不续写最后一句。"
+                "只用来核对连续性。不复述前情，不续写最后一句。"
             )
             lines.append(f"- prev_tail: `{prev}` ({len(tail)} chars)")
 
@@ -360,102 +355,8 @@ def _writer_plan_parts(
     workspace_root: Path | None = None,
     message: str = "",
 ) -> list[str]:
-    from app.writing.architecture import writer_sees_control_plane
-
-    if writer_sees_control_plane():
-        return _outline_job_parts(focus, workspace_root=workspace_root)
     from app.writing.writing_pack import compile_writing_pack_parts
 
     return compile_writing_pack_parts(
         focus, workspace_root=workspace_root, message=message
     )
-
-
-def _outline_job_parts(
-    focus: str,
-    *,
-    workspace_root: Path | None = None,
-) -> list[str]:
-    """定向抽出当前阶段、章节作用、当前章段。chapter job 即当前章段。"""
-    from app.writing.outline_arc import (
-        extract_chapter_role,
-        extract_current_stage,
-        extract_outline_job,
-        extract_outline_neighbors,
-        extract_outline_spine,
-        extract_outline_style_contract,
-        extract_world_entry,
-        outline_style_committed,
-    )
-
-    text = _read_outline_md(workspace_root)
-    from app.writing.book_scope import infer_book_scope
-    from app.writing.outline_phase import resolve_outline_phase
-
-    parts: list[str] = []
-    scope = infer_book_scope("", outline=text, section_id=focus)
-    phase = resolve_outline_phase(
-        "", outline=text, book_scope=scope, workspace_root=workspace_root
-    )
-    if phase.get("outline_phase") == "open":
-        parts.append(
-            "### Outline phase: open\n"
-            + str(phase.get("outline_phase_note") or "")
-        )
-        if not text.strip():
-            return parts
-    if not text.strip():
-        return []
-    style = extract_outline_style_contract(text)
-    if style and outline_style_committed(text):
-        parts.append(f"### Outline book\n{style}")
-    spine = extract_outline_spine(text)
-    if spine:
-        parts.append(f"### Outline spine\n{spine}")
-    n = _focus_section_number(focus)
-    if n == 1:
-        entry = extract_world_entry(text)
-        if entry:
-            parts.append(f"### 世界入口\n{entry}")
-    stage = extract_current_stage(text)
-    if stage:
-        parts.append(
-            "### 当前阶段\n连续性约束，不要在正文里复述或总结。\n" + stage
-        )
-    role = extract_chapter_role(text, focus) if focus else ""
-    if role:
-        parts.append(
-            f"### 章节作用 (`{focus}`)\n"
-            "连续性约束，不要在正文里复述或总结。\n"
-            + role
-        )
-    if n is not None and n >= 2:
-        neighbors = extract_outline_neighbors(text, focus)
-        for sid, neighbor_role in neighbors.items():
-            parts.append(
-                f"### 相邻章节作用 (`{sid}`)\n"
-                "连续性约束，不是这一章的开写便条。\n"
-                + neighbor_role
-            )
-    if n is not None and n >= 4:
-        toc = outline_toc_snippet(workspace_root, max_chars=720)
-        kept = [
-            line
-            for line in toc.splitlines()
-            if "远处" not in line and "世界入口" not in line
-        ]
-        toc = "\n".join(kept).strip()
-        if toc:
-            parts.append(f"### Outline map (breadth)\n{toc}")
-        parts.append(
-            "### Continuity\n"
-            "与上一章已发生的事实一致。新章另起一场。"
-        )
-    job = extract_outline_job(text, focus) if focus else ""
-    if job:
-        parts.append(
-            f"### 当前章段 (`{focus}`)\n"
-            "开写便条。写这些事实；不要把阶段和作用抄进正文。\n"
-            + job
-        )
-    return parts

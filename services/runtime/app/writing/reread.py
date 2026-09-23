@@ -96,32 +96,10 @@ def build_reread_pack(*, workspace_root: Path | None = None) -> dict[str, Any]:
         label = "太 AI" if mark.get("kind") == "ai" else "不像这本书"
         parts.append((f"[{sid} · 用户圈：{label}]", chunk))
 
-    from app.writing.architecture import writer_sees_control_plane
+    from app.writing.canon import load_canon
 
     used_p = 0
-    if writer_sees_control_plane():
-        state = load_story_state(workspace_root=workspace_root)
-        now = None
-        nums = [chapter_num(i) for i in ids]
-        nums_i = [n for n in nums if n is not None]
-        if nums_i:
-            now = max(nums_i)
-        for row in overdue_promises(state, current_ch=now):
-            made = row.get("made_ch")
-            sid = f"ch{made}" if made is not None else ""
-            body = _section_text(doc, sid) if sid else ""
-            token = str(row.get("what") or "")[:8]
-            chunk = _window(body, around=token, radius=300, cap=300)
-            if not chunk:
-                continue
-            used_p += visible_chars(chunk)
-            if used_p > REREAD_BUDGET["promises"]:
-                break
-            parts.append((f"[{sid} · 许诺逾期]", chunk))
-    else:
-        from app.writing.canon import load_canon
-
-        for fact in load_canon(workspace_root=workspace_root).get("facts") or []:
+    for fact in load_canon(workspace_root=workspace_root).get("facts") or []:
             if not isinstance(fact, dict):
                 continue
             if fact.get("status") != "active" or fact.get("kind") != "promise":
@@ -329,6 +307,6 @@ def should_gate_editor_phase(message: str) -> bool:
         return False
     if re.match(r"^\[edit\]", blob, re.I):
         return True
-    if re.search(r"/edit\b|编辑看看", blob, re.I):
+    if re.search(r"/edit\b|编辑看看|为什么像\s*AI|审读这一章|检查这一章", blob, re.I):
         return True
     return False

@@ -476,51 +476,6 @@ def split_sample_excerpts(samples: str) -> list[tuple[str, str]]:
     return out
 
 
-def ensure_voice_seed(*, workspace_root: Path | None = None) -> int:
-    """Work 级 voice_seed：换章不换书。缺则写入 writing_prefs.json。"""
-    from app.writing.work_mode import load_writing_prefs, save_writing_prefs
-
-    prefs = load_writing_prefs(workspace_root=workspace_root)
-    raw = prefs.get("voice_seed")
-    try:
-        seed = int(raw)
-    except (TypeError, ValueError):
-        seed = None
-    if seed is None:
-        blob = str(_workspace_root_for_seed(workspace_root))
-        seed = int.from_bytes(hashlib.sha256(blob.encode("utf-8")).digest()[:4], "big")
-        prefs["voice_seed"] = seed
-        save_writing_prefs(prefs, workspace_root=workspace_root)
-    return seed
-
-
-def _workspace_root_for_seed(workspace_root: Path | None) -> Path:
-    return Path(workspace_root or settings.workspace_root).resolve()
-
-
-def pick_voice_excerpt(excerpts: list[tuple[str, str]], *, seed: int) -> tuple[str, str] | None:
-    if not excerpts:
-        return None
-    return excerpts[seed % len(excerpts)]
-
-
-def rotate_builtin_samples(body: str, *, workspace_root: Path | None = None) -> str:
-    """每 Turn 只出一段公版节选。同一 Work 两 Turn 同一段。"""
-    sections = parse_style_card_sections(body)
-    samples = sections.get("Samples") or ""
-    excerpts = split_sample_excerpts(samples)
-    if len(excerpts) <= 1:
-        return body
-    seed = ensure_voice_seed(workspace_root=workspace_root)
-    picked = pick_voice_excerpt(excerpts, seed=seed)
-    if picked is None:
-        return body
-    title, excerpt = picked
-    heading = f"### {title}\n\n{excerpt}" if title else excerpt
-    intro = "公版节选。样品只借句味与起伏；人物、行当、年代由这本自己长出来。"
-    return merge_style_section(body, "Samples", f"{intro}\n\n{heading}")
-
-
 def extract_sample_paragraphs(
     text: str,
     *,
@@ -725,16 +680,11 @@ def _load_builtin_voice(
     if not body.strip():
         return None
     body = apply_style_meta_for_pin(body.strip(), meta)
-    from app.writing.architecture import public_exemplar_rotation
-
-    if rotate_samples and public_exemplar_rotation():
-        body = rotate_builtin_samples(body, workspace_root=workspace_root)
-    elif not public_exemplar_rotation():
-        body = merge_style_section(
-            body,
-            "Samples",
-            "用户认可的本书原文优先。平台不自动轮换公版。",
-        )
+    body = merge_style_section(
+        body,
+        "Samples",
+        "用户认可的本书原文优先。平台不自动轮换公版。",
+    )
     return WritingCard(
         path=builtin_path,
         title=_card_title(path, meta, body) or fallback_title,
@@ -952,21 +902,11 @@ def prepare_writing_system_prompt(
     spec = build_writing_spec_block(message, workspace_root=workspace_root)
     if spec:
         extras.append(spec)
-    from app.writing.work_mode import resolve_work_mode
-    from app.writing.commitment import format_commitment_block
-    from app.writing.subtype import serial_subtype_block
-
-    work_mode, _src = resolve_work_mode(message, workspace_root=workspace_root)
     from app.writing.turn_phase import resolve_scope
 
     scope = resolve_scope(
         message, outline=outline_text, workspace_root=workspace_root
     )
-    from app.writing.architecture import writer_sees_control_plane
-
-    if not author and writer_sees_control_plane():
-        extras.append(format_commitment_block(work_mode=work_mode, workspace_root=workspace_root))
-    from app.writing.editor_notes import format_editor_notes_block
     from app.writing.author_notes import format_author_notes_block
     from app.writing.focus import infer_focus_section_id
     from app.writing.manuscript import list_section_ids, load_manuscript_doc
@@ -983,20 +923,23 @@ def prepare_writing_system_prompt(
         author_block = format_author_state_block(workspace_root=workspace_root)
         if author_block:
             extras.append(author_block)
-        taste_block = format_taste_block(workspace_root=workspace_root)
+        taste_block = format_taste_block(workspace_root=workspace_root, query=message)
         if taste_block:
             extras.append(taste_block)
-    editor_block = format_editor_notes_block(focus=focus, workspace_root=workspace_root)
-    if editor_block and writer_sees_control_plane():
-        extras.append(editor_block)
     if not author:
+        from app.writing.taste import format_taste_block
+
         author_block = format_author_notes_block(workspace_root=workspace_root)
         if author_block:
             extras.append(author_block)
-    if work_mode == "web_serial":
-        subtype = serial_subtype_block(message, outline_text)
-        if subtype:
-            extras.append(subtype)
+        taste_block = format_taste_block(workspace_root=workspace_root, query=message)
+        if taste_block:
+            extras.append(taste_block)
+    from app.writing.taste import format_voice_offer
+
+    voice_offer = format_voice_offer(message, workspace_root=workspace_root)
+    if voice_offer:
+        extras.append(voice_offer)
     from app.writing.opening_ponds import (
         format_committed_pond_block,
         format_opening_ponds_block,
@@ -1020,31 +963,14 @@ def prepare_writing_system_prompt(
         )
         if committed:
             extras.append(committed)
-        from app.writing.work_mode import format_after_lock_craft_block
-
-        after_lock = format_after_lock_craft_block(
-            picking=False,
-            work_mode=work_mode,
-            book_scope=scope,
-        )
-        if after_lock and writer_sees_control_plane():
-            extras.append(after_lock)
-        elif scope == "long":
+        if scope == "long":
             extras.append(
                 "## 点选之后\n已选的是作品简介，不是正文。不要把简介粘进稿。"
             )
-    from app.writing.signals.beats import format_local_beats_block
+    from app.writing.revision import apply_revision_block, should_apply_revision
 
-    spec_frag = None
-    if spec:
-        matched = re.search(r"fragment: `([^`]+)`", spec)
-        if matched:
-            spec_frag = matched.group(1)
-    beats = format_local_beats_block(
-        message, workspace_root=workspace_root, fragment=spec_frag
-    )
-    if beats and writer_sees_control_plane():
-        extras.append(beats)
+    if should_apply_revision(message):
+        extras.append(apply_revision_block())
     from app.writing.reread import should_gate_editor_phase, should_gate_reread_phase
 
     reread_phase = should_gate_reread_phase(message)

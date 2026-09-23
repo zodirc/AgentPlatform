@@ -159,5 +159,7 @@ def test_observations_include_l0_and_stale(tmp_path: Path) -> None:
     )
     block = format_observations_block(workspace_root=tmp_path)
     assert "[observations]" in block
-    assert "L0=" in block
+    assert "L0=" not in block
+    assert "staccato_uniform" not in block
+    assert "net_signal" not in block
     assert "author_state_stale" in block

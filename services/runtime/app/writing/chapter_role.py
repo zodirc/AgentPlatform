@@ -228,86 +228,8 @@ def chapter_kind_obligation(
     message: str = "",
     outline: str = "",
 ) -> str:
-    from app.writing.architecture import writer_sees_control_plane
-
-    if not writer_sees_control_plane():
-        return ""
-    k = normalize_chapter_kind(kind)
-    pos = normalize_chapter_position(position)
-    mode = normalize_work_mode(work_mode)
-    from app.writing.book_scope import default_duty_for_scope, normalize_book_scope
-    from app.writing.work_mode import serial_opening_compass
-
-    scope = normalize_book_scope(book_scope)
-    if scope in {"short", "single"}:
-        return default_duty_for_scope(
-            scope,
-            work_mode=mode,
-            position=pos,
-            chapter_kind=k,
-            message=message,
-            outline=outline,
-        )
-    if k == "live_character":
-        if pos == "opening":
-            from app.writing.outline_phase import wants_opening_candidates
-
-            picking = wants_opening_candidates(message, outline=outline)
-            extra = ""
-            if not picking:
-                extra = (
-                    serial_opening_compass(message=message, outline=outline) + "。"
-                    if mode == "web_serial"
-                    else "句味与人物距离优先。"
-                )
-            return (
-                "这场偏站住这个人：读者先看见他眼下怎么过；"
-                "一章通常一场，长篇约三千到五千个可见字。后面的海（境界总纲、全书规则、结局）不要写进这一章。"
-                "物件从他站着的地方长出来。"
-                + extra
-            )
-        return "这场偏立人：人物选择与关系在场上，勿空转设定演讲"
-    if k == "world_rule":
-        if pos == "opening" and scope == "long":
-            from app.writing.outline_phase import wants_opening_candidates
-
-            picking = wants_opening_candidates(message, outline=outline)
-            extra = " 机构专名让场景站稳后再出现。"
-            if mode == "web_serial" and not picking:
-                extra = (
-                    f" 质地托住{serial_opening_compass(message=message, outline=outline)}。"
-                )
-            elif mode == "web_serial" and picking:
-                extra = ""
-            return (
-                "这场偏环境质地：社会背景与自然场景可先站；"
-                "何时何地即可，不要写成能/不能做什么的手册。"
-                + extra
-            )
-        if pos in {"rising", "turn"} and scope == "long":
-            return "这场偏环境质地：只写新地点/这场要的那一步，勿重播已立设定"
-        return "这场偏环境质地：地方和关系托住人物，勿开场背设定"
-    if k == "conflict_hook":
-        if pos == "opening" and mode == "web_serial":
-            from app.writing.outline_phase import wants_opening_candidates
-
-            picking = wants_opening_candidates(message, outline=outline)
-            extra = ""
-            if not picking:
-                extra = serial_opening_compass(message=message, outline=outline) + "。"
-            return (
-                "本章强钩：第一句是事故，烟火是入口不是主菜；"
-                "只兑第一阶悬念，卷末高潮留给后文。"
-                + extra
-            )
-        return (
-            "本章强钩：冲突/异变可先顶，但仍要有人；"
-            "只兑第一阶悬念，禁止卷末大高潮与设定百科"
-        )
-    if k == "plot_step":
-        return "本章情节台阶：这场要的那一步可见（信息、对手、选择均可）；人物仍在场上"
-    if k == "climax_payoff":
-        return "本章高潮兑现：一件主线麻烦顶满；副线只碰撞主线"
+    """章职不再生成写作义务。"""
+    del kind, work_mode, position, book_scope, message, outline
     return ""
 
 

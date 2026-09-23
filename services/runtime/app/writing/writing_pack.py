@@ -1,6 +1,7 @@
-"""Planner 交给 Writer 的事实包。
+"""按需交给 Writer 的事实。
 
-不含章节作用、奖励、惩罚、承诺槽和修复课。规划术语留在大纲文件里。
+只放眼前要写的事、已确认事实和用户认可的原文。
+不转发主线、世界入口、当前阶段的抽象句，也不自动补目标、期限或冲突。
 """
 
 from __future__ import annotations
@@ -40,48 +41,36 @@ def compile_writing_pack_parts(
 ) -> list[str]:
     from app.writing.book_scope import infer_book_scope
     from app.writing.canon import format_active_facts
-    from app.writing.focus import _focus_section_number, _read_outline_md
+    from app.writing.focus import _read_outline_md
     from app.writing.outline_arc import (
-        extract_current_stage,
         extract_outline_job,
-        extract_outline_spine,
         extract_outline_style_contract,
-        extract_world_entry,
         outline_style_committed,
     )
     from app.writing.outline_phase import resolve_outline_phase
 
     text = _read_outline_md(workspace_root)
-    mode = planning_mode(workspace_root=workspace_root, outline=text)
     scope = infer_book_scope(message, outline=text, section_id=focus)
     phase = resolve_outline_phase(
         message, outline=text, book_scope=scope, workspace_root=workspace_root
     )
-    parts: list[str] = ["### 写作包", "下面是事实。正文不要解释计划。"]
+    parts: list[str] = [
+        "### 写作包",
+        "只放眼前要写的事和已确认的事实。缺了就空着，不要补目标、期限或冲突。",
+    ]
     if phase.get("outline_phase") == "open" and not text.strip():
-        parts.append("大纲还没有。先写入 outline.md，再写正文。")
-        return parts
-    if not text.strip() and not focus:
         return parts
     style = extract_outline_style_contract(text)
     if style and outline_style_committed(text):
         parts.append(style)
-    spine = extract_outline_spine(text)
-    if spine and mode != "discovery":
-        parts.append(spine)
-    n = _focus_section_number(focus) if focus else None
-    if mode != "discovery" and n == 1:
-        entry = extract_world_entry(text)
-        if entry:
-            parts.append(entry)
-    if mode != "discovery":
-        stage = extract_current_stage(text)
-        if stage:
-            parts.append(stage)
     brief = extract_outline_job(text, focus) if focus else ""
     if brief:
         parts.append(brief)
-    facts = format_active_facts(focus=focus, workspace_root=workspace_root)
+    facts = format_active_facts(
+        focus=focus,
+        workspace_root=workspace_root,
+        query=f"{message}\n{brief}",
+    )
     if facts:
-        parts.append("已成立：\n" + facts)
+        parts.append("已确认：\n" + facts)
     return parts

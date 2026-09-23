@@ -5,29 +5,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from app.writing.book_scope import book_scope_label, scope_spec_line
-from app.writing.chapter_role import cold_start_score_fragment, resolve_chapter_role
+from app.writing.book_scope import book_scope_label
+from app.writing.chapter_role import resolve_chapter_role
 from app.writing.focus import infer_focus_section_id
 from app.writing.manuscript import list_section_ids, load_manuscript_doc
 from app.writing.occupy import manuscript_is_occupied, wants_new_piece
 from app.writing.outline_arc import extract_outline_job, outline_style_committed
-from app.writing.signals.prefs_loader import _module as _writing_prefs
-from app.writing.work_mode import (
-    resolve_work_mode,
-    work_mode_label,
-)
-from app.writing.regime import is_author_regime
-
-normalize_fragment = _writing_prefs().normalize_fragment
-
-_LABELS: dict[str, str] = {
-    "plot_progress": "情节推进",
-    "worldview_texture": "环境质地",
-    "climax_beat": "高潮",
-    "battle_action": "动作",
-    "dialogue_dyad": "对白",
-    "mixed": "综合",
-}
+from app.writing.work_mode import resolve_work_mode
 
 _CLIMAX = re.compile(r"高潮|摊牌|决战|翻脸|决裂|揭穿|对质|到顶")
 _PAD = re.compile(r"铺垫|过日子|加压|质地|规矩|立人")
@@ -123,36 +107,8 @@ def build_writing_spec_block(
     )
     scope = str(role.get("book_scope") or "single")
     scope_source = str(role.get("book_scope_source") or "auto")
-    position = str(role.get("chapter_position") or "rising")
-    section_num = _section_num(focus)
-
-    # 无纲：文学向仍 mixed；连载长篇开篇按章职切片（conflict_hook → plot_progress）。
-    if duty:
-        fragment = infer_fragment_from_duty(duty)
-    else:
-        fragment = cold_start_score_fragment(
-            None, duty="", role=role, work_mode=work_mode
-        )
-    fragment = normalize_fragment(fragment)
-    label = _LABELS.get(fragment, fragment)
-    mode_label = work_mode_label(work_mode)
-    source_note = "手动" if mode_source == "user" else "自动"
     scope_label = book_scope_label(scope)
-    scope_note = "手动" if scope_source == "user" else "自动"
-
-    duty_line = ""
-    if duty:
-        one = re.sub(r"\s+", " ", duty).strip()
-        duty_line = one if len(one) <= 72 else one[:71] + "…"
-    scope_line = scope_spec_line(
-        scope,
-        position=position,
-        section_num=section_num,
-        work_mode=work_mode,
-        message=message,
-        outline=outline,
-    )
-    from app.writing.outline_phase import outline_phase_spec_line, resolve_outline_phase
+    from app.writing.outline_phase import resolve_outline_phase
 
     phase_info = resolve_outline_phase(
         message,
@@ -162,46 +118,18 @@ def build_writing_spec_block(
         manuscript_chapters=0 if fresh else len(ids),
     )
 
-    from app.writing.architecture import writer_sees_control_plane
-
-    if not writer_sees_control_plane():
-        phase = str(phase_info.get("outline_phase") or "open")
-        scope_tail = " · 手动" if scope_source == "user" else ""
-        mode_tail = "（手动）" if mode_source == "user" else ""
-        quiet = [
-            "## 作品",
-            f"- book_scope: `{scope}`（{scope_label}{scope_tail}）",
-            f"- work_mode: `{work_mode}`{mode_tail}",
-            f"- outline_phase: `{phase}`",
-        ]
-        if focus:
-            quiet.append(f"- focus: `{focus}`")
-        if not outline_style_committed(outline) or starting_new:
-            quiet.append("- 新篇另起人与事")
-        text = "\n".join(quiet)
-        return text if len(text) <= 620 else text[:619] + "…"
-
-    lines = [
-        "## Writing spec",
-        f"- book_scope: `{scope}`（{scope_label} · {scope_note}）",
-        f"- work_mode: `{work_mode}`（{mode_label} · {source_note}）",
-        f"- fragment: `{fragment}`（{label} · 评分切片，不是章职）",
-        f"- {scope_line}",
-        outline_phase_spec_line(phase_info),
+    phase = str(phase_info.get("outline_phase") or "open")
+    scope_tail = " · 手动" if scope_source == "user" else ""
+    mode_tail = "（手动）" if mode_source == "user" else ""
+    quiet = [
+        "## 作品",
+        f"- book_scope: `{scope}`（{scope_label}{scope_tail}）",
+        f"- work_mode: `{work_mode}`{mode_tail}",
+        f"- outline_phase: `{phase}`",
     ]
     if focus:
-        lines.append(f"- focus: `{focus}`")
-    if duty_line:
-        lines.append(f"- 这一场: {duty_line}")
+        quiet.append(f"- focus: `{focus}`")
     if not outline_style_committed(outline) or starting_new:
-        lines.append("- 新篇另起人与事")
-    lines.append(
-        "- 若 tool_result 点名弱窗：同轮 propose_patch 只改那一窗，收成一两句或动手"
-    )
-    text = "\n".join(lines)
-    author = is_author_regime(message, workspace_root=workspace_root)
-    if author:
-        lines = [ln for ln in lines if "若 tool_result 点名弱窗" not in ln]
-        text = "\n".join(lines)
-    cap = 500 if author else 620
-    return text if len(text) <= cap else text[: cap - 1] + "…"
+        quiet.append("- 新篇另起人与事")
+    text = "\n".join(quiet)
+    return text if len(text) <= 620 else text[:619] + "…"

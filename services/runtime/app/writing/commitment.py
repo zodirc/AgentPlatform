@@ -1,4 +1,4 @@
-"""章级叙事承诺：声明 → 配额硬拒；兑现启发式只写 sidecar，不回传模型。"""
+"""用户若自己交了章级选择，只记 sidecar。不回传模型，也不当落盘硬门。"""
 
 from __future__ import annotations
 
@@ -6,8 +6,6 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Mapping
-
-from app.writing.work_mode import normalize_work_mode
 
 COMMIT_DIR = Path(".agent") / "work" / "commitments"
 DEFAULT_COMBO = {
@@ -32,11 +30,7 @@ SLOTS: dict[str, tuple[str, ...]] = {
     "affect_mode": ("embodied", "named", "mixed"),
     "locations": ("1", "2+"),
 }
-LITERARY_QUOTA_SLOTS = tuple(SLOTS)
-WEB_QUOTA_SLOTS = ("affect_mode", "locations", "subplot")
 WINDOW_N = 5
-DEFAULT_MAX = 2
-TIME_ORDER_STREAK = 3
 COMMIT_MIN_VISIBLE = 800
 
 DRAFT_COMMITMENT_PROPERTY: dict[str, Any] = {
@@ -74,12 +68,6 @@ def normalize_commitment(raw: Mapping[str, Any] | None) -> dict[str, str]:
     return out
 
 
-def is_default_combo(commit: Mapping[str, str], *, work_mode: str) -> bool:
-    mode = normalize_work_mode(work_mode)
-    keys = WEB_QUOTA_SLOTS if mode == "web_serial" else LITERARY_QUOTA_SLOTS
-    return all(commit.get(key) == DEFAULT_COMBO[key] for key in keys)
-
-
 def load_recent_commitments(*, workspace_root: Path, limit: int = WINDOW_N) -> list[dict[str, str]]:
     root = Path(workspace_root).resolve() / COMMIT_DIR
     if not root.is_dir():
@@ -94,40 +82,6 @@ def load_recent_commitments(*, workspace_root: Path, limit: int = WINDOW_N) -> l
         if isinstance(data, dict):
             rows.append(normalize_commitment(data))
     return rows
-
-
-def quota_reject(
-    commit: Mapping[str, str],
-    *,
-    work_mode: str,
-    workspace_root: Path,
-) -> tuple[str, str] | None:
-    mode = normalize_work_mode(work_mode)
-    history = load_recent_commitments(workspace_root=workspace_root, limit=WINDOW_N)
-    window = history[-WINDOW_N:]
-    if is_default_combo(commit, work_mode=mode):
-        n_default = sum(1 for row in window if is_default_combo(row, work_mode=mode))
-        if n_default >= DEFAULT_MAX:
-            return (
-                "commitment_default_over_quota",
-                "连续章节里 AI 默认组合（线性/无副线/主角选择/道德清楚/具身/单地点）已用满。"
-                "改一个槽位再交。",
-            )
-    if mode != "web_serial":
-        streak = 0
-        for row in reversed(window):
-            if row.get("time_order") == commit.get("time_order"):
-                streak += 1
-            else:
-                break
-        if streak >= TIME_ORDER_STREAK - 1 and commit.get("time_order"):
-            # 本章将变成第 3 次
-            if streak + 1 >= TIME_ORDER_STREAK:
-                return (
-                    "commitment_time_order_streak",
-                    "同一 time_order 连续三章。换一种时序再交。",
-                )
-    return None
 
 
 def save_commitment(
@@ -183,48 +137,6 @@ def fulfillment_facts(text: str, commit: Mapping[str, str]) -> dict[str, Any]:
     }
 
 
-def unavailable_commitment_lines(*, work_mode: str, workspace_root: Path | None) -> list[str]:
-    """只列本章不可用的组合，不列全枚举。"""
-    from app.settings import settings
-
-    root = Path(workspace_root or settings.workspace_root).resolve()
-    mode = normalize_work_mode(work_mode)
-    history = load_recent_commitments(workspace_root=root, limit=WINDOW_N)
-    window = history[-WINDOW_N:]
-    lines: list[str] = []
-    n_default = sum(1 for row in window if is_default_combo(row, work_mode=mode))
-    if n_default >= DEFAULT_MAX:
-        lines.append(
-            "本章不可用：窗内默认组合（线性/无副线/主角选择/道德清楚/具身/单地点）已用满。"
-        )
-    if mode != "web_serial" and window:
-        last = window[-1].get("time_order")
-        streak = 0
-        for row in reversed(window):
-            if row.get("time_order") == last:
-                streak += 1
-            else:
-                break
-        if streak >= TIME_ORDER_STREAK - 1 and last:
-            lines.append(f"本章不可用：time_order={last} 已连续两章。")
-    return lines
-
-
-def format_commitment_block(
-    *,
-    work_mode: str = "literary",
-    workspace_root: Path | None = None,
-) -> str:
-    lines = [
-        "## Narrative commitment",
-        "章长 upsert 带 narrative_commitment，按这章真的要写的来填。",
-    ]
-    lines.extend(
-        unavailable_commitment_lines(work_mode=work_mode, workspace_root=workspace_root)
-    )
-    return "\n".join(lines)
-
-
 def choice_history(
     *,
     workspace_root: Path,
@@ -243,17 +155,6 @@ def choice_history(
     return out
 
 
-def missing_commitment_error() -> dict[str, Any]:
-    return {
-        "status": "error",
-        "error": "need_narrative_commitment",
-        "summary": (
-            "章稿须带 narrative_commitment（time_order/subplot/resolution_agency/"
-            "moral_polarity/affect_mode/locations）。先交承诺再写正文。"
-        ),
-    }
-
-
 def gate_draft_commitment(
     *,
     content: str,
@@ -263,31 +164,14 @@ def gate_draft_commitment(
     raw: Any,
     workspace_root: Path,
 ) -> tuple[dict[str, Any] | None, dict[str, str] | None]:
-    """长章 upsert 才硬要承诺。append / rewrite_window / 短稿不挡。corrected 不挡。"""
-    from app.writing.architecture import commitment_hard_gate
+    """不把承诺槽当硬门。用户若自己交了选择，只记下，不拒绝落盘。"""
     from app.writing.text_metrics import visible_chars
 
-    if not commitment_hard_gate():
-        if isinstance(raw, dict) and visible_chars(content) >= COMMIT_MIN_VISIBLE and mode not in {
-            "append",
-            "rewrite_window",
-        }:
-            commit = normalize_commitment(raw)
-            save_commitment(section_id, commit, workspace_root=workspace_root)
-            return None, commit
-        return None, None
-    if mode in {"append", "rewrite_window"}:
-        return None, None
-    if visible_chars(content) < COMMIT_MIN_VISIBLE:
-        return None, None
-    if not isinstance(raw, dict):
-        return missing_commitment_error(), None
-    commit = normalize_commitment(raw)
-    blocked = quota_reject(commit, work_mode=work_mode, workspace_root=workspace_root)
-    if blocked:
-        return {"status": "error", "error": blocked[0], "summary": blocked[1]}, None
-    save_commitment(section_id, commit, workspace_root=workspace_root)
-    from app.writing.ledger import append_ledger
-
-    append_ledger(commit, workspace_root=workspace_root, kind="chapter")
-    return None, commit
+    if isinstance(raw, dict) and visible_chars(content) >= COMMIT_MIN_VISIBLE and mode not in {
+        "append",
+        "rewrite_window",
+    }:
+        commit = normalize_commitment(raw)
+        save_commitment(section_id, commit, workspace_root=workspace_root)
+        return None, commit
+    return None, None

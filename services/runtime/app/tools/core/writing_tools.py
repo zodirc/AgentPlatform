@@ -478,14 +478,8 @@ def _reject_append_gate(
     """章级过程 L0 未清，或新切片自带碎拍 → 拒 append（不落盘）。长篇 L0 不挡加厚。"""
     if occupy_fresh or mode != "append":
         return None
-    from app.writing.architecture import writer_sees_control_plane
-
     prior_row = (manifest.get("section_drafts") or {}).get(section_id)
-    if (
-        not writer_sees_control_plane()
-        and isinstance(prior_row, dict)
-        and prior_row.get("length_short")
-    ):
+    if isinstance(prior_row, dict) and prior_row.get("length_short"):
         return {
             "status": "error",
             "error": "append_second_scene",
@@ -1070,40 +1064,36 @@ async def draft_section(
             scored,
             workspace_root=Path(settings.workspace_root),
         )
-    from app.writing.architecture import writer_sees_control_plane
+    from app.writing.canon import chapter_candidates, load_canon
+    from app.writing.editor import structural_return_payload
 
-    if not writer_sees_control_plane():
-        from app.writing.canon import chapter_candidates, load_canon
-        from app.writing.editor import structural_return_payload
-
-        kinds = {
-            row["kind"]
-            for row in chapter_candidates(section_id, scored)
-            if row["kind"] != "change"
-        }
-        conflict = any(
-            isinstance(row, dict) and row.get("source_section") == section_id
-            for row in load_canon(workspace_root=Path(settings.workspace_root)).get(
-                "conflicts"
-            )
-            or []
+    kinds = {
+        row["kind"]
+        for row in chapter_candidates(section_id, scored)
+        if row["kind"] != "change"
+    }
+    conflict = any(
+        isinstance(row, dict) and row.get("source_section") == section_id
+        for row in load_canon(workspace_root=Path(settings.workspace_root)).get(
+            "conflicts"
         )
-        handoff = structural_return_payload(
-            length_short=bool(result.get("length_short")),
-            has_material=bool(kinds),
-            conflict=conflict,
-        )
-        if handoff:
-            entry["structural_return"] = handoff
-            drafts[section_id] = entry
-        result.pop("writing_signals", None)
-        result.pop("consistency_flags", None)
-        result.pop("thread_stale", None)
-        result.pop("repair_span", None)
-        result.pop("rewrite_policy", None)
+        or []
+    )
+    handoff = structural_return_payload(
+        length_short=bool(result.get("length_short")),
+        has_material=bool(kinds),
+        conflict=conflict,
+    )
+    if handoff:
+        entry["structural_return"] = handoff
+        drafts[section_id] = entry
+    result.pop("writing_signals", None)
+    result.pop("consistency_flags", None)
+    result.pop("thread_stale", None)
+    result.pop("repair_span", None)
+    result.pop("rewrite_policy", None)
     if not author:
         return result
-    from app.writing.commitment import choice_history
     from app.writing.text_metrics import DEFAULT_CHAPTER_MAX, DEFAULT_CHAPTER_MIN
 
     vis = int(result.get("visible_chars") or 0)
@@ -1118,18 +1108,6 @@ async def draft_section(
     }
     if flags:
         shrunk["continuity_flags"] = flags
-    from app.writing.architecture import writer_sees_control_plane
-
-    if writer_sees_control_plane():
-        due = overdue_promises(
-            load_story_state(workspace_root=Path(settings.workspace_root)),
-            current_ch=chapter_num(section_id),
-        )
-        if due:
-            shrunk["promises_due"] = due[:3]
-    hist = choice_history(workspace_root=Path(settings.workspace_root))
-    if hist:
-        shrunk["choice_history"] = hist
     if previous_kept:
         shrunk["previous_kept"] = previous_kept
     if occupy_fresh:

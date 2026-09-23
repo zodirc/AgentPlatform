@@ -50,10 +50,7 @@ def test_opening_skips_later_chapters() -> None:
     assert opening_fields(text, "ch2") == {}
 
 
-def test_opening_receipt_once(monkeypatch) -> None:
-    from app.settings import settings
-
-    monkeypatch.setattr(settings, "writing_architecture", "legacy")
+def test_opening_receipt_once() -> None:
     uid = uuid4()
     state = TurnState(
         turn_id=uid,
@@ -69,7 +66,7 @@ def test_opening_receipt_once(monkeypatch) -> None:
         tool_name="draft_section",
         result={"status": "drafted", "opening_institution": True},
     )
-    assert should_inject_verify_receipt(state, reserve_steps=10) is True
+    assert should_inject_verify_receipt(state, reserve_steps=10) is False
     assert verify_receipt_kind(state) == "opening"
     text = build_verify_receipt_text(state)
     assert "机构专名" in text

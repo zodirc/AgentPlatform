@@ -346,17 +346,6 @@ def should_inject_verify_receipt(
     )
     if writing_used:
         return False
-    from app.writing.architecture import inject_aesthetic_receipt
-
-    if inject_aesthetic_receipt():
-        if bool(getattr(state, "staccato_pending", False)):
-            return True
-        if bool(getattr(state, "hinge_pending", False)):
-            return True
-        if bool(getattr(state, "opening_pending", False)):
-            return True
-        if bool(getattr(state, "lore_pending", False)):
-            return True
     return False
 
 

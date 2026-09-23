@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -59,6 +60,8 @@ def append_taste_mark(
     excerpt: str,
     note: str = "",
     source: str = "user",
+    scope: str = "",
+    paired_excerpt: str = "",
     workspace_root: Path | None = None,
 ) -> dict[str, Any]:
     from app.settings import settings
@@ -76,6 +79,8 @@ def append_taste_mark(
         "kind": token,
         "excerpt": body,
         "note": clip_visible((note or "").strip(), 60),
+        "scope": clip_visible((scope or "").strip(), 40),
+        "paired_excerpt": clip_visible((paired_excerpt or "").strip(), 200),
         "source": "editor" if source == "editor" else "user",
     }
     path = taste_path(workspace_root=workspace_root)
@@ -105,22 +110,50 @@ def append_taste_mark(
     return {"status": "ok", "mark": row, "summary": f"已记口味：{KIND_LABELS[token]}"}
 
 
-def format_taste_block(*, workspace_root: Path | None = None) -> str:
+def format_taste_block(
+    *,
+    workspace_root: Path | None = None,
+    audience: str = "writer",
+    query: str = "",
+) -> str:
     from app.settings import settings
 
     marks = load_taste_marks(workspace_root=workspace_root)
     if not marks:
         return ""
     cap = int(getattr(settings, "writing_taste_block_max_chars", 1200) or 1200)
-    yes = [m for m in marks if m.get("kind") == "yes" and m.get("source") != "editor"][-4:]
-    neg = [m for m in marks if m.get("kind") in {"ai", "off"}][-3:]
+    revoked = {
+        str(m.get("excerpt") or "").strip()
+        for m in marks
+        if m.get("kind") in {"off", "cut"} and str(m.get("excerpt") or "").strip()
+    }
+    yes = [
+        m
+        for m in marks
+        if m.get("kind") == "yes"
+        and str(m.get("excerpt") or "").strip() not in revoked
+    ]
+    blob = query or ""
+
+    def _rank(mark: dict[str, Any]) -> tuple[int, int]:
+        excerpt = str(mark.get("excerpt") or "")
+        hit = 1 if blob and excerpt[:8] and excerpt[:8] in blob else 0
+        user = 1 if mark.get("source") != "editor" else 0
+        return (hit, user)
+
+    yes.sort(key=_rank, reverse=True)
+    yes = yes[:3]
+    neg: list[dict[str, Any]] = []
+    if audience != "writer":
+        neg = [m for m in marks if m.get("kind") in {"ai", "off"}][-3:]
     lines = ["[taste]"]
     if yes:
         lines.append("用户说就是这样")
         for mark in yes:
             sid = mark.get("section_id") or ""
             excerpt = clip_visible(str(mark.get("excerpt") or ""), 200)
-            lines.append(f"[{sid} · 用户圈：就是这样]\n{excerpt}")
+            label = "就是这样" if mark.get("source") != "editor" else "编辑保留，用户未反对"
+            lines.append(f"[{sid} · {label}]\n{excerpt}")
     if neg:
         lines.append("用户说太 AI / 不像这本书")
         for mark in neg:
@@ -136,6 +169,77 @@ def format_taste_block(*, workspace_root: Path | None = None) -> str:
     if visible_chars(text) > cap:
         text = clip_visible(text, cap)
     return text
+
+
+_VOICE_REL = Path(".agent") / "work" / "voice_choice"
+_OPENING_VOICE = re.compile(r"写开篇|开篇|写第一章|^第一章")
+_PICK_A = re.compile(r"声口(?:用|选|采用)\s*A|采用声口\s*A")
+_PICK_B = re.compile(r"声口(?:用|选|采用)\s*B|采用声口\s*B")
+_VOICE_LINES = {
+    "A": "叙述距离近，句子跟人物的手脚走。",
+    "B": "叙述距离稍远，场景先于解释。",
+}
+
+
+def _voice_path(*, workspace_root: Path | None = None) -> Path:
+    return _workspace(workspace_root) / _VOICE_REL
+
+
+def _has_confirmed_voice(*, workspace_root: Path | None = None) -> bool:
+    marks = load_taste_marks(workspace_root=workspace_root)
+    revoked = {
+        str(m.get("excerpt") or "").strip()
+        for m in marks
+        if m.get("kind") in {"off", "cut"} and str(m.get("excerpt") or "").strip()
+    }
+    return any(
+        m.get("kind") == "yes"
+        and m.get("source") != "editor"
+        and str(m.get("excerpt") or "").strip()
+        and str(m.get("excerpt") or "").strip() not in revoked
+        for m in marks
+    )
+
+
+def load_voice_choice(*, workspace_root: Path | None = None) -> str:
+    path = _voice_path(workspace_root=workspace_root)
+    if not path.is_file():
+        return ""
+    token = path.read_text(encoding="utf-8", errors="replace").strip().upper()
+    return token if token in _VOICE_LINES else ""
+
+
+def save_voice_choice(token: str, *, workspace_root: Path | None = None) -> None:
+    path = _voice_path(workspace_root=workspace_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(token.strip().upper() + "\n", encoding="utf-8")
+
+
+def format_voice_offer(message: str, *, workspace_root: Path | None = None) -> str:
+    """开篇没有确认原文时给出两个声口候选。没选中就不记成作品声口。"""
+    blob = message or ""
+    if _PICK_A.search(blob):
+        save_voice_choice("A", workspace_root=workspace_root)
+    elif _PICK_B.search(blob):
+        save_voice_choice("B", workspace_root=workspace_root)
+    chosen = load_voice_choice(workspace_root=workspace_root)
+    if chosen:
+        return (
+            "## 本书声口\n"
+            f"用户选定：{_VOICE_LINES[chosen]}\n"
+            "这只定叙述距离。候选本身不是正文正例。"
+        )
+    if _has_confirmed_voice(workspace_root=workspace_root):
+        return ""
+    if not _OPENING_VOICE.search(blob):
+        return ""
+    return (
+        "## 声口候选\n"
+        "本书还没有用户确认的原文。可以选一个叙述距离，不选就用中性现代白话。\n"
+        f"A. {_VOICE_LINES['A']}\n"
+        f"B. {_VOICE_LINES['B']}\n"
+        "没有选择时，两个候选都不记成作品声口。"
+    )
 
 
 def work_prototypes(*, workspace_root: Path | None = None) -> list[dict[str, Any]]:

@@ -105,6 +105,7 @@ def _tools_for_turn(
     """Plan 规划闸优先；否则开篇候选闸；再编辑 / 回读相位。"""
     from app.writing.opening_ponds import should_gate_opening_choice
     from app.writing.reread import should_gate_editor_phase, should_gate_reread_phase
+    from app.writing.revision import should_gate_revision_phase
 
     opening_choice = False
     editor_phase = False
@@ -120,7 +121,9 @@ def _tools_for_turn(
 
             outline_wait = should_gate_outline_wait(message or "")
         if not opening_choice and not outline_wait:
-            editor_phase = should_gate_editor_phase(message or "")
+            editor_phase = should_gate_revision_phase(message or "") or should_gate_editor_phase(
+                message or ""
+            )
             if not editor_phase:
                 reread_phase = should_gate_reread_phase(message or "")
     tools = tool_scope(
@@ -131,6 +134,7 @@ def _tools_for_turn(
         outline_wait=outline_wait,
         editor_phase=editor_phase,
         reread_phase=reread_phase,
+        revision_phase=should_gate_revision_phase(message or ""),
     )
     return tools, opening_choice, editor_phase, reread_phase
 
@@ -1763,18 +1767,16 @@ async def _run_turn(
             else f"{choice_block}\n"
         )
     elif editor_phase:
-        from app.writing.architecture import writer_sees_control_plane
         from app.writing.editor import editor_phase_block, format_observations_block
+        from app.writing.revision import revision_phase_block, should_gate_revision_phase
 
-        edit_block = editor_phase_block()
-        if writer_sees_control_plane():
-            if edit_block:
-                volatile_context = (
-                    f"{volatile_context.rstrip()}\n\n{edit_block}\n"
-                    if volatile_context.strip()
-                    else f"{edit_block}\n"
-                )
+        if should_gate_revision_phase(message or ""):
+            from app.writing.revision import build_revision_context
+
+            system_prompt = revision_phase_block()
+            volatile_context = build_revision_context(message or "")
         else:
+            edit_block = editor_phase_block()
             system_prompt = edit_block or system_prompt
             obs = format_observations_block()
             volatile_context = obs or ""

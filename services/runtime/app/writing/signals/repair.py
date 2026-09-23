@@ -431,13 +431,9 @@ def build_repair_span(
     if not old or old not in body:
         return None
     hint_key = key or "weak_window"
-    from app.writing.architecture import AESTHETIC_SIGNAL_KEYS, aesthetic_auto_patch
+    from app.writing.architecture import AESTHETIC_SIGNAL_KEYS
 
-    from app.writing.staccato import drives_patch
-
-    aesthetic = hint_key in AESTHETIC_SIGNAL_KEYS or (
-        hint_key == "staccato_uniform" and not drives_patch()
-    )
+    aesthetic = hint_key in AESTHETIC_SIGNAL_KEYS or hint_key == "staccato_uniform"
     repair_class = "aesthetic" if aesthetic else "mechanical"
     payload = {
         "old_text": old,
@@ -445,7 +441,7 @@ def build_repair_span(
         "hint": repair_hint(hint_key, work_mode),
         "visible_chars": visible_chars(old),
         "repair_class": repair_class,
-        "suggest_only": repair_class == "aesthetic" and not aesthetic_auto_patch(),
+        "suggest_only": repair_class == "aesthetic",
     }
     return payload
 

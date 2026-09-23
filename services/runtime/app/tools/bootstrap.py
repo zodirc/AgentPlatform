@@ -1286,6 +1286,15 @@ OUTLINE_WAIT_TOOL_ALLOWLIST = frozenset(
     }
 )
 
+REVISION_PHASE_TOOL_ALLOWLIST = frozenset(
+    {
+        "read_file",
+        "grep",
+        "glob",
+        "stub_echo",
+    }
+)
+
 EDITOR_PHASE_TOOL_ALLOWLIST = frozenset(
     {
         "read_file",
@@ -1323,6 +1332,7 @@ def tool_scope(
     outline_wait: bool = False,
     editor_phase: bool = False,
     reread_phase: bool = False,
+    revision_phase: bool = False,
 ) -> list[ToolSpec]:
     """按场景 Profile（及可选 Plan 相位 / 开篇点选 / 大纲等人 / 编辑 / 回读）裁剪本 Turn 可用工具。
 
@@ -1376,6 +1386,8 @@ def tool_scope(
             names.append("update_outline")
         if "read_file" not in names and registry.get("read_file") is not None:
             names.append("read_file")
+    elif revision_phase:
+        names = [n for n in names if n in REVISION_PHASE_TOOL_ALLOWLIST]
     elif editor_phase:
         names = [n for n in names if n in EDITOR_PHASE_TOOL_ALLOWLIST]
         if "editor_report" not in names and registry.get("editor_report") is not None:

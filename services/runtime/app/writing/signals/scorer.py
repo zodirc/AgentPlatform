@@ -532,12 +532,10 @@ def score_writing_fragment(
         probe_penalties = list(body.get("penalties") or [])
     elif worst_scored is not None and l0_penalty_hits(worst_scored.get("penalties")):
         probe_penalties = list(worst_scored.get("penalties") or probe_penalties)
-    from app.writing.architecture import writer_sees_control_plane
-
     needs_repair = is_writing_weak(
         net=float(body["net_signal"]),
         penalties=probe_penalties if not body_l0 else body.get("penalties"),
-        length_short=length_short and writer_sees_control_plane(),
+        length_short=False,
     )
     span = None
     if needs_repair:
@@ -578,11 +576,7 @@ def score_writing_fragment(
                 else None,
                 work_mode=mode,
             )
-            from app.writing.architecture import writer_sees_control_plane
-
-            if writer_sees_control_plane():
-                body["repair_span"] = span
-            elif span.get("repair_class") == "mechanical":
+            if span.get("repair_class") == "mechanical":
                 body["repair_span"] = span
             else:
                 body["telemetry_repair_span"] = span

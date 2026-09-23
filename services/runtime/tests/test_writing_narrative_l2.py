@@ -7,7 +7,6 @@ from app.writing.commitment import (
     COMMIT_MIN_VISIBLE,
     gate_draft_commitment,
     normalize_commitment,
-    quota_reject,
 )
 from app.writing.ledger import HAMMING_MIN, append_ledger, hamming, pond_vector, too_close_to_ledger
 from app.writing.narrative.judge import parse_judge_payload, self_agreement
@@ -121,7 +120,7 @@ def test_pond_vector_prefers_declared_price_axis() -> None:
     assert encode_vector({"price_class": "body_tax"})["price_class"] == "lifespan"
 
 
-def test_commitment_quota_and_min_visible(tmp_path: Path, monkeypatch) -> None:
+def test_commitment_quota_and_min_visible(tmp_path: Path) -> None:
     default = normalize_commitment({})
     assert default["affect_mode"] == "embodied"
     err, commit = gate_draft_commitment(
@@ -143,20 +142,6 @@ def test_commitment_quota_and_min_visible(tmp_path: Path, monkeypatch) -> None:
         workspace_root=tmp_path,
     )
     assert err is None and commit is None
-    from app.settings import settings
-
-    monkeypatch.setattr(settings, "writing_architecture", "legacy")
-    err, commit = gate_draft_commitment(
-        content=long,
-        mode="upsert",
-        work_mode="literary",
-        section_id="ch1",
-        raw=None,
-        workspace_root=tmp_path,
-    )
-    assert err is not None and err["error"] == "need_narrative_commitment"
-    mixed = normalize_commitment({"affect_mode": "named", "subplot": "parallel_theme"})
-    assert quota_reject(mixed, work_mode="literary", workspace_root=tmp_path) is None
 
 
 def test_fourth_wall_does_not_raise_meta_knowing() -> None:
@@ -168,5 +153,5 @@ def test_fourth_wall_does_not_raise_meta_knowing() -> None:
 
 def test_serial_subtype_block() -> None:
     assert infer_serial_subtype("写一部凡人流长篇") == "fanren"
-    assert "凡人流" in serial_subtype_block("写一部凡人流长篇")
+    assert serial_subtype_block("写一部凡人流长篇") == ""
     assert serial_subtype_block("写个日常") == ""

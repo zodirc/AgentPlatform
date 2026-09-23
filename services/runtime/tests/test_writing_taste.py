@@ -24,10 +24,12 @@ def test_taste_block_is_excerpts_only(tmp_path: Path) -> None:
     block = format_taste_block(workspace_root=tmp_path)
     assert block.startswith("[taste]")
     assert "她没接话，把秤砣放回去" in block
-    assert "夜色如墨" in block
+    assert "夜色如墨" not in block
     assert "请避免" not in block
     assert "不要写" not in block
-    assert "用户圈：就是这样" in block
+    assert "就是这样" in block
+    editor = format_taste_block(workspace_root=tmp_path, audience="editor")
+    assert "夜色如墨" in editor
 
 
 def test_taste_block_caps_at_1200(tmp_path: Path) -> None:

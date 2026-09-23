@@ -479,32 +479,6 @@ def check_propose_patch_allowed(
             patch_apply_miss_streak=apply_miss_streak(manifest, section_id=sid),
         )
 
-    if isinstance(prior, dict):
-        net_raw = prior.get("net_signal")
-        if net_raw is not None:
-            try:
-                net = float(net_raw)
-            except (TypeError, ValueError):
-                net = None
-            from app.writing.architecture import net_signal_controls_patch
-
-            if (
-                net_signal_controls_patch()
-                and net is not None
-                and net >= 0.0
-                and not _process_l0_open(prior)
-            ):
-                return _budget_error(
-                    error="patch_unnecessary",
-                    penalty_key=penalty_key,
-                    rewrite_policy="append_or_stop",
-                    summary=(
-                        "net_signal 已 ≥ 0 且无过程 L0：不要继续 patch。"
-                        "这场还没写满就在已有拍里补；已经收住就收工，不要 append 第二场。"
-                    ),
-                    net_signal=net,
-                )
-
     if sid and patch_budget_exhausted(
         manifest, section_id=sid, penalty_key=penalty_key
     ):
