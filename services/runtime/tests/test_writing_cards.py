@@ -216,14 +216,6 @@ def test_author_prompt_adds_state_and_taste_drops_commitment(tmp_path: Path) -> 
 
     save_book_scope_override(scope="long", source="user", workspace_root=tmp_path)
     save_regime_override(value="author", source="user", workspace_root=tmp_path)
-    from app.writing.story_state import apply_author_delta
-
-    apply_author_delta(
-        section_id="ch1",
-        deltas=["码头冷了"],
-        patch={"identity": {"is": ["码头上的人"]}},
-        workspace_root=tmp_path,
-    )
     update_author_state("立场", "这本书更冷了。", workspace_root=tmp_path)
     append_taste_mark(
         section_id="ch1",
@@ -239,7 +231,7 @@ def test_author_prompt_adds_state_and_taste_drops_commitment(tmp_path: Path) -> 
     vol = pin.volatile_block
     assert "[author_state]" in vol
     assert "[taste]" in vol
-    assert vol.index("## Story state") < vol.index("[author_state]")
+    assert "## Story state" not in vol
     assert vol.index("[author_state]") < vol.index("[taste]")
     assert "commitment" not in vol.lower()
     assert "不可用组合" not in vol

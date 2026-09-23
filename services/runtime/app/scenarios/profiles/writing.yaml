@@ -20,7 +20,6 @@ tool_names:
   - forget
   - load_skill
   - delegate
-  - note_story_delta
   - author_note
   - author_state
   - reread_book

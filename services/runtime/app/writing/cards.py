@@ -956,7 +956,6 @@ def prepare_writing_system_prompt(
     )
     if not author:
         extras.append(format_commitment_block(work_mode=work_mode, workspace_root=workspace_root))
-    from app.writing.story_state import format_story_state_block
     from app.writing.editor_notes import format_editor_notes_block
     from app.writing.author_notes import format_author_notes_block
     from app.writing.focus import infer_focus_section_id
@@ -967,9 +966,6 @@ def prepare_writing_system_prompt(
     focus = infer_focus_section_id(
         message, ids, workspace_root=workspace_root, outline=outline_text
     ) or (ids[-1] if ids else "")
-    story_block = format_story_state_block(workspace_root=workspace_root)
-    if story_block:
-        extras.append(story_block)
     if author:
         from app.writing.author_state import format_author_state_block
         from app.writing.taste import format_taste_block

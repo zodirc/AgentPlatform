@@ -365,7 +365,7 @@ def test_scenario_registry_loads_profiles() -> None:
     assert writing.attach_writing_signals is True
     assert "draft_section" in writing.tool_names
     assert "propose_book_candidates" in writing.tool_names
-    assert "note_story_delta" in writing.tool_names
+    assert "note_story_delta" not in writing.tool_names
     assert "author_note" in writing.tool_names
     assert "author_state" in writing.tool_names
     assert "reread_book" in writing.tool_names

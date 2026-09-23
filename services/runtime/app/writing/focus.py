@@ -260,14 +260,6 @@ def build_writing_bookmark(
         "last_user": last_user[:800],
     }
     try:
-        from app.writing.story_state import bookmark_story_bits
-
-        bits = bookmark_story_bits()
-        if bits:
-            bookmark["story_state"] = bits
-    except Exception:
-        pass
-    try:
         from app.writing.author_state import bookmark_author_stance
 
         stance = bookmark_author_stance()
@@ -307,9 +299,6 @@ def format_writing_bookmark(bookmark: dict[str, object]) -> str:
     last_user = str(bookmark.get("last_user") or "").strip()
     if last_user:
         lines.append(f"last_user:\n{last_user}")
-    story = str(bookmark.get("story_state") or "").strip()
-    if story:
-        lines.append(f"story_state: {story}")
     return "\n".join(lines)
 
 

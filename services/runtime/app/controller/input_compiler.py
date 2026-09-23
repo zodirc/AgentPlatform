@@ -76,7 +76,7 @@ EDIT_EXPAND = (
 )
 REREAD_EXPAND = (
     "[reread] 回头读这本书。读回来的是原文，不是概要。"
-    "先 reread_book，再 author_state 写回读记，并用 note_story_delta 重估账本。"
+    "先 reread_book，再 author_state 写回读记。"
     "动前文只用 propose_retcon，等用户按此执行。"
 )
 _RETCON_EXECUTE = re.compile(r"^\[retcon\]", re.I)

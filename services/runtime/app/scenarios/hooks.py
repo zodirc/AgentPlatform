@@ -184,7 +184,6 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
                     )
                 try:
                     from app.writing.story_state import (
-                        apply_mechanical_update,
                         chapter_num,
                         consistency_flags,
                         thread_stale_flags,
@@ -203,10 +202,6 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
                         user_text, workspace_root=Path(settings.workspace_root)
                     )
 
-                    apply_mechanical_update(
-                        chapter_text,
-                        section_id=focus or "",
-                    )
                     measured = save_surface(focus or "ch", chapter_text)
                     ch_n = chapter_num(focus or "")
                     cons = consistency_flags(chapter_text, section_id=focus or "")

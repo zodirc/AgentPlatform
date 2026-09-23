@@ -397,9 +397,6 @@ def format_story_state_block(*, workspace_root: Path | None = None) -> str:
         lines.append("这本书拒绝：")
         for item in taboos:
             lines.append(f"- {item}")
-    missed = missed_delta_streak(state)
-    if missed >= 2:
-        lines.append("连续两章没有留下 deltas。这章若改变了什么，用 note_story_delta 记三句以内。")
     if author:
         hint = _author_pass_hint(
             state, current_ch=now, workspace_root=workspace_root
@@ -485,21 +482,6 @@ def _latest_chapter(state: Mapping[str, Any]) -> int | None:
             except (TypeError, ValueError):
                 pass
     return max(nums) if nums else None
-
-
-def missed_delta_streak(state: Mapping[str, Any]) -> int:
-    deltas = state.get("deltas") if isinstance(state.get("deltas"), dict) else {}
-    now = _latest_chapter(state)
-    if now is None:
-        return 0
-    miss = 0
-    for ch in range(now, 0, -1):
-        if str(ch) in deltas and deltas[str(ch)]:
-            break
-        miss += 1
-        if miss >= 2:
-            return miss
-    return miss
 
 
 def story_state_contract_ready(*, workspace_root: Path | None = None) -> bool:

@@ -1404,30 +1404,6 @@ async def propose_chapter_openings(
     }
 
 
-async def note_story_delta(
-    section_id: str,
-    deltas: list[str] | None = None,
-    patch: dict[str, Any] | None = None,
-    **_kwargs: Any,
-) -> dict[str, Any]:
-    """章写完后记 ≤3 条自由句，可选结构化 patch。不评分。"""
-    from app.writing.story_state import apply_author_delta, chapter_num
-
-    state = apply_author_delta(
-        section_id=section_id,
-        deltas=list(deltas or []),
-        patch=patch if isinstance(patch, dict) else None,
-        workspace_root=Path(settings.workspace_root),
-    )
-    key = str(chapter_num(section_id) or section_id)
-    return {
-        "status": "ok",
-        "section_id": section_id,
-        "deltas": (state.get("deltas") or {}).get(key),
-        "summary": "已记入 story_state",
-    }
-
-
 async def author_note(
     section_id: str,
     text: str,

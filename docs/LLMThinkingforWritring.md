@@ -200,7 +200,7 @@ Child 流结束时：优先从 `tool_calls[].input` 取对象，否则用文本�
 主模型仍拿完整 writing system。立意相关只有 WORK STATE / TOOLS 里几句，用来 **禁止它自己编候选、禁止把草稿状态带进构思**：
 
 > 用户只给题材或说「看看」时，进入作品候选阶段。  
-> 这一阶段只负责产生若干个新的作品候选，不写第一章，不进入 opening / outline / draft，也不要把当前章节、story_state、author_state 或其他写作状态带入候选构思。  
+> 这一阶段只负责产生若干个新的作品候选，不写第一章，不进入 opening / outline / draft，也不要把当前章节、author_state 或其他写作状态带入候选构思。  
 > 调用 `propose_book_candidates` 时不要自己编候选。工具会为每个候选建立独立的最小上下文并分别采样；每次采样只产生一个候选，不进行候选之间的比较、连续 brainstorm 或二次创作。  
 > 候选只是一个大概成立、值得继续发展的作品概貌。形成后立即停止，由后续选择阶段负责判断。  
 > 候选的 `pitch` 是书页入口，不是第一章开头。
@@ -273,7 +273,7 @@ Child 的工作是：题材 → 随手产一个对象。不是：研究都市修
 
 - `writing_context` / `focus=ch1` / `outline_phase` / `plot_progress`
 - `outline.md`、draft、manuscript
-- `story_state`、`author_state`
+- `author_state`
 - 上一组卡片、拒池正文
 - 长篇 / 网文 / 工作模式标签（除了从用户句里剥题材时用到的「长篇」前缀）
 

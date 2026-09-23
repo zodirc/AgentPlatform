@@ -491,37 +491,6 @@ def build_registry() -> ToolRegistry:
     )
     registry.register(
         ToolSpec(
-            name="note_story_delta",
-            description=(
-                "After a chapter is drafted, optionally record up to 3 free sentences "
-                "of what changed, plus an optional structured patch "
-                "(wants/pressures/threads/info_gaps/taboos/"
-                "reader_ledger/promises/deferred/identity). Not scored."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "section_id": {"type": "string"},
-                    "deltas": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "maxItems": 3,
-                    },
-                    "patch": {
-                        "type": "object",
-                        "description": (
-                            "Optional ledger patch: wants/pressures/threads/"
-                            "info_gaps/taboos/reader_ledger/promises/deferred/identity"
-                        ),
-                    },
-                },
-                "required": ["section_id"],
-            },
-            handler=core.note_story_delta,
-        )
-    )
-    registry.register(
-        ToolSpec(
             name="author_note",
             description=(
                 "After a chapter, optionally record ≤120 characters of your current "
@@ -1359,7 +1328,6 @@ REREAD_PHASE_TOOL_ALLOWLIST = frozenset(
         "glob",
         "reread_book",
         "author_state",
-        "note_story_delta",
         "propose_retcon",
         "stub_echo",
     }
@@ -1438,7 +1406,7 @@ def tool_scope(
             names.append("editor_report")
     elif reread_phase:
         names = [n for n in names if n in REREAD_PHASE_TOOL_ALLOWLIST]
-        for extra in ("reread_book", "author_state", "note_story_delta", "propose_retcon"):
+        for extra in ("reread_book", "author_state", "propose_retcon"):
             if extra not in names and registry.get(extra) is not None:
                 names.append(extra)
     specs: list[ToolSpec] = []

@@ -156,9 +156,7 @@ def outline_contract_ready(
     spine = extract_outline_spine(text).strip()
 
     if scope == "long":
-        from app.writing.story_state import story_state_contract_ready
-
-        return story_state_contract_ready(workspace_root=workspace_root)
+        return bool(spine) or bool(_SPINE_HINT.search(text))
 
     if scope == "short":
         return len(text) >= 40 and (bool(spine) or _SPINE_HINT.search(text))
