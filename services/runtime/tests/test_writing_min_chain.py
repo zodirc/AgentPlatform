@@ -158,6 +158,7 @@ def test_revision_does_not_write_until_choice() -> None:
     }
     assert "propose_patch" not in names
     assert "draft_section" not in names
+    assert "stub_echo" not in names
     assert should_apply_revision("采用候选 A") is True
     assert should_gate_revision_phase("采用候选 A") is False
 

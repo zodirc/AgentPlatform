@@ -1263,26 +1263,15 @@ _LATE_STAGE_DROP = frozenset(
 # Plan phase "planning": only allow plan edits — no retrieval / disk write / exec
 # until the user clicks "execute this plan".
 # Plan「规划中」：只允许改清单，禁止检索/写盘/exec（用户尚未点「按此执行」）。
-PLANNING_TOOL_ALLOWLIST = frozenset(
-    {
-        "update_plan",
-        "stub_echo",
-    }
-)
+PLANNING_TOOL_ALLOWLIST = frozenset({"update_plan"})
 
 # Opening-pond picker (Plan analog): only the card tool until the user picks one.
-OPENING_CHOICE_TOOL_ALLOWLIST = frozenset(
-    {
-        "propose_book_candidates",
-        "stub_echo",
-    }
-)
+OPENING_CHOICE_TOOL_ALLOWLIST = frozenset({"propose_book_candidates"})
 
 OUTLINE_WAIT_TOOL_ALLOWLIST = frozenset(
     {
         "update_outline",
         "read_file",
-        "stub_echo",
     }
 )
 
@@ -1291,7 +1280,6 @@ REVISION_PHASE_TOOL_ALLOWLIST = frozenset(
         "read_file",
         "grep",
         "glob",
-        "stub_echo",
     }
 )
 
@@ -1301,7 +1289,6 @@ EDITOR_PHASE_TOOL_ALLOWLIST = frozenset(
         "grep",
         "glob",
         "editor_report",
-        "stub_echo",
     }
 )
 
@@ -1314,7 +1301,6 @@ REREAD_PHASE_TOOL_ALLOWLIST = frozenset(
         "reread_book",
         "author_state",
         "propose_retcon",
-        "stub_echo",
     }
 )
 
@@ -1338,17 +1324,17 @@ def tool_scope(
 
     English: Build the per-turn ToolSpec list from ScenarioProfile.tool_names and
     approval_overrides, then apply plan-phase rules:
-    - ``planning`` → allowlist only (update_plan / stub_echo);
+    - ``planning`` → allowlist only (update_plan);
     - ``executing`` → waive approval for on-write tools (user already approved the plan).
-    - ``opening_choice`` → allowlist only (propose_book_candidates / stub_echo);
+    - ``opening_choice`` → allowlist only (propose_book_candidates);
       ignored when ``planning`` (Plan mode wins).
     - ``outline_wait`` → allowlist update_outline / read_file; after opening_choice.
     - ``editor_phase`` / ``reread_phase`` → writing role allowlists; ignored when
       planning or opening_choice. Priority: planning > opening_choice > outline_wait
       > editor > reread.
 
-    Always ensures ``stub_echo`` is present for ops/debug probes. Does not register
-    new handlers — only selects and ``replace()``s approval flags from
+    ``stub_echo`` stays registered for tests. It is not offered to the model.
+    Does not register new handlers — only selects and ``replace()``s approval flags from
     ``build_registry()`` output.
 
     参数:
@@ -1364,9 +1350,7 @@ def tool_scope(
     返回:
         已套用审批覆盖后的 ToolSpec 列表（可直接交给 AgentEngine / ToolExecutor）。
     """
-    names = list(profile.tool_names)
-    if "stub_echo" not in names:
-        names.append("stub_echo")
+    names = [name for name in profile.tool_names if name != "stub_echo"]
     phase = (plan_phase or "").strip().lower() or None
     if phase == "planning":
         names = [n for n in names if n in PLANNING_TOOL_ALLOWLIST]

@@ -207,8 +207,7 @@ def test_tool_scope_skips_unknown_tools() -> None:
     )
     registry = build_registry()
     specs = tool_scope(profile, registry)
-    assert len(specs) == 1
-    assert specs[0].name == "stub_echo"
+    assert specs == []
 
 
 def test_tool_scope_editor_and_reread_phases() -> None:

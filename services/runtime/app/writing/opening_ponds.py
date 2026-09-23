@@ -13,7 +13,7 @@ OPENING_PONDS_REL = Path(".agent") / "work" / "opening_ponds.json"
 COMMITTED_POND_REL = Path(".agent") / "work" / "committed_pond.json"
 MORE_PONDS_MESSAGE = "我要其他的"
 OPENING_CHOICE_TOOL_ALLOWLIST = frozenset(
-    {"propose_book_candidates", "propose_opening_ponds", "stub_echo"}
+    {"propose_book_candidates", "propose_opening_ponds"}
 )
 # Same Turn may resample twice; a third reject stops (user says 我看看).
 _POND_REPAIR_MAX = 2

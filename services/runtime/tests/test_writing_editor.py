@@ -100,6 +100,7 @@ def test_editor_phase_has_no_write_tools() -> None:
     assert "draft_section" not in names
     assert "propose_patch" not in names
     assert "update_outline" not in names
+    assert "stub_echo" not in names
 
 
 def test_editor_block_falls_back_to_regex_notes(tmp_path: Path) -> None:
