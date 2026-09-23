@@ -313,17 +313,31 @@ def load_writing_book(*, workspace_root: Path | None = None) -> dict[str, Any]:
             keep = []
     else:
         keep = []
+    from app.writing.architecture import writer_sees_control_plane
+
+    console = writer_sees_control_plane()
+    canon_promises: list[dict[str, Any]] = []
+    if not console:
+        from app.writing.canon import load_canon
+
+        canon_promises = [
+            fact
+            for fact in load_canon(workspace_root=root).get("facts") or []
+            if isinstance(fact, dict)
+            and fact.get("kind") == "promise"
+            and fact.get("status") == "active"
+        ]
     return {
         "title": title,
         "empty": empty,
         "parts": parts,
-        "wild_cards": list(state.get("wild_cards") or []),
-        "swerves": list(state.get("swerves") or []),
+        "wild_cards": list(state.get("wild_cards") or []) if console else [],
+        "swerves": list(state.get("swerves") or []) if console else [],
         "consistency_flags": flags,
         "identity": state.get("identity") or {},
-        "reader_ledger": state.get("reader_ledger") or {},
-        "promises": state.get("promises") or [],
-        "deferred": state.get("deferred") or [],
+        "reader_ledger": state.get("reader_ledger") or {} if console else {},
+        "promises": state.get("promises") or [] if console else canon_promises,
+        "deferred": state.get("deferred") or [] if console else [],
         "editor_flags": editor_flags,
         "editor_keep": keep,
         "taste_marks": load_taste_marks(workspace_root=root)[-12:],

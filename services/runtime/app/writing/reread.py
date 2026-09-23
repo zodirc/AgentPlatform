@@ -96,25 +96,54 @@ def build_reread_pack(*, workspace_root: Path | None = None) -> dict[str, Any]:
         label = "太 AI" if mark.get("kind") == "ai" else "不像这本书"
         parts.append((f"[{sid} · 用户圈：{label}]", chunk))
 
-    state = load_story_state(workspace_root=workspace_root)
-    now = None
-    nums = [chapter_num(i) for i in ids]
-    nums_i = [n for n in nums if n is not None]
-    if nums_i:
-        now = max(nums_i)
+    from app.writing.architecture import writer_sees_control_plane
+
     used_p = 0
-    for row in overdue_promises(state, current_ch=now):
-        made = row.get("made_ch")
-        sid = f"ch{made}" if made is not None else ""
-        body = _section_text(doc, sid) if sid else ""
-        token = str(row.get("what") or "")[:8]
-        chunk = _window(body, around=token, radius=300, cap=300)
-        if not chunk:
-            continue
-        used_p += visible_chars(chunk)
-        if used_p > REREAD_BUDGET["promises"]:
-            break
-        parts.append((f"[{sid} · 许诺逾期]", chunk))
+    if writer_sees_control_plane():
+        state = load_story_state(workspace_root=workspace_root)
+        now = None
+        nums = [chapter_num(i) for i in ids]
+        nums_i = [n for n in nums if n is not None]
+        if nums_i:
+            now = max(nums_i)
+        for row in overdue_promises(state, current_ch=now):
+            made = row.get("made_ch")
+            sid = f"ch{made}" if made is not None else ""
+            body = _section_text(doc, sid) if sid else ""
+            token = str(row.get("what") or "")[:8]
+            chunk = _window(body, around=token, radius=300, cap=300)
+            if not chunk:
+                continue
+            used_p += visible_chars(chunk)
+            if used_p > REREAD_BUDGET["promises"]:
+                break
+            parts.append((f"[{sid} · 许诺逾期]", chunk))
+    else:
+        from app.writing.canon import load_canon
+
+        for fact in load_canon(workspace_root=workspace_root).get("facts") or []:
+            if not isinstance(fact, dict):
+                continue
+            if fact.get("status") != "active" or fact.get("kind") != "promise":
+                continue
+            sid = str(fact.get("source_section") or "")
+            body = _section_text(doc, sid) if sid else ""
+            token = str(fact.get("evidence") or fact.get("text") or "")[:12]
+            chunk = _window(body, around=token, radius=300, cap=300) if body else ""
+            if not chunk:
+                chunk = str(fact.get("text") or "")
+            if not chunk:
+                continue
+            used_p += visible_chars(chunk)
+            if used_p > REREAD_BUDGET["promises"]:
+                break
+            parts.append((f"[{sid} · 未兑现承诺]", chunk))
+
+    from app.writing.canon import format_active_facts
+
+    facts = format_active_facts(workspace_root=workspace_root)
+    if facts:
+        parts.append(("[已成立事实]", facts))
 
     tail_ids = ids[-2:]
     per = 1000

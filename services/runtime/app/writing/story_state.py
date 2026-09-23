@@ -536,7 +536,31 @@ def consistency_flags(
     section_id: str = "",
     workspace_root: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """启发式软门。倒叙/回忆是合法矛盾，不硬拒。"""
+    """启发式软门。倒叙/回忆是合法矛盾，不硬拒。corrected 只读 canon。"""
+    from app.writing.architecture import writer_sees_control_plane
+
+    body = text or ""
+    flags: list[dict[str, Any]] = []
+    if not writer_sees_control_plane():
+        from app.writing.canon import load_canon
+
+        for fact in load_canon(workspace_root=workspace_root).get("facts") or []:
+            if not isinstance(fact, dict) or fact.get("status") != "active":
+                continue
+            name = str(fact.get("subject") or "").strip()
+            blob = str(fact.get("text") or "")
+            if fact.get("kind") == "character" and "已死" in blob and name:
+                if name in body and re.search(
+                    rf"{re.escape(name)}.{{0,12}}(?:说|道|问)", body
+                ):
+                    flags.append(
+                        {
+                            "kind": "fact_death",
+                            "text": f"{name} 在已成立事实里已死，本章仍在说话",
+                            "section_id": section_id,
+                        }
+                    )
+        return flags
     state = load_story_state(workspace_root=workspace_root)
     body = text or ""
     flags: list[dict[str, Any]] = []
@@ -590,7 +614,14 @@ def apply_mechanical_update(
     section_id: str,
     workspace_root: Path | None = None,
 ) -> dict[str, Any]:
-    """post_turn 机械半：facts / last_seen / last_touched / spent。"""
+    """post_turn 机械半。corrected 的事实写入 canon，不写入这本控制台。"""
+    from app.writing.architecture import writer_sees_control_plane
+
+    if not writer_sees_control_plane():
+        from app.writing.canon import note_chapter_candidate
+
+        note_chapter_candidate(section_id, text, workspace_root=workspace_root)
+        return load_story_state(workspace_root=workspace_root)
     state = load_story_state(workspace_root=workspace_root)
     ch = chapter_num(section_id) or _latest_chapter(state) or 0
     body = text or ""

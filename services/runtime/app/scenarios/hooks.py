@@ -205,12 +205,19 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
                     measured = save_surface(focus or "ch", chapter_text)
                     ch_n = chapter_num(focus or "")
                     cons = consistency_flags(chapter_text, section_id=focus or "")
-                    stale = thread_stale_flags(current_ch=ch_n)
-                    unpaid = wild_card_without_consequence(current_ch=ch_n)
-                    state = load_story_state()
-                    deltas = []
-                    if ch_n is not None:
-                        deltas = list((state.get("deltas") or {}).get(str(ch_n)) or [])
+                    from app.writing.architecture import writer_sees_control_plane
+
+                    if writer_sees_control_plane():
+                        stale = thread_stale_flags(current_ch=ch_n)
+                        unpaid = wild_card_without_consequence(current_ch=ch_n)
+                        state = load_story_state()
+                        deltas = []
+                        if ch_n is not None:
+                            deltas = list((state.get("deltas") or {}).get(str(ch_n)) or [])
+                    else:
+                        stale = []
+                        unpaid = []
+                        deltas = []
                     notes_text = load_author_notes()
                     repeats = False
                     if deltas and notes_text:
