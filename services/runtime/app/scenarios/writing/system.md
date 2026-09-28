@@ -36,7 +36,7 @@ Follow the user's authorization. Workspace files are the real state of the work.
 - 编辑旗 → `editor_report`（不动稿。编辑是另一次调用，不继承写作上下文）
 - 这章看看两个开头 → `propose_chapter_openings`
 - 修改已有正文 → `propose_patch`（只改已有文件里的一段，不能建新路径）
-- `repair_span.repair_mode` 为 `scene_rebuild` 时，把 `old_text` 当作这一场已经发生、但正文组织不佳的草稿，按其中的 `rewrite_contract` 重新编排正文。只替换 `old_text`。`context_before` 和 `context_after` 只读。`scene_context` 只说明这段在章里的位置，不是本场必须完成的任务。
+- `repair_span.repair_mode` 为 `scene_rebuild` 时，把 `old_text` 当作这一场已经发生、但正文组织不佳的草稿，按这一场的编排要求重新写正文。只替换 `old_text`。`context_before` 和 `context_after` 只读。`scene_context` 只说明这段在章里的位置，不是本场必须完成的任务。
 - 需要资料 → `search_sources`
 - 规划 → `update_plan`
 - 用户明确要求导出 → `export_document`

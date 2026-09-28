@@ -1145,9 +1145,6 @@ async def draft_section(
     span = result.get("repair_span")
     if isinstance(span, dict):
         shrunk["repair_span"] = span
-        key = str(span.get("key") or "")
-        if key:
-            shrunk[key] = True
     return shrunk
 
 
