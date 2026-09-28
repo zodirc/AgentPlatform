@@ -126,6 +126,9 @@ def test_form_is_a_direct_candidate_job() -> None:
     assert "用户原话优先" in blob
     assert "题材只供参照，不是模板" in blob
     assert "简介按书页上的作品介绍来写" in blob
+    assert "书名点出世界或年代" in blob
+    assert "不要写到某一个人和某一件事" in blob
+    assert "不要给人物起名" in blob
     assert "不要罗列卖点" in blob
     assert "持续兑现" not in blob
     assert "因果核心" not in blob
