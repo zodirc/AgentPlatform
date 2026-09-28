@@ -83,6 +83,14 @@ def test_discard_writing_book_clears_sidecar_keeps_library(workspace: Path) -> N
     _write(workspace / ".agent" / "work" / "editor_notes" / "ch1.md", "- 短句\n")
     _write(workspace / ".agent" / "work" / "surface" / "ch1.json", "{}")
     _write(workspace / ".agent" / "work" / "surface_index.json", '{"chapters":[]}')
+    _write(
+        workspace / ".agent" / "work" / "canon_facts.json",
+        '{"facts":[{"text":"不许开车门","status":"active"}],"conflicts":[]}',
+    )
+    _write(workspace / ".agent" / "work" / "ledger.jsonl", '{"vector":{}}\n')
+    _write(workspace / ".agent" / "work" / "commitments" / "ch1.json", '{"subplot":"none"}')
+    _write(workspace / ".agent" / "work" / "planning_mode", "planned\n")
+    _write(workspace / ".agent" / "work" / "voice_choice", "default\n")
 
     result = discard_writing_book(workspace_root=workspace)
     assert result["ok"] is True
@@ -104,6 +112,11 @@ def test_discard_writing_book_clears_sidecar_keeps_library(workspace: Path) -> N
     assert not (workspace / ".agent" / "work" / "author_notes.md").exists()
     assert not (workspace / ".agent" / "work" / "author_state.md").exists()
     assert not (workspace / ".agent" / "work" / "author_state_stance.jsonl").exists()
+    assert not (workspace / ".agent" / "work" / "canon_facts.json").exists()
+    assert not (workspace / ".agent" / "work" / "ledger.jsonl").exists()
+    assert not (workspace / ".agent" / "work" / "commitments" / "ch1.json").exists()
+    assert not (workspace / ".agent" / "work" / "planning_mode").exists()
+    assert not (workspace / ".agent" / "work" / "voice_choice").exists()
     assert '"work_mode":"web_serial"' in (workspace / "writing_prefs.json").read_text(
         encoding="utf-8"
     )

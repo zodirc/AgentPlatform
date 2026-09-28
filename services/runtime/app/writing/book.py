@@ -416,6 +416,11 @@ def discard_writing_book(*, workspace_root: Path | None = None) -> dict[str, Any
     _wipe_dir_files(root, ".agent/work/history", cleared, "beats")
     _wipe_dir_files(root, ".agent/work/turns", cleared, "beats")
     _wipe_dir_files(root, ".agent/work/drafts", cleared, "manuscript")
+    _unlink_file(root, ".agent/work/canon_facts.json", cleared, "manuscript")
+    _unlink_file(root, ".agent/work/ledger.jsonl", cleared, "manuscript")
+    _unlink_file(root, ".agent/work/planning_mode", cleared, "outline")
+    _unlink_file(root, ".agent/work/voice_choice", cleared, "outline")
+    _wipe_dir_files(root, ".agent/work/commitments", cleared, "manuscript")
     if clear_style_lock(workspace_root=root) and "outline" not in cleared:
         cleared.append("outline")
     return {
