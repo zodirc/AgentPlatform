@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 _CANON = Path(".agent") / "work" / "canon_facts.json"
+CONFIRMED_MD = "confirmed.md"
 _KINDS = frozenset(
     {
         "character",
@@ -87,6 +88,7 @@ def save_canon(data: dict[str, Any], *, workspace_root: Path | None = None) -> P
     path = canon_path(workspace_root=workspace_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    publish_confirmed_md(workspace_root=workspace_root)
     return path
 
 
@@ -287,6 +289,36 @@ def active_facts_for_writer(
 
     rows.sort(key=rank, reverse=True)
     return rows[:limit]
+
+
+def publish_confirmed_md(*, workspace_root: Path | None = None) -> str:
+    """把已确认事实写成工作区里可打开的 confirmed.md。没有事实时删掉这份文件。"""
+    root = _workspace(workspace_root)
+    path = root / CONFIRMED_MD
+    text = format_book_confirmed(workspace_root=root)
+    if not text.strip():
+        if path.is_file():
+            try:
+                path.unlink()
+            except OSError:
+                return ""
+        return ""
+    path.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
+    return CONFIRMED_MD
+
+
+def format_book_confirmed(*, workspace_root: Path | None = None) -> str:
+    """这本书里已确认、可以约束下一章的事实。线索和未核对的话不在这里。"""
+    lines: list[str] = []
+    for fact in load_canon(workspace_root=workspace_root)["facts"]:
+        if not isinstance(fact, dict) or not _confirmed(fact):
+            continue
+        src = fact.get("source_section") or ""
+        label = _KIND_LABEL.get(str(fact.get("kind") or ""), "事实")
+        evidence = str(fact.get("evidence") or "").strip()
+        window = f"｜原文：{evidence}" if evidence else ""
+        lines.append(f"- {label}（{src}）{fact.get('text')}{window}")
+    return "\n".join(lines)
 
 
 def format_active_facts(

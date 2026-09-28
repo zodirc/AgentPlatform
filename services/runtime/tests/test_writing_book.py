@@ -37,22 +37,54 @@ def test_load_writing_book_lists_hidden_beats_and_pending_cards(workspace: Path)
     _write(workspace / "sources" / "mine.md", "资料库上传")
     _write(workspace / "writing_prefs.json", '{"work_mode":"web_serial"}')
 
+    _write(
+        workspace / ".agent" / "work" / "canon_facts.json",
+        json.dumps(
+            {
+                "facts": [
+                    {
+                        "kind": "rule",
+                        "status": "active",
+                        "certainty": "confirmed",
+                        "source_section": "ch1",
+                        "text": "不许开车门",
+                        "evidence": "谁都不许开车门。",
+                    },
+                    {
+                        "kind": "speech",
+                        "status": "active",
+                        "certainty": "clue",
+                        "source_section": "ch1",
+                        "text": "他说签到",
+                        "evidence": "签到",
+                    },
+                ],
+                "conflicts": [],
+            },
+            ensure_ascii=False,
+        ),
+    )
+    _write(workspace / ".agent" / "work" / "author_state.md", "# 作者态\n旧手记\n")
+    _write(workspace / ".agent" / "work" / "story_state.md", "# 账本\n")
+
     book = load_writing_book(workspace_root=workspace)
     assert book["empty"] is False
     assert book["title"] == "第一卷：城市暗面"
     labels = [p["label"] for p in book["parts"]]
-    assert "大纲" in labels
-    assert "正文" in labels
-    assert any(p["label"].startswith("人物 · 沈砚") for p in book["parts"])
-    assert any(p["kind"] == "beat" and p["label"] == "对白" for p in book["parts"])
+    assert labels == ["正文", "已确认", "大纲"]
+    canon = next(p for p in book["parts"] if p["kind"] == "canon")
+    assert "不许开车门" in canon["text"]
+    assert "签到" not in canon["text"]
+    assert canon["path"] == "confirmed.md"
+    assert "不许开车门" in (workspace / "confirmed.md").read_text(encoding="utf-8")
     blob = json.dumps(book, ensure_ascii=False)
     assert ".agent" not in blob
     assert "local_beats" not in blob
+    assert "作者手记" not in labels
+    assert "对白" not in labels
     by_key = {p["key"]: p for p in book["parts"]}
     assert by_key["outline"]["path"] == "outline.md"
     assert by_key["manuscript"]["path"] == "drafts/manuscript.md"
-    people = [p for p in book["parts"] if p["kind"] == "character"]
-    assert people and people[0]["path"].startswith("sources/cards/")
 
 
 def test_discard_writing_book_clears_sidecar_keeps_library(workspace: Path) -> None:

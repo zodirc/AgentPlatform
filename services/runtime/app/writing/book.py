@@ -1,13 +1,12 @@
 """写作「这本书」：用户看见的稿件对象，不是目录树。
 
-Inventory 含大纲、正文、素材卡（含 pending）、记下的拍、旧稿归档。
-扔掉整本时清这些用户内容与 `.agent/work` 侧车；不动资料库、种子语料、会话。
+左侧只放正文、已确认、大纲。没有内容的一项不出现。
+扔掉整本时清用户稿与 `.agent/work` 侧车；不动资料库、种子语料、会话。
 """
 
 from __future__ import annotations
 
 import json
-import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -22,13 +21,6 @@ from app.writing.outline_phase import clear_style_lock
 from app.writing.text_metrics import visible_chars
 
 _TEXT_CAP = 80_000
-_PENDING_STEM_RE = re.compile(r"^\d{8}T\d{6}Z_[0-9a-f-]{8,}_(.+)$", re.I)
-_KIND_LABELS = {
-    "character": "人物",
-    "plot": "情节",
-    "style": "风格",
-    "general": "设定",
-}
 
 
 def _workspace(workspace_root: Path | None = None) -> Path:
@@ -109,98 +101,6 @@ def _part(
     return out
 
 
-def _card_display_title(path: Path, parsed: str) -> str:
-    stem = path.stem
-    match = _PENDING_STEM_RE.match(stem)
-    guessed = match.group(1).strip() if match else ""
-    if guessed and (parsed == stem or parsed.startswith("20") or not parsed):
-        return guessed
-    return parsed or guessed or stem
-
-
-def _load_cards(root: Path) -> list[dict[str, Any]]:
-    from app.writing.cards import (
-        _card_title,
-        _infer_kind,
-        _parse_frontmatter,
-        cards_root,
-    )
-
-    cards_dir = cards_root(workspace_root=root)
-    if not cards_dir.is_dir() or not _is_under(root, cards_dir):
-        return []
-    out: list[dict[str, Any]] = []
-    for idx, fp in enumerate(sorted(cards_dir.rglob("*.md"))):
-        if not fp.is_file() or fp.name.startswith("."):
-            continue
-        if not _is_under(root, fp):
-            continue
-        raw = _read_text(fp)
-        meta, body = _parse_frontmatter(raw)
-        kind = _infer_kind(fp, meta)
-        title = _card_display_title(fp, _card_title(fp, meta, body or raw))
-        kind_label = _KIND_LABELS.get(kind, "设定")
-        out.append(
-            _part(
-                key=f"card:{idx}",
-                label=f"{kind_label} · {title}",
-                text=body or raw,
-                kind=kind,
-                path=_public_rel(root, fp),
-            )
-        )
-    return out
-
-
-def _load_beats(root: Path) -> list[dict[str, Any]]:
-    from app.writing.work_mode import fragment_label
-
-    path = root / ".agent" / "work" / "local_beats.json"
-    raw = _read_text(path)
-    if not raw:
-        return []
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return []
-    items = payload.get("beats") if isinstance(payload, dict) else payload
-    if not isinstance(items, list):
-        return []
-    out: list[dict[str, Any]] = []
-    for idx, item in enumerate(items):
-        if not isinstance(item, dict):
-            continue
-        text = str(item.get("text") or "").strip()
-        if not text:
-            continue
-        frag = str(item.get("fragment") or "mixed")
-        label = fragment_label(frag)
-        out.append(_part(key=f"beat:{idx}", label=label, text=text, kind="beat"))
-    return out
-
-
-def _load_archives(root: Path) -> list[dict[str, Any]]:
-    archive = root / ARCHIVE_DIR
-    if not archive.is_dir() or not _is_under(root, archive):
-        return []
-    out: list[dict[str, Any]] = []
-    for idx, fp in enumerate(sorted(archive.glob("*.md"))):
-        if not fp.is_file():
-            continue
-        text = _read_text(fp)
-        title = _first_heading(text) or fp.stem
-        out.append(
-            _part(
-                key=f"archive:{idx}",
-                label=f"旧稿 · {title}",
-                text=text,
-                kind="archive",
-                path=_public_rel(root, fp),
-            )
-        )
-    return out
-
-
 def load_writing_book(*, workspace_root: Path | None = None) -> dict[str, Any]:
     """组装这本书的可见部件（不含路径）。"""
     root = _workspace(workspace_root)
@@ -214,20 +114,7 @@ def load_writing_book(*, workspace_root: Path | None = None) -> dict[str, Any]:
     if not manuscript.strip():
         ms_rel = confirmed_manuscript_rel()
         manuscript = _read_text(root / ms_rel)
-    cards = _load_cards(root)
-    beats = _load_beats(root)
-    archives = _load_archives(root)
     parts: list[dict[str, Any]] = []
-    if outline.strip():
-        parts.append(
-            _part(
-                key="outline",
-                label="大纲",
-                text=outline,
-                kind="outline",
-                path=_public_rel(root, outline_path),
-            )
-        )
     if manuscript.strip():
         parts.append(
             _part(
@@ -238,40 +125,28 @@ def load_writing_book(*, workspace_root: Path | None = None) -> dict[str, Any]:
                 path=_public_rel(root, root / ms_rel),
             )
         )
-    parts.extend(cards)
-    parts.extend(beats)
-    parts.extend(archives)
-    story_md = root / ".agent" / "work" / "story_state.md"
-    story_text = _read_text(story_md)
-    if story_text.strip():
+    from app.writing.canon import CONFIRMED_MD, format_book_confirmed, publish_confirmed_md
+
+    confirmed = format_book_confirmed(workspace_root=root)
+    if confirmed.strip():
+        publish_confirmed_md(workspace_root=root)
         parts.append(
             _part(
-                key="story_state",
-                label="作品账本",
-                text=story_text,
-                kind="story_state",
+                key="canon",
+                label="已确认",
+                text=confirmed,
+                kind="canon",
+                path=CONFIRMED_MD,
             )
         )
-    notes_path = root / ".agent" / "work" / "author_notes.md"
-    notes_text = _read_text(notes_path)
-    if notes_text.strip():
+    if outline.strip():
         parts.append(
             _part(
-                key="author_notes",
-                label="作者私记",
-                text=notes_text,
-                kind="author_notes",
-            )
-        )
-    state_path = root / ".agent" / "work" / "author_state.md"
-    state_text = _read_text(state_path)
-    if state_text.strip():
-        parts.append(
-            _part(
-                key="author_state",
-                label="作者手记",
-                text=state_text,
-                kind="author_state",
+                key="outline",
+                label="大纲",
+                text=outline,
+                kind="outline",
+                path=_public_rel(root, outline_path),
             )
         )
     title = _first_heading(outline) or _first_heading(manuscript) or "未命名"
@@ -376,6 +251,7 @@ def discard_writing_book(*, workspace_root: Path | None = None) -> dict[str, Any
     root = _workspace(workspace_root)
     cleared: list[str] = []
     _unlink_file(root, "outline.md", cleared, "outline")
+    _unlink_file(root, "confirmed.md", cleared, "manuscript")
     for rel in (
         draft_manuscript_rel(),
         legacy_draft_manuscript_rel(),
