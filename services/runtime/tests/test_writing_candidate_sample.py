@@ -255,6 +255,8 @@ async def test_generic_ability_request_reaches_model_with_seed_and_raw_request()
     assert all("用户原话：写一篇长篇的异能小说" in text for text in seen)
     assert all(_drawn_subject(text) for text in seen)
     assert len({_drawn_subject(text) for text in seen}) == 2
+    assert "已用书名：" not in seen[0]
+    assert "已用书名：余烬" in seen[1]
 
 
 @pytest.mark.asyncio
@@ -325,9 +327,21 @@ def test_choice_turn_keeps_the_named_genre() -> None:
     named = "写一篇长篇的都市修真小说"
     assert sample_user_text("我要其他的", [named]) == named
     assert sample_user_text("我看看", [named]) == named
-    assert sample_user_text(named, ["写一篇历史小说"]) == named
+    assert sample_user_text(named, ["写一篇历史小说"]) == (
+        "写一篇历史小说\n" + named
+    )
     history = "写一篇历史小说"
     assert sample_user_text("我看看", [history]) == history
+
+
+def test_later_urban_sentence_keeps_earlier_direction_and_the_pool() -> None:
+    first = "写一篇长篇都市异能小说，600章的规划"
+    mid = "我期望可以更宏大一些，有什么大灾变之类的，而异能则是排山倒海的那种能力"
+    latest = "和都市没有关联，和异能也没有关联"
+    text = sample_user_text("我要其他的", [latest, mid, first])
+    assert text == "\n".join((first, mid, latest))
+    assert "我要其他的" not in text
+    assert len(select_seeds(text, 2)) == 2
 
 
 def test_parse_card_and_meta_guard() -> None:

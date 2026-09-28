@@ -348,13 +348,14 @@ async def sample_one_candidate(
     exclude_ids: set[str] | None = None,
     exclude_fingerprints: set[str] | None = None,
     exclude_titles: set[str] | None = None,
+    taken_title: str = "",
 ) -> dict[str, Any] | None:
     """一个 sample job：题材已经抽定，只交这本书的 {title, pitch}。格式失败或撞车后再交一次。"""
     await _emit_thinking_delta("\n—— 独立采样 ——\n")
     last_raw = ""
     for _attempt in range(_SLOT_RETRIES + 1):
         formed = await _run_complete(
-            form_messages(user_text, subject=subject),
+            form_messages(user_text, subject=subject, taken_title=taken_title),
             complete=complete,
             generation=form_generation(),
             think_char_budget=_FORM_THINK_CHAR_BUDGET,
@@ -472,11 +473,9 @@ async def sample_independent_pair(
 
 
 async def resolve_sample_user_text(user_text: str, session_id: Any = None) -> str:
-    """本句是「我看看 / 我要其他的」时，类型仍用本会话里已经点过名的那一句。"""
-    from app.writing.work_reconstruction import names_genre, sample_user_text
+    """同一次选择里的用户原话整段留下。换卡令牌本身不代替前面的方向。"""
+    from app.writing.work_reconstruction import sample_user_text
 
-    if names_genre(user_text):
-        return user_text
     priors: list[str] = []
     if session_id:
         try:
@@ -501,6 +500,7 @@ async def _sample_with_seed(
     exclude_ids: set[str],
     exclude_fingerprints: set[str],
     exclude_titles: set[str],
+    taken_title: str = "",
 ) -> dict[str, Any] | None:
     return await sample_one_candidate(
         user_text,
@@ -510,6 +510,7 @@ async def _sample_with_seed(
         exclude_ids=exclude_ids,
         exclude_fingerprints=exclude_fingerprints,
         exclude_titles=exclude_titles,
+        taken_title=taken_title,
     )
 
 
@@ -527,7 +528,7 @@ async def _sample_independent_pair_body(
     if len(chosen) < _SAMPLE_POOL:
         if not (request_is_long_novel(user_text) or serves_urban_pool(user_text)):
             return []
-        # 具体要求已经足够，或没有对应题材池：直接依据用户原话独立抽取。
+        # 点名了具体作品，或没有对应题材池：不塞参照，仍按用户原话各采一次。
         chosen = [None] * _SAMPLE_POOL
     await _emit_thinking_delta("\n—— 题材池 ——\n")
     first = await _sample_with_seed(
@@ -544,6 +545,9 @@ async def _sample_independent_pair_body(
         first_title = str(first.get("title") or "").strip()
         if first_title:
             second_exclude_titles.add(first_title.casefold())
+    taken = ""
+    if first is not None:
+        taken = str(first.get("title") or "").strip()
     second = await _sample_with_seed(
         user_text,
         complete=complete,
@@ -552,6 +556,7 @@ async def _sample_independent_pair_body(
         exclude_ids=exclude_ids,
         exclude_fingerprints=exclude_fingerprints,
         exclude_titles=second_exclude_titles,
+        taken_title=taken,
     )
     if (
         first is not None
@@ -577,6 +582,7 @@ async def _sample_independent_pair_body(
             exclude_ids=exclude_ids,
             exclude_fingerprints=exclude_fingerprints,
             exclude_titles=second_exclude_titles,
+            taken_title=taken,
         )
     sampled = [first, second]
     seen_fps = set(exclude_fingerprints)

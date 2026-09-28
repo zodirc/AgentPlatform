@@ -45,6 +45,8 @@ _FORM_SYSTEM = """根据用户原话，借题材参照交一本新书的书名�
 
 用户原话优先。题材只供参照，不是模板；另起人物、世界和故事，不要换名复述。
 
+若给出已用书名，那个书名已经用过，这一本换一本。
+
 简介按书页上的作品介绍来写，让人知道这本书主要写什么。不要解释创作思路，不要罗列卖点，也不要写成预告片。
 
 只交一本。"""
@@ -74,7 +76,11 @@ def genre_label(user_text: str) -> str:
 
 
 def genre_of(user_text: str) -> str:
-    return genre_label(user_text) or (user_text or "").strip() or "都市修真"
+    raw = (user_text or "").strip()
+    if not raw:
+        return "都市修真"
+    first = next((line.strip() for line in raw.splitlines() if line.strip()), raw)
+    return genre_label(first) or first or "都市修真"
 
 
 # 换一组 / 再看看本身不是类型名。「我要其他的」剥掉尾字后会变成「我要其他」。
@@ -93,14 +99,29 @@ def names_genre(user_text: str) -> bool:
     return label != (user_text or "").strip() or bool(pool_for(label))
 
 
+def _direction_line(text: str) -> str:
+    body = (text or "").strip()
+    if not body or body in _CHOICE_ONLY:
+        return ""
+    return body
+
+
 def sample_user_text(current: str, prior: list[str] | None = None) -> str:
-    """抽题材用的那句话。本句没点类型时，沿用会话里上一句点过名的。"""
-    if names_genre(current):
-        return current
-    for text in prior or ():
-        if names_genre(text):
-            return text
-    return current
+    """同一次选择里的用户原话按时间接在一起。换卡令牌不计入。
+
+    ``prior`` 从新到旧。后一句里出现「都市」「异能」时，不把前面的话换掉。
+    """
+    lines: list[str] = []
+    for text in reversed(list(prior or ())):
+        line = _direction_line(text)
+        if line and line not in lines:
+            lines.append(line)
+    current_line = _direction_line(current)
+    if current_line and current_line not in lines:
+        lines.append(current_line)
+    if lines:
+        return "\n".join(lines)
+    return (current or "").strip()
 
 
 def topic_of(user_text: str) -> str:
@@ -226,6 +247,7 @@ def form_messages(
     user_text: str = "",
     *,
     subject: str = "",
+    taken_title: str = "",
 ) -> list[dict[str, Any]]:
     ctx = project_candidate_context(user_text)
     raw_request = (user_text or "").strip()
@@ -233,6 +255,9 @@ def form_messages(
     drawn = subject.strip()
     if drawn:
         lines.append(f"题材：{drawn}")
+    taken = taken_title.strip()
+    if taken:
+        lines.append(f"已用书名：{taken}")
     lines.extend(["", "交这本书的书名和简介。"])
     return [
         {"role": "system", "content": [{"type": "text", "text": _FORM_SYSTEM}]},

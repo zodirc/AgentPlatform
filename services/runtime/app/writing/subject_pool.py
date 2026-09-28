@@ -30,8 +30,7 @@ _SOLE_POWER_MARK = re.compile(
 )
 _PLAIN_URBAN_MARK = re.compile(r"都市文|都市小说")
 _DIRECTED_REQUEST_MARK = re.compile(
-    r"我期望|我想要|偏向|类似|参考|不要|更.{0,8}(?:系统|金手指|异能)|"
-    r"只有|仅有|仅主角|世界.{0,8}(?:平凡|普通|现实)|"
+    r"类似|参考|只有|仅有|仅主角|世界.{0,8}(?:平凡|普通|现实)|"
     r"金手指|超级系统|念能力|全职猎人|滚开"
 )
 
@@ -411,7 +410,10 @@ def _preferred_shelves(text: str) -> set[str]:
 
 
 def uses_reference_pool(text: str) -> bool:
-    """题材池只补充宽泛请求；用户已给出具体方向时不再塞入随机作品。"""
+    """题材池服务都市超凡。点名某部作品或「只有主角」时不再塞参照。
+
+    「我期望更宏大」这类补充仍从同一池里抽，用户原话另留在提示里。
+    """
     raw = (text or "").strip()
     return serves_urban_pool(raw) and not _DIRECTED_REQUEST_MARK.search(raw)
 
