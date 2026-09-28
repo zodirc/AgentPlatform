@@ -8,7 +8,7 @@ from app.writing.hinge import find_hinge_span
 from app.writing.lore import find_lore_span
 from app.writing.opening import find_opening_span
 from app.writing.patch_hygiene import close_span_in_body
-from app.writing.staccato import find_staccato_span, short_quote_inners
+from app.writing.staccato import short_quote_inners
 from app.writing.signals.windows import REPAIR_MIN_VISIBLE, REPAIR_SPAN_MAX, TextWindow
 from app.writing.text_metrics import LENGTH_SHORT_FLOOR, visible_chars
 
@@ -36,6 +36,16 @@ L0_PENALTY_KEYS = frozenset(
         "length_short",
     }
 )
+# 能在正文里定位 old_text、并交给同一次 propose_patch 的四类。
+# 篇幅不足不在此列。分数偏低、连接词、「心里清楚」也不在此列。
+ACTIONABLE_REPAIR_KEYS = frozenset(
+    {
+        "staccato_uniform",
+        "hinge_dense",
+        "opening_institution",
+        "lore_dump",
+    }
+)
 # 加厚前必须先清的过程门（length_short 不再默认 append 第二场）。
 APPEND_BLOCK_L0_KEYS = frozenset(
     {
@@ -52,14 +62,11 @@ def append_block_l0_keys(work_mode: str = "literary") -> frozenset[str]:
     return APPEND_BLOCK_L0_KEYS
 
 _HINTS: dict[str, str] = {
-    "staccato_uniform": (
-        "这一窗把同一拍拆成了多轮空问、三段式对拍、信息采访或连珠短对白。"
-        "已经叫过的名字又问了一遍。只改这一窗。"
-    ),
+    "staccato_uniform": "人物互动被连续的信息问答或均匀短拍取代。",
     "glue_heavy": "叙述里的「与此同时/就在这时」过密。",
-    "hinge_dense": "这一窗里看见/听到之后紧接着就是转折，连续多处。",
-    "opening_institution": "第一句就是机构名，读者还没地方站。",
-    "lore_dump": "这里成了「N年前」的案情提要。",
+    "hinge_dense": "发现之后马上解释，并在一句半里翻转。",
+    "opening_institution": "开篇先报出机构名，人物还没有可站的场面。",
+    "lore_dump": "过去的事被写成案情提要。",
     "length_short": (
         f"这场实体字还低于门槛（<{LENGTH_SHORT_FLOOR}，或用户点名配额的 85%）。"
         "用 draft_section 把同一场写到门槛，不要另起一场或灌无关说明。"
@@ -74,10 +81,10 @@ _HINTS: dict[str, str] = {
 }
 
 _HINTS_WEB_SERIAL: dict[str, str] = {
-    "staccato_uniform": "这一窗把同一拍拆成了多轮空问或连珠短对白。只改这一窗。",
-    "hinge_dense": "看见/听到之后马上拧成说明书，悬念还没站住。",
-    "opening_institution": "第一句就是机构名。",
-    "lore_dump": "这里成了开场案情提要。",
+    "staccato_uniform": "人物互动被连续的信息问答或均匀短拍取代。",
+    "hinge_dense": "发现之后马上解释，并在一句半里翻转。",
+    "opening_institution": "开篇先报出机构名，人物还没有可站的场面。",
+    "lore_dump": "过去的事被写成案情提要。",
     "meta_knowing_high": "「心里清楚」出现过多。",
     "fragment_mismatch": "评分切片不合这场戏。",
     "all_explained": "每个异常都给了来源。",
@@ -365,6 +372,107 @@ def should_reject_full_redraft(prior: dict[str, Any] | None) -> bool:
     return int(prior.get("visible_chars") or 0) >= REPAIR_MIN_VISIBLE
 
 
+def _diagnostic_for(penalties: list[dict[str, Any]], key: str) -> dict[str, Any]:
+    for item in penalties:
+        if not isinstance(item, dict) or not item.get("hit"):
+            continue
+        if str(item.get("key") or "") != key:
+            continue
+        return item
+    return {}
+
+
+def _center_of(body: str, span: str) -> tuple[int, int] | None:
+    needle = (span or "").strip()
+    if not needle:
+        return None
+    idx = body.find(needle)
+    if idx < 0:
+        return None
+    return idx, idx + len(needle)
+
+
+def _span_explains(old_text: str, center_text: str, *, key: str, subtype: str) -> bool:
+    if center_text and center_text not in old_text:
+        return False
+    if key == "staccato_uniform":
+        from app.writing.staccato import subtype_evidence_count
+
+        return subtype_evidence_count(old_text, subtype) > 0
+    if key == "hinge_dense":
+        from app.writing.hinge import count_hinge_chains, count_see_now
+
+        return count_hinge_chains(old_text) > 0 or count_see_now(old_text) > 0
+    if key == "opening_institution":
+        from app.writing.opening import _ORG
+
+        return _ORG.search(old_text) is not None
+    if key == "lore_dump":
+        from app.writing.lore import find_lore_span
+
+        return bool(find_lore_span(old_text))
+    return False
+
+
+def _scene_payload(
+    body: str,
+    center: tuple[int, int],
+    *,
+    key: str,
+    subtype: str,
+    scene_goal: str,
+    previous_failure: Any,
+    evidence: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    from app.writing.scene_repair import (
+        _PREFERRED_SCENE_MIN,
+        build_scene_repair_brief,
+        expand_micro_scene,
+        scene_problem_for,
+    )
+    from app.writing.staccato import subtype_evidence_count
+
+    def _continues(chunk: str) -> bool:
+        if key == "staccato_uniform":
+            return subtype_evidence_count(chunk, subtype) > 0
+        return False
+
+    expanded = expand_micro_scene(
+        body,
+        center[0],
+        center[1],
+        prefer_min=_PREFERRED_SCENE_MIN if subtype == "interview" else 0,
+        continues=_continues,
+    )
+    if expanded is None:
+        return None
+    old = str(expanded["old_text"])
+    center_text = body[center[0] : center[1]].strip()
+    if not _span_explains(old, center_text, key=key, subtype=subtype):
+        return None
+    brief = build_scene_repair_brief(
+        subtype=subtype,
+        scene_goal=scene_goal,
+        old_text=old,
+        previous_failure=previous_failure,
+    )
+    return {
+        "old_text": old,
+        "key": key,
+        "subtype": subtype,
+        "scene_problem": scene_problem_for(subtype),
+        "repair_mode": "scene_rebuild",
+        "scene_repair_brief": brief,
+        "context_before": expanded["context_before"],
+        "context_after": expanded["context_after"],
+        "hint": brief.get("current_problem") or repair_hint(key),
+        "visible_chars": expanded["visible_chars"],
+        "repair_class": "process",
+        "suggest_only": False,
+        "evidence": evidence or {},
+    }
+
+
 def build_repair_span(
     text: str,
     *,
@@ -373,6 +481,8 @@ def build_repair_span(
     net_signal: float,
     avoid_old: str = "",
     work_mode: str = "literary",
+    scene_goal: str = "",
+    previous_failure: Any = None,
 ) -> dict[str, Any] | None:
     """构造 repair_span。
     
@@ -386,25 +496,71 @@ def build_repair_span(
     l0 = [key for key in keys if key in L0_PENALTY_KEYS]
     probe = window.text if window is not None else body
     key = l0[0] if l0 else (keys[0] if keys else "")
-    span = ""
-    staccato_open = "staccato_uniform" in l0
-    if staccato_open:
-        # Locate on the chapter, never promote the weakest score window.
-        located = find_staccato_span(
-            body, max_chars=REPAIR_SPAN_MAX, avoid_old=avoid_old
+    if "staccato_uniform" in l0:
+        from app.writing.staccato import evidence_center, staccato_diagnostic
+
+        diag = _diagnostic_for(penalties, "staccato_uniform")
+        subtype = str(diag.get("dominant_subtype") or "")
+        evidence = diag.get("evidence") if isinstance(diag.get("evidence"), dict) else None
+        if not subtype:
+            fresh = staccato_diagnostic(body)
+            subtype = str(fresh.get("dominant_subtype") or "")
+            evidence = fresh.get("evidence") if isinstance(fresh.get("evidence"), dict) else evidence
+        center = evidence_center(body, subtype, avoid_old=avoid_old) if subtype else None
+        if center is None:
+            return None
+        return _scene_payload(
+            body,
+            center,
+            key="staccato_uniform",
+            subtype=subtype,
+            scene_goal=scene_goal,
+            previous_failure=previous_failure,
+            evidence=evidence,
         )
-        key = "staccato_uniform"
-        span = located
-    elif "hinge_dense" in l0:
-        span = find_hinge_span(probe)
-        key = "hinge_dense"
-    elif "opening_institution" in l0:
-        span = find_opening_span(probe)
-        key = "opening_institution"
-    elif "lore_dump" in l0:
-        span = find_lore_span(probe)
-        key = "lore_dump"
-    elif "meta_knowing_high" in keys:
+    if "hinge_dense" in l0:
+        center = _center_of(body, find_hinge_span(body))
+        if center is None:
+            return None
+        diag = _diagnostic_for(penalties, "hinge_dense")
+        evidence = diag.get("evidence") if isinstance(diag.get("evidence"), dict) else None
+        return _scene_payload(
+            body,
+            center,
+            key="hinge_dense",
+            subtype="explicit_turn_chain",
+            scene_goal=scene_goal,
+            previous_failure=previous_failure,
+            evidence=evidence,
+        )
+    if "opening_institution" in l0:
+        center = _center_of(body, find_opening_span(body))
+        if center is None:
+            return None
+        return _scene_payload(
+            body,
+            center,
+            key="opening_institution",
+            subtype="institution_before_place",
+            scene_goal=scene_goal,
+            previous_failure=previous_failure,
+            evidence={"institution_before_place": 1},
+        )
+    if "lore_dump" in l0:
+        center = _center_of(body, find_lore_span(body))
+        if center is None:
+            return None
+        return _scene_payload(
+            body,
+            center,
+            key="lore_dump",
+            subtype="years_ago_summary",
+            scene_goal=scene_goal,
+            previous_failure=previous_failure,
+            evidence={"years_ago_bio": 1},
+        )
+    span = ""
+    if "meta_knowing_high" in keys:
         needles = _meta_phrases() + _META_LOCATE_EXTRA
         span = _find_phrase_span(probe, needles)
         if not span:
@@ -415,10 +571,10 @@ def build_repair_span(
         if not span:
             span = _find_phrase_span(body, _glue_phrases())
         key = "glue_heavy"
-    if not span and not staccato_open and window is not None and l0:
+    if not span and window is not None and l0:
         span = (window.text or "").strip()
         key = key or "weak_window"
-    if not span and not staccato_open and l0:
+    if not span and l0:
         span = probe.strip()[:REPAIR_SPAN_MAX]
     if avoid_old and span and unproductive_repeat(
         {"repair_span": {"old_text": avoid_old, "key": key or "weak_window"}},
@@ -433,8 +589,17 @@ def build_repair_span(
     hint_key = key or "weak_window"
     from app.writing.architecture import AESTHETIC_SIGNAL_KEYS
 
-    aesthetic = hint_key in AESTHETIC_SIGNAL_KEYS or hint_key == "staccato_uniform"
-    repair_class = "aesthetic" if aesthetic else "mechanical"
+    actionable = hint_key in ACTIONABLE_REPAIR_KEYS
+    aesthetic = (
+        not actionable
+        and (hint_key in AESTHETIC_SIGNAL_KEYS or hint_key == "staccato_uniform")
+    )
+    if actionable:
+        repair_class = "process"
+    elif aesthetic:
+        repair_class = "aesthetic"
+    else:
+        repair_class = "mechanical"
     payload = {
         "old_text": old,
         "key": key or "weak_window",

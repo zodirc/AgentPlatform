@@ -1181,3 +1181,156 @@ def find_staccato_span(
     if not candidates:
         return ""
     return max(candidates, key=lambda item: (item[0], item[1]))[2]
+
+
+_STACCATO_GATES: dict[str, int] = {
+    "interview": _INTERVIEW_MIN,
+    "identity": 1,
+    "logistics": _LOGISTICS_MIN,
+    "phatic": _PHATIC_MIN,
+    "echo": _ECHO_MIN,
+    "thesis": 1,
+    "antithesis": 1,
+    "equate": 1,
+    "contrast": 1,
+    "echo_twist": 1,
+    "split": 1,
+    "logic": _LOGIC_MIN,
+    "defer": _DEFER_MIN,
+    "quote_run": _QUOTE_RUN,
+    "duet": _DUET_RUN,
+    "unit_run": _UNIT_RUN,
+}
+# 说得清这场怎么坏的种类。均匀短句只在这些都没过门槛时才当主因。
+_SPECIFIC_SUBTYPES = (
+    "interview",
+    "identity",
+    "logistics",
+    "phatic",
+    "echo",
+    "thesis",
+    "antithesis",
+    "equate",
+    "contrast",
+    "echo_twist",
+    "split",
+    "logic",
+    "defer",
+)
+_GENERIC_SUBTYPES = ("quote_run", "duet", "unit_run")
+_DOMINANT_ORDER = _SPECIFIC_SUBTYPES + _GENERIC_SUBTYPES
+
+
+def staccato_diagnostic(content: str) -> dict[str, Any]:
+    """章级碎拍诊断。evidence 只给定位和复检，不交给写作模型。"""
+    metrics = _staccato_metrics(content or "")
+    def _pick(order: tuple[str, ...]) -> str:
+        chosen = ""
+        best_count = -1
+        best_i = len(order)
+        for i, key in enumerate(order):
+            count = int(metrics.get(key) or 0)
+            if count < _STACCATO_GATES[key]:
+                continue
+            if count > best_count or (count == best_count and i < best_i):
+                best_count = count
+                best_i = i
+                chosen = key
+        return chosen
+
+    dominant = _pick(_SPECIFIC_SUBTYPES) or _pick(_GENERIC_SUBTYPES)
+    return {
+        "triggered": _literary_staccato_hit(metrics),
+        "dominant_subtype": dominant,
+        "evidence": dict(metrics),
+    }
+
+
+def subtype_evidence_count(text: str, subtype: str) -> int:
+    """这一段里某种病因还剩多少。短窗也计数，不受章级 80 字门槛限制。"""
+    kind = subtype or ""
+    if kind == "interview":
+        return max_interview_ladder(text)
+    if kind == "identity":
+        return count_identity_reasks(text)
+    if kind == "logistics":
+        return max_logistics_quote_run(text)
+    if kind == "phatic":
+        return max_phatic_quote_run(text)
+    if kind == "echo":
+        return count_echo_acks(text)
+    if kind == "thesis":
+        return count_thesis_mouth(text)
+    if kind == "antithesis":
+        return count_antithesis_punches(text) or (
+            1 if _ANTITHESIS_PUNCH.search(text or "") else 0
+        )
+    if kind == "equate":
+        return count_equate_punches(text) or (
+            1 if _EQUATE_PUNCH.search(text or "") else 0
+        )
+    if kind == "contrast":
+        return count_contrast_punches(text) or (
+            1 if _CONTRAST_PUNCH.search(text or "") else 0
+        )
+    if kind == "echo_twist":
+        return count_echo_twists(text)
+    if kind == "split":
+        return count_split_speech(text)
+    if kind == "logic":
+        return count_logic_glue_quotes(text)
+    if kind == "defer":
+        return len(_DEFER.findall(text or ""))
+    if kind == "quote_run":
+        return max_short_quote_run(text)
+    if kind == "duet":
+        return max_duet_quote_run(text)
+    if kind == "unit_run":
+        return max_short_unit_run(text)
+    return 0
+
+
+def evidence_center(
+    text: str, subtype: str, *, avoid_old: str = ""
+) -> tuple[int, int] | None:
+    """证据最密、且自身带这种证据的连续区域。找不到就空。"""
+    from app.writing.text_metrics import visible_chars
+
+    original = text or ""
+    body = _mask_old_span(original, avoid_old)
+    kind = subtype or ""
+    candidates: list[tuple[int, int]] = []
+    quotes = list(_QUOTE_SPAN.finditer(body))
+    gap_limit = _INTERVIEW_GAP if kind in {"interview", "identity", "thesis"} else _QUOTE_GAP_RESET
+    for i, left in enumerate(quotes):
+        end = left.end()
+        for right in quotes[i:]:
+            if right.start() > end:
+                gap = visible_chars(body[end : right.start()])
+                if gap > gap_limit:
+                    break
+            end = right.end()
+            candidates.append((left.start(), end))
+    if kind == "defer":
+        for match in _DEFER.finditer(body):
+            candidates.append((match.start(), match.end()))
+    if kind == "split":
+        for match in _SPLIT_SPEECH.finditer(body):
+            candidates.append((match.start(), match.end()))
+    if kind == "identity":
+        candidates.extend(_identity_reask_ranges(body))
+    best: tuple[int, int] | None = None
+    best_score = 0
+    best_len = 10**9
+    for start, end in candidates:
+        if end <= start:
+            continue
+        score = subtype_evidence_count(body[start:end], kind)
+        if score <= 0:
+            continue
+        length = end - start
+        if score > best_score or (score == best_score and length < best_len):
+            best_score = score
+            best_len = length
+            best = (start, end)
+    return best

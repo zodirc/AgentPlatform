@@ -66,6 +66,33 @@ async def test_strict_draft_keeps_signals(workspace: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_author_draft_returns_located_repair_span(workspace: Path) -> None:
+    save_regime_override(value="author", source="user", workspace_root=workspace)
+    text = (
+        "柜台上还温着酒，粉板上记着十九个钱。她把碗推到他手边。\n\n"
+        "「跑完了？」\n「跑完了。」\n「少了谁？」\n「不知道。」\n"
+        "「跑完了？」\n「跑完了。」\n「少了谁？」\n「不知道。」\n\n"
+        "只有穿长衫的才踱进隔壁，要酒要菜，慢慢地坐喝。"
+    )
+    result = await core.draft_section(
+        "ch2",
+        text,
+        turn_id=uuid4(),
+        turn_user_text="写一章长篇第二章 作者模式",
+        fragment="mixed",
+        choices=_COMMIT,
+    )
+    assert result["status"] == "drafted"
+    assert result["regime"] == "author"
+    span = result["repair_span"]
+    assert span["key"] == "staccato_uniform"
+    assert span["suggest_only"] is False
+    assert span["old_text"] in text
+    assert "writing_signals" not in result
+    assert "net_signal" not in result
+
+
+@pytest.mark.asyncio
 async def test_author_full_redraft_keeps_previous(workspace: Path) -> None:
     save_regime_override(value="author", source="user", workspace_root=workspace)
     turn_id = uuid4()

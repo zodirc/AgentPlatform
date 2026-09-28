@@ -226,7 +226,11 @@ async def propose_patch(
                 existing = ""
             if existing:
                 old, new = sanitize_prose_patch(existing, old, new)
-                blocked = prose_patch_block_reason(old, new)
+                span = prior.get("repair_span") if isinstance(prior, dict) else None
+                scene_rebuild = (
+                    isinstance(span, dict) and span.get("repair_mode") == "scene_rebuild"
+                )
+                blocked = None if scene_rebuild else prose_patch_block_reason(old, new)
                 if blocked:
                     return {
                         "path": path,
@@ -271,6 +275,49 @@ async def propose_patch(
                     )
                     err.setdefault("path", path)
                     return err
+                from app.writing.patch_budget import note_scene_rebuild_failure
+                from app.writing.scene_repair import retry_note, verify_brief, verify_scene_rebuild
+
+                span = prior.get("repair_span") if isinstance(prior, dict) else None
+                if isinstance(span, dict) and span.get("repair_mode") == "scene_rebuild":
+                    preserve, goal = verify_brief(span.get("scene_repair_brief"))
+                    verdict = verify_scene_rebuild(
+                        old,
+                        new,
+                        key=str(span.get("key") or ""),
+                        subtype=str(span.get("subtype") or ""),
+                        preserve=preserve if isinstance(preserve, list) else None,
+                        scene_goal=str(goal or ""),
+                    )
+                    if not verdict["accepted"]:
+                        note_scene_rebuild_failure(
+                            turn_id,
+                            session_id,
+                            path=path,
+                            old_text=old,
+                            prior=prior if isinstance(prior, dict) else None,
+                            section_id=section_id,
+                            reason=str(verdict.get("reason") or ""),
+                        )
+                        return {
+                            "path": path,
+                            "old_text": old,
+                            "new_text": new,
+                            "status": "error",
+                            "error": "scene_rebuild_rejected",
+                            "applies": False,
+                            "repair_verify": verdict,
+                            "summary": (
+                                retry_note(str(verdict.get("reason") or ""))
+                                or (
+                                    "previous repair failed because:\n  "
+                                    + str(
+                                        verdict.get("reason")
+                                        or "target defect barely changed"
+                                    )
+                                )
+                            ),
+                        }
     precheck = _span_apply_precheck(path, old, new)
     if not precheck.get("applies"):
         return {
@@ -361,7 +408,9 @@ async def apply_patch(
 
     if old and is_prose_writing_path(path) and existing and not _kwargs.get("user_cut"):
         old, new = sanitize_prose_patch(existing, old, new)
-        blocked = prose_patch_block_reason(old, new)
+        span = prior.get("repair_span") if isinstance(prior, dict) else None
+        scene_rebuild = isinstance(span, dict) and span.get("repair_mode") == "scene_rebuild"
+        blocked = None if scene_rebuild else prose_patch_block_reason(old, new)
         if blocked:
             if turn_id is not None:
                 note_prose_patch_apply_miss(
@@ -414,6 +463,44 @@ async def apply_patch(
             )
             err.setdefault("path", path)
             return err
+        from app.writing.patch_budget import note_scene_rebuild_failure
+        from app.writing.scene_repair import retry_note, verify_brief, verify_scene_rebuild
+
+        span = prior.get("repair_span") if isinstance(prior, dict) else None
+        if isinstance(span, dict) and span.get("repair_mode") == "scene_rebuild":
+            preserve, goal = verify_brief(span.get("scene_repair_brief"))
+            verdict = verify_scene_rebuild(
+                old,
+                new,
+                key=str(span.get("key") or ""),
+                subtype=str(span.get("subtype") or ""),
+                preserve=preserve if isinstance(preserve, list) else None,
+                scene_goal=str(goal or ""),
+            )
+            if not verdict["accepted"]:
+                note_scene_rebuild_failure(
+                    turn_id,
+                    session_id,
+                    path=path,
+                    old_text=old,
+                    prior=prior if isinstance(prior, dict) else None,
+                    section_id=section_id or "",
+                    reason=str(verdict.get("reason") or ""),
+                )
+                return {
+                    "path": path,
+                    "status": "error",
+                    "error": "scene_rebuild_rejected",
+                    "applies": False,
+                    "repair_verify": verdict,
+                    "summary": (
+                        retry_note(str(verdict.get("reason") or ""))
+                        or (
+                            "previous repair failed because:\n  "
+                            + str(verdict.get("reason") or "target defect barely changed")
+                        )
+                    ),
+                }
 
     if old:
         count = existing.count(old)

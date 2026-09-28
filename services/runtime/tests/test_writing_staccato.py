@@ -129,21 +129,11 @@ def test_staccato_receipt_beats_hinge() -> None:
     assert should_inject_verify_receipt(state, reserve_steps=10) is False
     assert verify_receipt_kind(state) == "staccato"
     text = build_verify_receipt_text(state)
-    assert "机械一问一答" in text
-    assert "进来拿" in text
-    assert "多轮空问" in text
-    assert "一两句" in text
-    assert "我知道" in text
-    assert "你有名字吗" in text
-    assert "是A，不是B" in text or "不是B" in text
-    assert "因为" in text
-    assert "propose_patch" in text
-    assert "draft_section 或" not in text
-    assert "neighbor" in text
-    assert "旁白" in text
-    assert "有人把话说满" not in text
-    assert "展开日子时把场面写完" not in text
-    assert "一次写满整窗" not in text
+    assert "scene_rebuild" in text
+    assert "repair_span.old_text" in text
+    assert "保留场景事实" in text
+    assert "机械一问一答" not in text
+    assert "neighbor" not in text
     kind = mark_verify_receipt_injected(state)
     assert kind == "staccato"
     assert state.staccato_receipt_sent is True
@@ -167,7 +157,7 @@ def test_staccato_flags_paper_handoff_rounds() -> None:
     from app.writing.signals.repair import repair_hint
 
     hint = repair_hint("staccato_uniform", "web_serial")
-    assert "空问" in hint or "短对白" in hint
+    assert "信息问答" in hint or "短拍" in hint
 
 
 def test_staccato_cleared_by_clean_draft() -> None:
@@ -193,6 +183,26 @@ def test_staccato_cleared_by_clean_draft() -> None:
     )
     assert state.staccato_pending is False
     assert should_inject_verify_receipt(state) is False
+
+
+def test_author_turn_still_arms_located_staccato() -> None:
+    uid = uuid4()
+    state = TurnState(
+        turn_id=uid,
+        session_id=uid,
+        run_id=uid,
+        trace_id=uid,
+        scenario_id="writing",
+        max_steps=40,
+        step_count=2,
+        turn_user_text="写一章长篇第二章 作者模式",
+    )
+    note_tool_result_for_verify(
+        state,
+        tool_name="draft_section",
+        result={"status": "drafted", "staccato_uniform": True},
+    )
+    assert state.staccato_pending is True
 
 
 def test_staccato_cleared_by_clean_patch() -> None:

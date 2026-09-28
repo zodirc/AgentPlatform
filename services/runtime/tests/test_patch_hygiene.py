@@ -123,8 +123,8 @@ def test_close_span_does_not_start_at_shuo_period() -> None:
 
 def test_build_repair_span_points_at_antithesis() -> None:
     text = (
-        "柜台上还温着酒。他擦了擦玻璃。"
-        "「电池还能撑一阵。」\n「钟不知道，屋子知道。」他说。"
+        "柜台上还温着酒。他擦了擦玻璃。\n"
+        "「进来。」\n「好。」\n「电池还能撑一阵。」\n「钟不知道，屋子知道。」他说。"
     )
     span = build_repair_span(
         text,
@@ -133,13 +133,8 @@ def test_build_repair_span_points_at_antithesis() -> None:
     )
     assert span is not None
     assert "钟不知道" in span["old_text"]
-    assert not span["old_text"].startswith("说。")
-    assert (
-        "多轮空问" in span["hint"]
-        or "一两句" in span["hint"]
-        or "对仗" in span["hint"]
-        or "旁白" in span["hint"]
-    )
+    assert span["repair_mode"] == "scene_rebuild"
+    assert span["old_text"] in text
 
 
 def test_prose_patch_block_reason_dialogue_to_narration() -> None:
@@ -189,8 +184,8 @@ def test_build_repair_span_locates_chapter_island_not_score_window() -> None:
     )
     assert span is not None
     assert "跑完了" in span["old_text"]
-    assert "别看了" not in span["old_text"]
-    assert visible_chars(span["old_text"]) <= 160
+    assert span["old_text"] in body
+    assert visible_chars(span["old_text"]) <= 672
 
 
 def test_meta_span_contains_knowing_phrase_not_window_head() -> None:

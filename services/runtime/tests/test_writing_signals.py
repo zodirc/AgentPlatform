@@ -503,15 +503,24 @@ def test_long_chapter_window_points_repair_span_at_staccato_island() -> None:
         text, fragment_declared="worldview_texture", prefs=prefs
     )
     assert out["windows"]["n"] >= 2
-    assert out["rewrite_policy"] == "draft_ok"
-    span = out["telemetry_repair_span"]
+    assert out["rewrite_policy"] == "propose_patch"
+    span = out["repair_span"]
+    assert span["suggest_only"] is False
+    assert span["repair_class"] == "process"
+    assert out["telemetry_repair_span"]["old_text"] == span["old_text"]
     assert "跑完了" in span["old_text"]
     assert span["old_text"] in text
     assert span["key"] == "staccato_uniform"
-    assert span["visible_chars"] <= 160
-    assert "鲁镇的酒店" not in span["old_text"]
+    assert span["repair_mode"] == "scene_rebuild"
+    assert span["subtype"]
+    assert "跑完了" in span["old_text"]
+    assert span["visible_chars"] <= 672
+    assert span["visible_chars"] >= 360
+    assert "evidence" not in span
     assert not (span.get("neighbor") or {}).get("text")
-    assert "空问" in (span.get("hint") or "") or "短对白" in (span.get("hint") or "")
+    brief = span["scene_repair_brief"]
+    assert brief["current_problem"]
+    assert "scene_job" not in brief
 
 
 def test_short_draft_allows_full_redraft_policy() -> None:
@@ -538,8 +547,9 @@ def test_ai_dialogue_requests_patch_under_repair_min_visible() -> None:
     assert visible_chars(text) < 800
     out = score_writing_fragment(text, fragment_declared="mixed", prefs=prefs)
     assert out["writing_weak"] is True
-    assert out["rewrite_policy"] == "draft_ok"
-    assert "telemetry_repair_span" in out
+    assert out["rewrite_policy"] == "propose_patch"
+    assert out["repair_span"]["key"] == "staccato_uniform"
+    assert out["repair_span"]["suggest_only"] is False
 
 
 def test_meta_hit_does_not_request_patch() -> None:
@@ -586,8 +596,8 @@ def test_staccato_stall_tries_next_island_or_keeps_weak() -> None:
         + "「那是旧账，旧账碎了也只管旧账。」\n"
     )
     first = score_writing_fragment(text, fragment_declared="mixed", prefs=prefs)
-    assert first["rewrite_policy"] == "draft_ok"
-    span = first["telemetry_repair_span"]
+    assert first["rewrite_policy"] == "propose_patch"
+    span = first["repair_span"]
     assert span["key"] == "staccato_uniform"
     second = score_writing_fragment(
         text,
@@ -673,7 +683,8 @@ def test_maybe_attach_scores_updated_chapter_not_span(workspace: Path) -> None:
     vis = int((signals.get("length_fields") or {}).get("visible_chars") or 0)
     assert vis >= 800
     assert vis != len(new_span)
-    assert signals.get("rewrite_policy") == "draft_ok"
+    assert signals.get("rewrite_policy") == "propose_patch"
+    assert (signals.get("repair_span") or {}).get("key") == "staccato_uniform"
     assert (signals.get("fragment") or {}).get("declared") == "mixed"
     span_only = score_writing_fragment(
         new_span, fragment_declared="dialogue_dyad", prefs=platform_prefs_payload()
@@ -776,9 +787,8 @@ def test_repair_hint_forks_by_work_mode() -> None:
 
     lit = repair_hint("staccato_uniform", "literary")
     web = repair_hint("staccato_uniform", "web_serial")
-    assert "空问" in lit or "短对白" in lit
-    assert "空问" in web or "短对白" in web
-    assert lit != web
+    assert "信息问答" in lit
+    assert lit == web
 
 
 def test_repair_hints_carry_at_most_one_prohibition() -> None:
@@ -807,9 +817,10 @@ def test_repair_span_hint_follows_work_mode() -> None:
         fragment_declared="worldview_texture",
         prefs=platform_prefs_payload(work_mode="web_serial"),
     )
-    span = web["telemetry_repair_span"]
+    span = web["repair_span"]
     assert span["key"] == "staccato_uniform"
-    assert "空问" in span["hint"] or "短对白" in span["hint"]
+    assert span["repair_mode"] == "scene_rebuild"
+    assert "信息问答" in span["hint"] or "短拍" in span["hint"]
 
 
 def test_repair_neighbor_prefers_local_beat(tmp_path, monkeypatch) -> None:

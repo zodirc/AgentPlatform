@@ -69,8 +69,8 @@ def test_opening_receipt_once() -> None:
     assert should_inject_verify_receipt(state, reserve_steps=10) is False
     assert verify_receipt_kind(state) == "opening"
     text = build_verify_receipt_text(state)
-    assert "机构专名" in text
-    assert "可站的场面" in text
+    assert "scene_rebuild" in text
+    assert "repair_span.old_text" in text
     assert "neighbor" not in text
     assert "路、田、价钱" not in text
     assert "路、田、店" not in text

@@ -26,8 +26,6 @@ from app.structural.issue_repro import (
 )
 from app.structural.related_tests import related_test_paths
 from app.structural.test_summary import is_testish_command
-from app.writing.patch_budget import MAX_PATCHES_PER_PENALTY_KEY
-
 # 预留步数：保证 receipt 注入后仍有步数跑测试/修稿再交卷。
 DEFAULT_VERIFY_RECEIPT_RESERVE_STEPS = 10
 _RELATED_CAP = 5
@@ -81,12 +79,7 @@ def note_writing_signals_for_verify(state: Any, result: dict[str, Any]) -> None:
     hits = _writing_l0_hits(result)
     if hits is None:
         return
-    from app.writing.delivery_gate import suppress_same_turn_writing_receipts
-
-    if suppress_same_turn_writing_receipts(
-        message=str(getattr(state, "turn_user_text", "") or "")
-    ):
-        return
+    # 四类 L0 定位成功后，作者档也要同轮补丁。篇幅交付门仍由作者档单独关掉。
     for key, attr in _WRITING_PENDING.items():
         setattr(state, attr, bool(hits.get(key)))
 
@@ -461,63 +454,29 @@ def build_verify_receipt_text(state: Any) -> str:
     return _build_classic_receipt_text(state)
 
 
-def _build_staccato_receipt_text() -> str:
-    """均匀短拍（三字问答/空应声）L0 修复指引正文。"""
+def _scene_rebuild_receipt_text() -> str:
+    """当前这一刀的任务。写法约束在 scene_repair_brief 和 harness，不在这里重讲。"""
     return (
-        "这一段对白或句子长短几乎一样短，像机械一问一答"
-        "（「进来拿。」「我会还。」「先记账。」「记多久？」这一路）；"
-        "或把一句话拆成「…。」他说，「…。」；或把物件说成「A，就是B」；"
-        "或用「钟不知道，屋子知道」这类对仗收束；"
-        "或接上一句的词干再加「也/还」（「刀钝你也哭」「现在还要看」）；"
-        "或用「几点 / 早点睡 / 到家发消息 / 知道」把场收掉；"
-        "或嘴里总结「小时候也这样…未必做得到」；"
-        "或问答末句用「是A，不是B」收束；"
-        "或尽是「我知道」「嗯」「懂」这类没有新决定的应声。"
-        "或已经叫过的名字再问「你有名字吗」「叫什么」。"
-        "这是同一拍拆成的多轮空问，不是「太短」。"
-        "收成一两句把决定或物件说完，或只动手；孤立短打不要扩。"
-        "对白里因为/可是可以有。不要另起一套去AI模板。"
-        f"用 propose_patch 只换 writing_signals.repair_span.old_text（同 key 本 Turn 至多 {MAX_PATCHES_PER_PENALTY_KEY} 次）；"
-        "若 span 带 neighbor，跟那条拍里一句有内容的对白或一记动作，不要搬情节，"
-        "也不要把「」拆成旁白。"
-        "预算尽则 draft_section mode=rewrite_window 一次替换整窗："
-        "一两句说完，或手、物、沉默、信息差接上。"
-        "不要把对白改成「告诉他…」的说明。不要整章再 draft_section。"
+        "本次检测发现一处局部场景问题。"
+        "走 scene_rebuild，只替换 repair_span.old_text。"
+        "保留场景事实和状态变化，不改变整章剧情。"
     )
+
+
+def _build_staccato_receipt_text() -> str:
+    return _scene_rebuild_receipt_text()
 
 
 def _build_hinge_receipt_text() -> str:
-    """hinge 拧法（看见+立马+却）L0 修复指引正文。"""
-    return (
-        "这一段在「看见/听到」之后用了立马/立刻，下一句又在拧（却/没想到/回头）。"
-        "不要补转折，不要还上一章的账，不要另起一套去AI模板。"
-        "改的是这一拍的拧法，不是把整场改成三字句。"
-        "用 propose_patch 只换 writing_signals.repair_span.old_text："
-        "看见之后可以停在物件、价钱、规矩或沉默上。"
-        "前后句子长短仍可以对不齐。不要改成说明书。不要整章再 draft_section。"
-    )
+    return _scene_rebuild_receipt_text()
 
 
 def _build_opening_receipt_text() -> str:
-    """开篇机构专名（宗/派）L0 修复指引正文。"""
-    return (
-        "第一章入口写成了机构专名（宗/派/仙门），读者还不知道这是哪块地。"
-        "不要补身世提要，不要另起一套去AI模板。"
-        "用 propose_patch 只换开篇几句（writing_signals.repair_span.old_text）："
-        "先写可站的场面，机构名让人物后口带出。"
-        "不要整章再 draft_section。身世、失踪、全书谜面仍不要写进第一章。"
-    )
+    return _scene_rebuild_receipt_text()
 
 
 def _build_lore_receipt_text() -> str:
-    """开篇 lore dump（N年前+失踪/尸体）L0 修复指引正文。"""
-    return (
-        "这一段在点到人名之后，用「N年前」写成了失踪/尸体提要。"
-        "不要补转折，不要把全书谜面写圆，不要另起一套去AI模板。"
-        "用 propose_patch 只删这段提要（writing_signals.repair_span.old_text）："
-        "留在当下的屋子、活计或麻烦上即可。"
-        "不要整章再 draft_section。删提要时不要改成三字问答连环。"
-    )
+    return _scene_rebuild_receipt_text()
 
 
 def _build_classic_receipt_text(state: Any) -> str:

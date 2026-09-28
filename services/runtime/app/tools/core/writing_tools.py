@@ -317,6 +317,26 @@ def _replace_rewrite_window(
     )
 
 
+def _attach_process_repair_span(
+    result: dict[str, Any],
+    signals: dict[str, Any] | None,
+) -> None:
+    """四类 L0 定位成功时，把微场景工作单交回模型。不带回分数和证据计数。"""
+    if not isinstance(signals, dict):
+        return
+    span = signals.get("repair_span")
+    if not isinstance(span, dict) or span.get("repair_class") != "process":
+        return
+    old = str(span.get("old_text") or "").strip()
+    key = str(span.get("key") or "").strip()
+    if not old or not key:
+        return
+    from app.writing.scene_repair import projection_for_model
+
+    result["repair_span"] = projection_for_model(span)
+    result[key] = True
+
+
 def _collapse_rewrite_result(
     document: str,
     *,
@@ -1038,8 +1058,11 @@ async def draft_section(
     penalties = None
     if isinstance(signals_block, dict):
         penalties = signals_block.get("penalties")
-        if signals_block.get("repair_span") and not author:
-            entry["repair_span"] = signals_block["repair_span"]
+        span = signals_block.get("repair_span")
+        if isinstance(span, dict) and (
+            not author or span.get("repair_class") == "process"
+        ):
+            entry["repair_span"] = span
         if signals_block.get("telemetry_repair_span") and not author:
             entry["telemetry_repair_span"] = signals_block["telemetry_repair_span"]
         if signals_block.get("rewrite_policy") and not author:
@@ -1092,6 +1115,7 @@ async def draft_section(
     result.pop("thread_stale", None)
     result.pop("repair_span", None)
     result.pop("rewrite_policy", None)
+    _attach_process_repair_span(result, signals_block if isinstance(signals_block, dict) else None)
     if not author:
         return result
     from app.writing.text_metrics import DEFAULT_CHAPTER_MAX, DEFAULT_CHAPTER_MIN
@@ -1118,6 +1142,12 @@ async def draft_section(
     # 作者档不把篇幅评价句回给模型；数字已在 visible_chars / target_range。
     if summary and "低于门槛" not in summary:
         shrunk["summary"] = summary
+    span = result.get("repair_span")
+    if isinstance(span, dict):
+        shrunk["repair_span"] = span
+        key = str(span.get("key") or "")
+        if key:
+            shrunk[key] = True
     return shrunk
 
 

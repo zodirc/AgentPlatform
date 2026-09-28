@@ -563,6 +563,52 @@ def check_rewrite_window_allowed(
     )
 
 
+def note_scene_rebuild_failure(
+    turn_id: object | None,
+    session_id: object | None,
+    *,
+    path: str,
+    old_text: str,
+    prior: dict[str, Any] | None,
+    section_id: str = "",
+    reason: str,
+) -> None:
+    """复检没过：记一次尝试，并把失败原因留给下一刀。"""
+    if turn_id is None:
+        return
+    from app.tools.core.writing_tools import _read_manifest, _write_manifest
+
+    manifest = _read_manifest(turn_id, session_id=session_id) or {}
+    sid = normalize_section_id(
+        section_id or resolve_section_for_prose_patch(path, old_text=old_text)
+    )
+    if not sid:
+        return
+    record_patch_attempt(
+        manifest,
+        section_id=sid,
+        penalty_key=resolve_penalty_key(prior, old_text=old_text),
+        old_text=old_text,
+    )
+    drafts = manifest.setdefault("section_drafts", {})
+    row = drafts.get(sid)
+    if not isinstance(row, dict):
+        row = {}
+        drafts[sid] = row
+    try:
+        attempt = int((row.get("repair_feedback") or {}).get("attempt") or 0)
+    except (TypeError, ValueError):
+        attempt = 0
+    from app.writing.scene_repair import retry_note
+
+    row["repair_feedback"] = {
+        "reason": reason,
+        "note": retry_note(reason),
+        "attempt": attempt + 1,
+    }
+    _write_manifest(turn_id, manifest, session_id=session_id)
+
+
 def note_prose_patch_applied(
     turn_id: object | None,
     session_id: object | None,

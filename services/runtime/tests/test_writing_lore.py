@@ -64,8 +64,8 @@ def test_lore_receipt_once() -> None:
     assert should_inject_verify_receipt(state, reserve_steps=10) is False
     assert verify_receipt_kind(state) == "lore"
     text = build_verify_receipt_text(state)
-    assert "删这段提要" in text
-    assert "全书谜面" in text
+    assert "scene_rebuild" in text
+    assert "repair_span.old_text" in text
     assert "neighbor" not in text
     kind = mark_verify_receipt_injected(state)
     assert kind == "lore"

@@ -384,6 +384,7 @@ async def build_writing_signals(
         space=space,
         prior=prior,
         chapter_position=str(role.get("chapter_position") or ""),
+        scene_goal=duty,
     )
     # 假高潮只跟纲上的这场，不跟发明的章类型。
     duty_conflict = bool(

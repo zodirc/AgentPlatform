@@ -37,7 +37,6 @@ from app.writing.signals.prose import (
     world_layer_visible,
 )
 from app.writing.signals.space import MetricSpace, fit_signature
-from app.writing.staccato import staccato_fields
 from app.writing.text_metrics import draft_length_fields, visible_chars
 
 
@@ -213,7 +212,7 @@ def _collect_penalties(
     mode = str(prefs.get("work_mode") or work_mode or "literary")
     position = _score_position(chapter_position, section_id)
 
-    def add(key: str, hit: bool, hint: str) -> None:
+    def add(key: str, hit: bool, hint: str, diagnostic: dict[str, Any] | None = None) -> None:
         if not hit:
             return
         if not _phase_penalty_allowed(key, mode=mode, position=position):
@@ -221,21 +220,66 @@ def _collect_penalties(
         delta = signal_coeff(coeff, fragment_declared, key)
         if delta == 0.0:
             return
-        hits.append({"key": key, "hit": True, "delta": round(delta, 4), "hint": hint})
+        row: dict[str, Any] = {
+            "key": key,
+            "hit": True,
+            "delta": round(delta, 4),
+            "hint": hint,
+        }
+        if diagnostic:
+            subtype = str(diagnostic.get("dominant_subtype") or "")
+            if subtype:
+                row["dominant_subtype"] = subtype
+                row["triggered"] = True
+            evidence = diagnostic.get("evidence")
+            if isinstance(evidence, dict):
+                row["evidence"] = evidence
+        hits.append(row)
 
-    add("hinge_dense", bool(hinge_fields(text).get("hinge_dense")), "看见/听到后立马拧")
+    from app.writing.staccato import staccato_diagnostic
+
+    hinge = hinge_fields(text)
+    add(
+        "hinge_dense",
+        bool(hinge.get("hinge_dense")),
+        "发现之后马上解释并翻转",
+        {
+            "dominant_subtype": "explicit_turn_chain",
+            "evidence": {
+                "hinge_chain_count": hinge.get("hinge_chain_count") or 0,
+                "hinge_see_now": hinge.get("hinge_see_now") or 0,
+                "hinge_see_now_meta": hinge.get("hinge_see_now_meta") or 0,
+            },
+        }
+        if hinge.get("hinge_dense")
+        else None,
+    )
+    staccato_diag = staccato_diagnostic(text)
     add(
         "staccato_uniform",
-        bool(staccato_fields(text, work_mode=mode).get("staccato_uniform")),
-        "空转问答/采访阶梯/收场目录/对拍连环",
+        bool(staccato_diag.get("triggered")),
+        "互动被连续问答或均匀短拍取代",
+        staccato_diag,
     )
     if not skip_opening and mode != "web_serial":
+        opened = bool(opening_fields(text, section_id).get("opening_institution"))
         add(
             "opening_institution",
-            bool(opening_fields(text, section_id).get("opening_institution")),
-            "开篇机构专名",
+            opened,
+            "开篇先报机构名",
+            {"dominant_subtype": "institution_before_place", "evidence": {"institution_before_place": 1}}
+            if opened
+            else None,
         )
-    add("lore_dump", bool(lore_fields(text, section_id).get("lore_dump")), "第一章身世提要")
+    lore = bool(lore_fields(text, section_id).get("lore_dump"))
+    add(
+        "lore_dump",
+        lore,
+        "过去被写成案情提要",
+        {"dominant_subtype": "years_ago_summary", "evidence": {"years_ago_bio": 1}}
+        if lore
+        else None,
+    )
     add("length_short", bool(length_fields.get("length_short")), "实体文字不足")
     if mode == "web_serial":
         add(
@@ -463,6 +507,7 @@ def score_writing_fragment(
     space: MetricSpace | None = None,
     prior: dict[str, Any] | None = None,
     chapter_position: str = "",
+    scene_goal: str = "",
 ) -> dict[str, Any]:
     """完整片段评分含 repair。
     
@@ -538,6 +583,7 @@ def score_writing_fragment(
         length_short=False,
     )
     span = None
+    feedback = prior.get("repair_feedback") if isinstance(prior, dict) else None
     if needs_repair:
         span = build_repair_span(
             text,
@@ -545,6 +591,8 @@ def score_writing_fragment(
             window=locate_win,
             net_signal=float(body["net_signal"]),
             work_mode=mode,
+            scene_goal=scene_goal,
+            previous_failure=feedback,
         )
         if span and unproductive_repeat(prior, span, body.get("composite")):
             avoid = str(span.get("old_text") or "")
@@ -555,29 +603,39 @@ def score_writing_fragment(
                 net_signal=float(body["net_signal"]),
                 avoid_old=avoid,
                 work_mode=mode,
+                scene_goal=scene_goal,
+                previous_failure=feedback,
             )
             if alt and not unproductive_repeat(prior, alt, body.get("composite")):
                 span = alt
             else:
                 span = None
         if span:
-            from app.writing.signals.repair import attach_repair_neighbor
+            if span.get("repair_mode") != "scene_rebuild":
+                from app.writing.signals.repair import attach_repair_neighbor
 
-            neighbor_frag = (
-                "dialogue_dyad"
-                if str(span.get("key") or "") == "staccato_uniform"
-                else fragment_declared
-            )
-            attach_repair_neighbor(
-                span,
-                fragment=neighbor_frag,
-                exemplar_fit=body.get("exemplar_fit")
-                if isinstance(body.get("exemplar_fit"), dict)
-                else None,
-                work_mode=mode,
-            )
-            if span.get("repair_class") == "mechanical":
-                body["repair_span"] = span
+                neighbor_frag = (
+                    "dialogue_dyad"
+                    if str(span.get("key") or "") == "staccato_uniform"
+                    else fragment_declared
+                )
+                attach_repair_neighbor(
+                    span,
+                    fragment=neighbor_frag,
+                    exemplar_fit=body.get("exemplar_fit")
+                    if isinstance(body.get("exemplar_fit"), dict)
+                    else None,
+                    work_mode=mode,
+                )
+            if span.get("repair_class") in {"mechanical", "process"}:
+                if span.get("repair_class") == "process":
+                    body["telemetry_repair_span"] = span
+                    shown = dict(span)
+                    shown.pop("evidence", None)
+                    body["repair_span"] = shown
+                    span = shown
+                else:
+                    body["repair_span"] = span
             else:
                 body["telemetry_repair_span"] = span
                 span = None
