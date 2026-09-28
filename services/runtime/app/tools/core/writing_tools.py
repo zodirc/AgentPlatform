@@ -1477,7 +1477,7 @@ async def author_note(
     text: str,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """作者私记别名：作者档写入 author_state「疑心」节；严格档仍写 author_notes。"""
+    """作者档别名：只在作者档把一句疑心写入 author_state。不写作者私记。"""
     from app.writing.regime import is_author_regime
 
     if is_author_regime(
@@ -1493,17 +1493,10 @@ async def author_note(
             phase="author",
             workspace_root=Path(settings.workspace_root),
         )
-    from app.writing.author_notes import append_author_note
-
-    append_author_note(
-        section_id,
-        text,
-        workspace_root=Path(settings.workspace_root),
-    )
     return {
-        "status": "ok",
+        "status": "skipped",
         "section_id": section_id,
-        "summary": "已记入 author_notes",
+        "summary": "作者私记已停用",
     }
 
 

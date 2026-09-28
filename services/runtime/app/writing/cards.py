@@ -907,7 +907,6 @@ def prepare_writing_system_prompt(
     scope = resolve_scope(
         message, outline=outline_text, workspace_root=workspace_root
     )
-    from app.writing.author_notes import format_author_notes_block
     from app.writing.focus import infer_focus_section_id
     from app.writing.manuscript import list_section_ids, load_manuscript_doc
 
@@ -929,9 +928,6 @@ def prepare_writing_system_prompt(
     if not author:
         from app.writing.taste import format_taste_block
 
-        author_block = format_author_notes_block(workspace_root=workspace_root)
-        if author_block:
-            extras.append(author_block)
         taste_block = format_taste_block(workspace_root=workspace_root, query=message)
         if taste_block:
             extras.append(taste_block)

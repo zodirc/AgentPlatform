@@ -125,10 +125,6 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
         from pathlib import Path
 
         from app.settings import settings
-        from app.writing.continuity import (
-            extract_continuity_candidates,
-            write_pending_candidates,
-        )
         from app.writing.focus import infer_focus_section_id
         from app.writing.manuscript import extract_section, list_section_ids, load_manuscript_doc
 
@@ -167,21 +163,6 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
             )
             chapter_text = extract_section(doc, focus) if focus else doc
             if (chapter_text or "").strip():
-                candidates = extract_continuity_candidates(
-                    chapter_text,
-                    section_id=focus or "",
-                    outline=outline_text,
-                )
-                written = write_pending_candidates(
-                    candidates,
-                    turn_id=str(turn_id),
-                )
-                if written:
-                    logger.info(
-                        "wn1 pending continuity cards turn_id=%s count=%s",
-                        turn_id,
-                        len(written),
-                    )
                 try:
                     from app.writing.story_state import (
                         chapter_num,
@@ -194,8 +175,6 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
                         build_editor_note_lines,
                         write_editor_notes,
                     )
-                    from app.writing.author_notes import load_author_notes, note_repeats_delta
-                    from app.writing.story_state import load_story_state
                     from app.writing.regime import is_author_regime
 
                     is_author = is_author_regime(
@@ -207,22 +186,12 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
                     cons = consistency_flags(chapter_text, section_id=focus or "")
                     stale = []
                     unpaid = []
-                    deltas = []
-                    notes_text = load_author_notes()
-                    repeats = False
-                    if deltas and notes_text:
-                        from app.writing.author_notes import recent_author_notes
-
-                        recents = recent_author_notes(n=1)
-                        if recents:
-                            repeats = note_repeats_delta(recents[-1], deltas)
                     lines = build_editor_note_lines(
                         section_id=focus or "",
                         measured=measured,
                         consistency=cons,
                         stale=stale,
                         wild_unpaid=unpaid,
-                        author_note_repeats_delta=repeats,
                         include_surface=not is_author,
                     )
                     write_editor_notes(focus or "ch", lines)

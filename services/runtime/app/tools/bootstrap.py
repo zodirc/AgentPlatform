@@ -467,24 +467,6 @@ def build_registry() -> ToolRegistry:
     )
     registry.register(
         ToolSpec(
-            name="author_note",
-            description=(
-                "After a chapter, optionally record ≤120 characters of your current "
-                "doubt or bet about this book — not a summary. Not scored."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "section_id": {"type": "string"},
-                    "text": {"type": "string"},
-                },
-                "required": ["section_id", "text"],
-            },
-            handler=core.author_note,
-        )
-    )
-    registry.register(
-        ToolSpec(
             name="author_state",
             description=(
                 "Maintain this book's first-person author notebook "

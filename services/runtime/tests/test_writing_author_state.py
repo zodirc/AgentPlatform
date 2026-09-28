@@ -103,7 +103,7 @@ async def test_author_note_alias_writes_doubt_section(workspace: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_author_note_strict_still_writes_notes(workspace: Path) -> None:
+async def test_author_note_strict_does_not_write_notes(workspace: Path) -> None:
     from app.tools.core import tools as core
 
     result = await core.author_note(
@@ -111,9 +111,8 @@ async def test_author_note_strict_still_writes_notes(workspace: Path) -> None:
         "短篇备注",
         turn_user_text="写一篇短篇小说",
     )
-    assert result["status"] == "ok"
-    notes = (workspace / ".agent" / "work" / "author_notes.md").read_text(encoding="utf-8")
-    assert "短篇备注" in notes
+    assert result["status"] == "skipped"
+    assert not (workspace / ".agent" / "work" / "author_notes.md").exists()
 
 
 def test_stance_stale_after_three_similar_writes(tmp_path: Path) -> None:

@@ -366,7 +366,7 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "draft_section" in writing.tool_names
     assert "propose_book_candidates" in writing.tool_names
     assert "note_story_delta" not in writing.tool_names
-    assert "author_note" in writing.tool_names
+    assert "author_note" not in writing.tool_names
     assert "author_state" in writing.tool_names
     assert "reread_book" in writing.tool_names
     assert "propose_retcon" in writing.tool_names
