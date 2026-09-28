@@ -906,6 +906,29 @@ def find_committed_pond(
     return load_committed_pond(workspace_root=workspace_root)
 
 
+def release_unadopted_ponds(
+    message: str = "",
+    *,
+    workspace_root: Path | None = None,
+) -> bool:
+    """新会话还没点中书时，丢掉上一轮没采用的候选。
+
+    同一会话里的「我要其他的」不走这里。点选令牌要留着当前卡片，才能对上书名。
+    已经有已选书时不动，新会话继续写这本书。
+    """
+    if committed_pond_title(message):
+        return False
+    root = _workspace(workspace_root)
+    if load_committed_pond(workspace_root=root):
+        return False
+    from app.writing.ledger import drop_pond_fingerprints
+    from app.writing.pond_history import clear_rejected_ponds
+
+    cleared = clear_opening_ponds(workspace_root=root)
+    cleared = clear_rejected_ponds(workspace_root=root) or cleared
+    return drop_pond_fingerprints(workspace_root=root) or cleared
+
+
 def format_opening_ponds_block(
     *,
     workspace_root: Path | None = None,

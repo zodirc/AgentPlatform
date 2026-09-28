@@ -458,6 +458,52 @@ def test_clear_and_load_opening_ponds_browse_is_soft(workspace: Path) -> None:
     assert format_opening_ponds_block(workspace_root=workspace) == ""
 
 
+def test_new_session_drops_unadopted_ponds_keeps_chosen_book(workspace: Path) -> None:
+    from app.writing.ledger import append_ledger, append_pond_fingerprint
+    from app.writing.opening_ponds import (
+        format_select_pond_message,
+        release_unadopted_ponds,
+        save_committed_pond,
+        save_opening_ponds,
+    )
+    from app.writing.pond_history import append_rejected_ponds
+
+    items = normalize_pond_items(
+        [
+            _pond("深层回声", start_kind="self_notice", promise="power_steps"),
+            _pond("拳馆见数", start_kind="pulled_in", promise="costly_truth"),
+        ]
+    )
+    saved = save_opening_ponds(items, summary="两本", workspace_root=workspace)
+    append_rejected_ponds(saved, workspace_root=workspace)
+    for item in items:
+        append_pond_fingerprint(item, workspace_root=workspace)
+    append_ledger(
+        {"start_kind": "self_notice", "promise": "power_steps"},
+        workspace_root=workspace,
+        kind="chapter",
+    )
+    ponds = workspace / ".agent" / "work" / "opening_ponds.json"
+    rejected = workspace / ".agent" / "work" / "opening_ponds_rejected.jsonl"
+    ledger = workspace / ".agent" / "work" / "ledger.jsonl"
+
+    assert release_unadopted_ponds("采用此开篇「深层回声」", workspace_root=workspace) is False
+    assert ponds.is_file()
+
+    assert release_unadopted_ponds("写一篇散文", workspace_root=workspace) is True
+    assert not ponds.is_file()
+    assert not rejected.is_file()
+    text = ledger.read_text(encoding="utf-8")
+    assert "深层回声" not in text
+    assert '"kind": "chapter"' in text
+
+    save_opening_ponds(items, summary="两本", workspace_root=workspace)
+    save_committed_pond(items[0], workspace_root=workspace)
+    assert release_unadopted_ponds("下一章", workspace_root=workspace) is False
+    assert ponds.is_file()
+    assert format_select_pond_message(items[0]).startswith("采用此开篇")
+
+
 def test_seed_outline_from_pond_empty_wrap_and_prepend(
     workspace: Path, monkeypatch
 ) -> None:

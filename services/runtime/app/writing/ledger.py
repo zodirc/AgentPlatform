@@ -244,6 +244,41 @@ def pond_vector(item: Mapping[str, Any]) -> dict[str, str]:
     )
 
 
+def drop_pond_fingerprints(*, workspace_root: Path) -> bool:
+    """丢掉未采用候选的书名行。章承诺向量行留下。"""
+    path = ledger_path(workspace_root=workspace_root)
+    if not path.is_file():
+        return False
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    kept: list[str] = []
+    dropped = False
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            data = json.loads(line)
+        except ValueError:
+            kept.append(line)
+            continue
+        if isinstance(data, dict) and data.get("kind") == "pond":
+            dropped = True
+            continue
+        kept.append(line)
+    if not dropped:
+        return False
+    try:
+        if kept:
+            path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+        else:
+            path.unlink()
+    except OSError:
+        return False
+    return True
+
+
 def append_pond_fingerprint(
     item: Mapping[str, Any],
     *,
