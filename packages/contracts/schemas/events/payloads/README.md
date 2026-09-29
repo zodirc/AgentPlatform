@@ -10,7 +10,7 @@
 ## 规则
 
 1. runtime append 事件前校验 `payload` 符合对应 schema。
-2. 新增 type：增 `*.json`、更新 `_index.json`、`types.json`、ADR-004、`contracts.md` §3。
+2. 新增 type：增 `*.json`、更新 `_index.json`、`types.json`，并在 [ADR-017](../../../../docs/adr/017-contract-validation-and-event-payloads.md) 记下是否改变校验面。
 3. payload **不得**重复 domain 枚举（如用 `phase: "running"` 代替读 `turns.status`）。
 
 ## Phase 1 最小集

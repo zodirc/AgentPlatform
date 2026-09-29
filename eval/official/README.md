@@ -10,7 +10,7 @@
 > `make official-bench-retrieval-agent` / `context-agent` / `coding-infer-agent`  
 > （需 `make up`、`OPS_TEST_SECRET`、`BENCH_MODEL_*`；冒烟可加 `QUERY_LIMIT=5`）。  
 > 协议戳记 `official-small-2026-08-m3`（自由主臂）。`m2` 为强制臂过渡史；L0 component（m1 hybrid/旁路）仍可用作对照。  
-> **中文全流程图**：[`docs/assets/ops/official-l1-agent-path-flow-zh.png`](../../docs/assets/ops/official-l1-agent-path-flow-zh.png)
+> **中文全流程图**：导览 [Ops L1](../../docs/tour/index.html#ops-bench) · [`docs/assets/ops/ops-bench-principle-zh.png`](../../docs/assets/ops/ops-bench-principle-zh.png)
 
 每次跑分写：
 
