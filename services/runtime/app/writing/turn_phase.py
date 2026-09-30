@@ -40,8 +40,7 @@ _NOT_JOB_HEAD_RE = re.compile(
 )
 _CH_ID_RE = re.compile(r"^ch(\d+)$", re.I)
 OUTLINE_AWAIT_HINT = (
-    "纲已写入 outline.md。世界入口和当前阶段说明读者怎么进入、这一段留下什么变化；"
-    "近处章节各有一句作用。可以说写第一章、改纲，或先补当前章段。"
+    "纲已写入。可以说写第一章、改纲，或先补当前章便条。"
 )
 # 与 text_metrics.OUTLINE_MIN_VISIBLE 同一道「章段过薄」门槛。
 NEAR_JOB_MIN = 80
@@ -71,13 +70,9 @@ def _workspace(workspace_root: Path | None) -> Path:
 def _read_outline(workspace_root: Path | None = None, outline: str | None = None) -> str:
     if outline is not None:
         return outline
-    path = _workspace(workspace_root) / "outline.md"
-    if not path.is_file():
-        return ""
-    try:
-        return path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return ""
+    from app.writing.outline_store import project_outline
+
+    return project_outline(workspace_root)
 
 
 def last_chapter_num(section_ids: list[str] | None) -> int:

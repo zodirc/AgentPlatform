@@ -440,6 +440,28 @@ def _domain_event_payload(event_type: str, result: dict[str, Any]) -> dict[str, 
             out["outline_path"] = str(result.get("outline_path"))
         if mode in {"replace", "append"}:
             out["mode"] = mode
+        changed = result.get("changed_files")
+        if isinstance(changed, list) and changed:
+            files = []
+            for row in changed:
+                if not isinstance(row, dict) or not row.get("path"):
+                    continue
+                item = {
+                    "path": str(row.get("path"))[:256],
+                    "scope": str(row.get("scope") or "work")[:32],
+                }
+                if row.get("section_id"):
+                    item["section_id"] = str(row.get("section_id"))[:32]
+                if row.get("volume_index") is not None:
+                    try:
+                        item["volume_index"] = int(row.get("volume_index"))
+                    except (TypeError, ValueError):
+                        pass
+                files.append(item)
+                if len(files) >= 12:
+                    break
+            if files:
+                out["changed_files"] = files
         return out
     return dict(result)
 

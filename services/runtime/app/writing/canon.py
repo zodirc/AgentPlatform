@@ -25,6 +25,7 @@ _KINDS = frozenset(
         "speech",
         "guess",
         "state",
+        "outcome",
     }
 )
 _KIND_LABEL = {
@@ -37,9 +38,10 @@ _KIND_LABEL = {
     "speech": "转述",
     "guess": "猜测",
     "state": "临时状态",
+    "outcome": "章结果",
 }
 _TIMELINE_KINDS = frozenset({"character", "relation", "object", "promise", "state"})
-_CONFIRMED_KINDS = frozenset({"character", "object", "rule"})
+_CONFIRMED_KINDS = frozenset({"character", "object", "rule", "outcome"})
 _SENTENCE = re.compile(r"[^。！？\n]+[。！？]")
 _NAME = r"[\u4e00-\u9fff]{2,4}"
 _DEATH = re.compile(rf"([\u4e00-\u9fff]{{2,4}}?)(?:落水死|阵亡|被杀|死了)")
@@ -113,7 +115,11 @@ def record_fact(
     if not body or not source_section:
         return "skipped"
     clue_kinds = {"speech", "guess", "relation", "promise", "change", "state"}
-    sure = "clue" if certainty == "clue" or token in clue_kinds else "confirmed"
+    # 带正文证据的章结果保持 confirmed，不走 change 的降级。
+    if token == "outcome" and certainty != "clue":
+        sure = "confirmed"
+    else:
+        sure = "clue" if certainty == "clue" or token in clue_kinds else "confirmed"
     data = load_canon(workspace_root=workspace_root)
     incoming = {
         "id": f"{source_section}:{token}:{subject or 'self'}",
@@ -289,6 +295,65 @@ def active_facts_for_writer(
 
     rows.sort(key=rank, reverse=True)
     return rows[:limit]
+
+
+def record_chapter_outcomes(
+    section_id: str,
+    prose: str,
+    outcomes: list[dict[str, Any]] | None,
+    *,
+    workspace_root: Path | None = None,
+) -> dict[str, list[str]]:
+    """只收下正文里能对上证据的章结果。对不上的不进 canon。"""
+    accepted: list[str] = []
+    rejected: list[str] = []
+    body = prose or ""
+    for item in outcomes or []:
+        if not isinstance(item, dict):
+            rejected.append("bad_item")
+            continue
+        evidence = str(item.get("evidence") or "").strip()
+        text = str(item.get("text") or "").strip()
+        if not evidence or evidence not in body or not text:
+            rejected.append(text or evidence or "missing_evidence")
+            continue
+        certainty = "confirmed" if item.get("constrains_next") is not False else "clue"
+        subject = str(item.get("subject") or text)[:40]
+        record_fact(
+            kind="outcome",
+            text=text,
+            source_section=section_id,
+            evidence=evidence,
+            subject=subject,
+            certainty=certainty,
+            workspace_root=workspace_root,
+        )
+        accepted.append(text)
+    return {"accepted": accepted, "rejected": rejected}
+
+
+def previous_outcomes(
+    focus: str,
+    *,
+    workspace_root: Path | None = None,
+) -> str:
+    """上一章里经证据确认、并声明会约束下一章的结果。"""
+    match = re.search(r"(\d+)", focus or "")
+    if not match:
+        return ""
+    prev = f"ch{int(match.group(1)) - 1}"
+    if int(match.group(1)) <= 1:
+        return ""
+    lines: list[str] = []
+    for fact in load_canon(workspace_root=workspace_root)["facts"]:
+        if not isinstance(fact, dict) or not _confirmed(fact):
+            continue
+        if fact.get("kind") != "outcome":
+            continue
+        if str(fact.get("source_section") or "") != prev:
+            continue
+        lines.append(f"- {fact.get('text')}")
+    return "\n".join(lines)
 
 
 def publish_confirmed_md(*, workspace_root: Path | None = None) -> str:

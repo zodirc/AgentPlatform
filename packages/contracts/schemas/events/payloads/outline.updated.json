@@ -14,6 +14,21 @@
       "type": "string",
       "enum": ["replace", "append"],
       "description": "How outline.md was updated"
+    },
+    "changed_files": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "scope"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "scope": { "type": "string", "enum": ["work", "volume", "chapter"] },
+          "section_id": { "type": "string", "maxLength": 32 },
+          "volume_index": { "type": "integer", "minimum": 1 }
+        }
+      }
     }
   }
 }

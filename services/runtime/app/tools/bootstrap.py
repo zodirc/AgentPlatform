@@ -234,6 +234,30 @@ def build_registry() -> ToolRegistry:
                             "No quota. Later chapters should show a consequence."
                         ),
                     },
+                    "outcomes": {
+                        "type": "array",
+                        "description": (
+                            "Chapter results. Each item needs text and evidence that "
+                            "appears in content. Unmatched evidence is not stored."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "text": {"type": "string"},
+                                "evidence": {"type": "string"},
+                                "subject": {"type": "string"},
+                                "constrains_next": {"type": "boolean"},
+                            },
+                            "required": ["text", "evidence"],
+                        },
+                    },
+                    "plan_deviation": {
+                        "type": "string",
+                        "description": (
+                            "How the prose left the chapter note. Diagnostic only; "
+                            "not written into canon."
+                        ),
+                    },
                 },
                 "required": ["section_id", "content"],
             },
@@ -600,14 +624,42 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="update_outline",
             description=(
-                "Create or update outline.md (creates the file when absent; empty "
-                "workspace is allowed). Prefer mode=append for long outlines / "
-                "batch continuation; replace requires the full outline (or force=true)"
+                "Create or update the outline. content still writes outline.md. "
+                "documents writes work, volume, and chapter files in one commit "
+                "without splitting a mixed markdown blob. "
+                "Prefer mode=append for long outlines; replace requires the full "
+                "target text (or force=true)."
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "content": {"type": "string"},
+                    "scope": {
+                        "type": "string",
+                        "enum": ["work", "volume", "chapter"],
+                    },
+                    "section_id": {"type": "string"},
+                    "volume_index": {"type": "integer"},
+                    "documents": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "scope": {
+                                    "type": "string",
+                                    "enum": ["work", "volume", "chapter"],
+                                },
+                                "content": {"type": "string"},
+                                "mode": {
+                                    "type": "string",
+                                    "enum": ["replace", "append"],
+                                },
+                                "section_id": {"type": "string"},
+                                "volume_index": {"type": "integer"},
+                            },
+                            "required": ["scope", "content"],
+                        },
+                    },
                     "mode": {
                         "type": "string",
                         "enum": ["replace", "append"],
@@ -643,7 +695,6 @@ def build_registry() -> ToolRegistry:
                         },
                     },
                 },
-                "required": ["content"],
             },
             handler=core.update_outline,
         )

@@ -382,16 +382,9 @@ def _collect_rewards(
         and not flags["synopsis"],
         "接近该类型范本原型（节奏/质地，非情节）",
     )
-    outline_md = ""
-    if section_id:
-        try:
-            from app.tools.core.paths import _resolve_path
+    from app.writing.outline_store import project_outline
 
-            op = _resolve_path("outline.md")
-            if op.is_file():
-                outline_md = op.read_text(encoding="utf-8")
-        except OSError:
-            outline_md = ""
+    outline_md = project_outline() if section_id else ""
     if outline_md:
         arc = outline_arc_fields(outline_md, section_id)
         add("outline_duty_match", not arc.get("outline_peak_flood"), "未抢高潮章职能")

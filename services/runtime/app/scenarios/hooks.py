@@ -128,13 +128,9 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
         from app.writing.focus import infer_focus_section_id
         from app.writing.manuscript import extract_section, list_section_ids, load_manuscript_doc
 
-        outline_text = ""
-        outline_path = Path(settings.workspace_root) / "outline.md"
-        if outline_path.is_file():
-            try:
-                outline_text = outline_path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                outline_text = ""
+        from app.writing.outline_store import project_outline
+
+        outline_text = project_outline(Path(settings.workspace_root))
 
         doc, _rel = load_manuscript_doc()
         if doc.strip():

@@ -313,14 +313,9 @@ def outline_toc_snippet(workspace_root: Path | None = None, *, max_chars: int = 
     
     返回:
         str。"""
-    root = Path(workspace_root or settings.workspace_root).resolve()
-    path = root / "outline.md"
-    if not path.is_file():
-        return ""
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return ""
+    from app.writing.outline_store import project_outline
+
+    text = project_outline(workspace_root)
     lines = []
     for line in text.splitlines():
         if line.startswith("#") or line.strip().startswith("-") or line.strip().startswith("*"):
@@ -332,14 +327,9 @@ def outline_toc_snippet(workspace_root: Path | None = None, *, max_chars: int = 
 
 
 def _read_outline_md(workspace_root: Path | None = None) -> str:
-    root = Path(workspace_root or settings.workspace_root).resolve()
-    path = root / "outline.md"
-    if not path.is_file():
-        return ""
-    try:
-        return path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return ""
+    from app.writing.outline_store import project_outline
+
+    return project_outline(workspace_root)
 
 
 def _focus_section_number(focus: str) -> int | None:

@@ -40,14 +40,16 @@ def compile_writing_pack_parts(
     message: str = "",
 ) -> list[str]:
     from app.writing.book_scope import infer_book_scope
-    from app.writing.canon import format_active_facts
+    from app.writing.canon import format_active_facts, previous_outcomes
     from app.writing.focus import _read_outline_md
-    from app.writing.outline_arc import (
-        extract_outline_job,
-        extract_outline_style_contract,
-        outline_style_committed,
-    )
+    from app.writing.outline_arc import extract_outline_job
     from app.writing.outline_phase import resolve_outline_phase
+    from app.writing.outline_store import (
+        next_dependency,
+        planned_dependencies,
+        volume_question,
+        work_for_writer,
+    )
 
     text = _read_outline_md(workspace_root)
     scope = infer_book_scope(message, outline=text, section_id=focus)
@@ -60,12 +62,26 @@ def compile_writing_pack_parts(
     ]
     if phase.get("outline_phase") == "open" and not text.strip():
         return parts
-    style = extract_outline_style_contract(text)
-    if style and outline_style_committed(text):
-        parts.append(style)
+    situation = work_for_writer(workspace_root)
+    if situation:
+        parts.append(situation)
+    question = volume_question(workspace_root)
+    if question:
+        parts.append(question)
+    mode = planning_mode(workspace_root=workspace_root, outline=text)
+    if mode == "planned":
+        deps = planned_dependencies(workspace_root)
+        if deps:
+            parts.append(deps)
     brief = extract_outline_job(text, focus) if focus else ""
     if brief:
         parts.append(brief)
+    nxt = next_dependency(focus, workspace_root) if focus else ""
+    if nxt:
+        parts.append(nxt)
+    prior = previous_outcomes(focus, workspace_root=workspace_root)
+    if prior:
+        parts.append("上一章结果：\n" + prior)
     facts = format_active_facts(
         focus=focus,
         workspace_root=workspace_root,

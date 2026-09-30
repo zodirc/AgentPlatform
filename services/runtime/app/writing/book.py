@@ -149,6 +149,34 @@ def load_writing_book(*, workspace_root: Path | None = None) -> dict[str, Any]:
                 path=_public_rel(root, outline_path),
             )
         )
+    from app.writing.outline_store import list_chapter_rels, list_volume_rels
+
+    for rel in list_volume_rels(root):
+        body = _read_text(root / rel)
+        if not body.strip():
+            continue
+        parts.append(
+            _part(
+                key=rel,
+                label="卷纲",
+                text=body,
+                kind="volume",
+                path=rel,
+            )
+        )
+    for rel in list_chapter_rels(root):
+        body = _read_text(root / rel)
+        if not body.strip():
+            continue
+        parts.append(
+            _part(
+                key=rel,
+                label="章便条",
+                text=body,
+                kind="chapter",
+                path=rel,
+            )
+        )
     title = _first_heading(outline) or _first_heading(manuscript) or "未命名"
     empty = not parts
     if empty:

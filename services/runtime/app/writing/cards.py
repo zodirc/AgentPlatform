@@ -853,13 +853,9 @@ def prepare_writing_system_prompt(
         message=message,
         workspace_root=workspace_root,
     )
-    outline_text = ""
-    try:
-        op = Path(workspace_root or settings.workspace_root).resolve() / "outline.md"
-        if op.is_file():
-            outline_text = op.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        outline_text = ""
+    from app.writing.outline_store import project_outline
+
+    outline_text = project_outline(workspace_root)
     picking = wants_opening_candidates(
         message, outline=outline_text, workspace_root=workspace_root
     )

@@ -310,15 +310,9 @@ async def _resolve_owner_and_work(session_id: object | None) -> tuple[UUID | Non
 
 
 def _chapter_duty(section_id: str) -> str:
-    outline = ""
-    try:
-        from app.tools.core.paths import _resolve_path
+    from app.writing.outline_store import project_outline
 
-        outline_path = _resolve_path("outline.md")
-        if outline_path.is_file():
-            outline = outline_path.read_text(encoding="utf-8")
-    except OSError:
-        outline = ""
+    outline = project_outline()
     if outline.strip():
         job = extract_outline_job(outline, section_id)
         if job:
@@ -344,15 +338,9 @@ async def build_writing_signals(
     platform_prefs_payload = _writing_prefs().platform_prefs_payload
 
     owner_id, work_id = await _resolve_owner_and_work(session_id)
-    outline = ""
-    try:
-        from app.tools.core.paths import _resolve_path
+    from app.writing.outline_store import project_outline
 
-        op = _resolve_path("outline.md")
-        if op.is_file():
-            outline = op.read_text(encoding="utf-8")
-    except OSError:
-        outline = ""
+    outline = project_outline()
     work_mode, mode_source = resolve_work_mode(turn_user_text, outline=outline)
     style_gains = load_style_gains(work_mode=work_mode)
     # Weights + signal gains live in writing tools (writing_prefs.json), not Settings.

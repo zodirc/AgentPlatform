@@ -47,16 +47,9 @@ def infer_fragment_from_duty(duty: str) -> str:
 
 
 def _outline_md(workspace_root: Path | None) -> str:
-    from app.settings import settings
+    from app.writing.outline_store import project_outline
 
-    root = Path(workspace_root or settings.workspace_root).resolve()
-    path = root / "outline.md"
-    if not path.is_file():
-        return ""
-    try:
-        return path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return ""
+    return project_outline(workspace_root)
 
 
 def _section_num(focus: str) -> int | None:

@@ -250,19 +250,18 @@ def resolve_outline_phase(
     elif is_picking:
         phase = "open"
         note = (
-            "长篇开写：propose_book_candidates 出作品候选（工具内部两本独立采样，交两张书页简介）；不要写进聊天"
+            "长篇开写：propose_book_candidates 内部有界搜索并终审作品候选，交两张书页简介；不要写进聊天"
         )
     elif not jobs:
         phase = "open"
-        note = "长篇先 update_outline：世界入口、当前阶段、近处章节作用，写完停；不要先 draft_section"
+        note = "长篇先 update_outline：核心处境、当前卷问题、第一章便条，写完停；不要先 draft_section"
     elif intent:
         phase = "open"
         note = "纲已在：按当前章段写这一章；开篇就是章首，不要另起一场"
     else:
         phase = "open"
         note = (
-            "纲已写入 outline.md。世界入口和当前阶段说明读者怎么进入、这一段留下什么变化；"
-            "近处章节各有一句作用。可以说写第一章、改纲，或先补当前章段。"
+            "纲已写入。可以说写第一章、改纲，或先补当前章便条。"
         )
 
     labels = {"ready": "成稿", "open": "开写", "continue": "续写"}

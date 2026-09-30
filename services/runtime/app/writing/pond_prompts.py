@@ -84,7 +84,11 @@ def format_committed_pond_block(
     lines = [
         "## 已选作品",
         "用户在卡片上勾选了一本。下面是这本书的简介，不是正文。"
-        "先把大纲写入 outline.md，写完停。先写世界入口和当前阶段；近处章节各写一句作用，远处只写阶段变化。"
+        "先写大纲，写完停。用 update_outline 的 documents 一次提交："
+        "scope=work 只写核心处境、叙事承诺和长程边界，不要抄简介；"
+        "scope=volume 写卷问题和起点；"
+        "scope=chapter、section_id=ch1 写第一章便条。"
+        "远处不排章节。discovery 可以不写卷内节点。"
         "开篇就是将来章首，不要把简介原样贴进稿。",
         f"{CHAPTER_DWELL_HINT}。不要为凑字粘无关场面。若第二条线与本场主题对位或共享时空，可以写。",
         "按这本书写；不要另起账单、走向、气味三栏，也不要另起窗口办事。",

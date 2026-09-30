@@ -39,13 +39,9 @@ def _plan_signature(items: list[dict[str, str]]) -> tuple[tuple[str, str, str], 
 def _draft_work_mode(turn_user_text: str = "") -> str:
     from app.writing.work_mode import resolve_work_mode
 
-    outline = ""
-    try:
-        op = _resolve_path("outline.md")
-        if op.is_file():
-            outline = op.read_text(encoding="utf-8")
-    except OSError:
-        outline = ""
+    from app.writing.outline_store import project_outline
+
+    outline = project_outline(Path(settings.workspace_root))
     mode, _ = resolve_work_mode(turn_user_text, outline=outline)
     return mode
 
@@ -53,13 +49,9 @@ def _draft_work_mode(turn_user_text: str = "") -> str:
 def _draft_book_scope(turn_user_text: str = "", section_id: str = "") -> str:
     from app.writing.book_scope import resolve_book_scope
 
-    outline = ""
-    try:
-        op = _resolve_path("outline.md")
-        if op.is_file():
-            outline = op.read_text(encoding="utf-8")
-    except OSError:
-        outline = ""
+    from app.writing.outline_store import project_outline
+
+    outline = project_outline(Path(settings.workspace_root))
     scope, _src = resolve_book_scope(
         turn_user_text,
         outline=outline,
@@ -1079,7 +1071,8 @@ async def draft_section(
     drafts[section_id] = entry
     result["manifest_path"] = _write_manifest(turn_id, manifest, session_id=session_id)
     result["regime"] = regime
-    from app.writing.canon import note_chapter_candidate
+    from app.writing.canon import note_chapter_candidate, record_chapter_outcomes
+    from app.writing.outline_checks import prose_shadow_issues
 
     if mode != "rewrite_window":
         note_chapter_candidate(
@@ -1087,6 +1080,20 @@ async def draft_section(
             scored,
             workspace_root=Path(settings.workspace_root),
         )
+        outcomes = _kwargs.get("outcomes")
+        if isinstance(outcomes, list) and outcomes:
+            result["outcomes"] = record_chapter_outcomes(
+                section_id,
+                scored,
+                outcomes,
+                workspace_root=Path(settings.workspace_root),
+            )
+        deviation = str(_kwargs.get("plan_deviation") or "").strip()
+        if deviation:
+            result["plan_deviation"] = deviation
+        shadow = prose_shadow_issues(scored)
+        if shadow:
+            result["prose_shadow"] = shadow
     from app.writing.canon import chapter_candidates, load_canon
     from app.writing.editor import structural_return_payload
 
@@ -1249,7 +1256,7 @@ async def propose_book_candidates(
     items: list[dict[str, Any]] | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """live：独立采样 ×2，各交 title+pitch。stub：仍收调用方交来的卡片。"""
+    """live：有界搜索并终审出两张卡；stub：仍收调用方交来的卡片。"""
     from app.writing.candidate_sample import sample_independent_pair
     from app.writing.excerpt_job import job_signals_for, keep_passing_pond_items
     from app.writing.opening_ponds import (
@@ -1582,7 +1589,7 @@ async def editor_report(
 
 
 async def update_outline(
-    content: str,
+    content: str = "",
     mode: str = "replace",
     **_kwargs: Any,
 ) -> dict[str, Any]:
@@ -1598,7 +1605,17 @@ async def update_outline(
 
     说明:
         ``occupy_fresh`` 行为与 ``draft_section`` 一致，可归档旧 occupied 写作文档。
+        ``documents`` 或 ``scope`` 走分层文件；旧的 content 仍只写 outline.md。
     """
+    layered = _kwargs.get("documents") or str(_kwargs.get("scope") or "").strip()
+    if layered:
+        return _update_outline_layers(content, mode, **_kwargs)
+    if not str(content or "").strip() and not _kwargs.get("volume"):
+        return {
+            "status": "error",
+            "error": "empty_outline",
+            "summary": "update_outline 需要 content，或改用 documents / scope。",
+        }
     path = "outline.md"
     target = _resolve_path(path)
     denied = _mkdir_parent(target, path)
@@ -1758,6 +1775,68 @@ async def update_outline(
         prev = str(result.get("summary") or summary)
         if "纲已写入" not in prev:
             result["summary"] = f"{prev}；{OUTLINE_AWAIT_HINT}"
+    return result
+
+
+def _update_outline_layers(
+    content: str,
+    mode: str,
+    **_kwargs: Any,
+) -> dict[str, Any]:
+    """分层写入。不解析混合 Markdown。"""
+    from app.writing.outline_checks import plan_issues
+    from app.writing.outline_store import (
+        commit_documents,
+        project_outline,
+        read_chapter,
+        read_volume,
+    )
+    from app.writing.text_metrics import wants_outline_toc_only
+    from app.writing.turn_phase import OUTLINE_AWAIT_HINT, should_await_outline_direction
+
+    documents = _kwargs.get("documents")
+    if not isinstance(documents, list):
+        documents = [
+            {
+                "scope": _kwargs.get("scope"),
+                "content": content,
+                "mode": mode,
+                "section_id": _kwargs.get("section_id"),
+                "volume_index": _kwargs.get("volume_index"),
+            }
+        ]
+    force = str(_kwargs.get("force", "")).lower() in {"1", "true", "yes"}
+    result = commit_documents(
+        documents,
+        workspace_root=Path(settings.workspace_root),
+        force=force,
+    )
+    if result.get("status") == "error":
+        return result
+    user_text = str(_kwargs.get("turn_user_text") or "")
+    root = Path(settings.workspace_root)
+    section_id = ""
+    for row in result.get("changed_files") or []:
+        if isinstance(row, dict) and row.get("scope") == "chapter":
+            section_id = str(row.get("section_id") or "")
+            break
+    chapter = read_chapter(section_id, root) if section_id else ""
+    notes = plan_issues(
+        chapter=chapter,
+        volume=read_volume(1, root),
+        user_wants_toc=wants_outline_toc_only(user_text),
+    )
+    summary = "Outline updated"
+    if notes:
+        summary = summary + "；" + "；".join(notes)
+    projected = project_outline(root)
+    result["content"] = projected
+    result["mode"] = "replace" if mode != "append" else "append"
+    result["summary"] = summary
+    if should_await_outline_direction(user_text, outline=projected):
+        result["awaiting_direction"] = True
+        if "纲已写入" not in summary:
+            result["summary"] = f"{summary}；{OUTLINE_AWAIT_HINT}"
     return result
 
 
