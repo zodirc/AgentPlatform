@@ -410,12 +410,13 @@ def _preferred_shelves(text: str) -> set[str]:
 
 
 def uses_reference_pool(text: str) -> bool:
-    """题材池服务都市超凡。点名某部作品或「只有主角」时不再塞参照。
+    """对象级题材参照已关闭。
 
-    「我期望更宏大」这类补充仍从同一池里抽，用户原话另留在提示里。
+    宽泛都市请求不再抽设施、职业和可换名情节。用户原话单独进采样。
+    新的关系层参照要有评测后再开。
     """
-    raw = (text or "").strip()
-    return serves_urban_pool(raw) and not _DIRECTED_REQUEST_MARK.search(raw)
+    del text
+    return False
 
 
 def request_is_long_novel(text: str) -> bool:

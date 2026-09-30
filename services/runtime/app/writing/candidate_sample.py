@@ -1,4 +1,4 @@
-"""作品候选：独立采样 ×2 → title+pitch 卡片。无 selector / renderer。"""
+"""作品候选：并行短方向搜索 → 选二 → 独立成文 → title+pitch 卡片。"""
 
 from __future__ import annotations
 
@@ -27,12 +27,27 @@ from app.writing.work_reconstruction import (
     parse_card,
     topic_of,
 )
+from app.writing.premise_gate import GATE_SCHEMA, gate_messages, parse_gate_payload
+from app.writing.candidate_search import (
+    CARD_SELECTION_SCHEMA,
+    DIRECTION_SET_SCHEMA,
+    RENDER_SCHEMA,
+    card_selection_messages,
+    direction_set_messages,
+    diversify_selected_cards,
+    listing_affinity,
+    parse_card_selection,
+    parse_direction_set,
+    render_messages,
+)
 
 logger = logging.getLogger(__name__)
 
 CompleteFn = Callable[[list[dict[str, Any]]], Awaitable[str]]
+_CANDIDATE_MODEL_ROUTE = ("writing", "book_candidates")
 
 _SAMPLE_POOL = 2
+_SEARCH_PASSES = 2
 _SLOT_RETRIES = 1
 _THINKING_DELTA_MAX = 8192
 _FORM_MAX_OUTPUT_TOKENS = 1024
@@ -73,8 +88,9 @@ def _content_text(messages: list[dict[str, Any]]) -> str:
 
 
 def _isolated_generation(max_output_tokens: int) -> GenerationParams:
-    """候选 child 不继承 writing 场景温度/system，也不开内部搜索。"""
-    base = GenerationParams.from_settings(scenario_id=None)
+    """候选 child 只取写作温度，不继承场景 system，也不开内部搜索。"""
+    # 候选需要写作温度；此前误用 agent 温度，两个独立槽很容易落到同一模板。
+    base = GenerationParams.from_settings(scenario_id="writing")
     return replace(
         base,
         max_output_tokens=max_output_tokens,
@@ -93,6 +109,40 @@ def form_generation() -> GenerationParams:
 
 def candidate_generation() -> GenerationParams:
     return form_generation()
+
+
+def gate_generation() -> GenerationParams:
+    return replace(
+        _isolated_generation(256),
+        temperature=0.0,
+        response_schema=GATE_SCHEMA,
+    )
+
+
+def direction_generation() -> GenerationParams:
+    # 略抬温度，让四个方向更可能离开同一高概率模板。
+    return replace(
+        _isolated_generation(1400),
+        temperature=0.95,
+        response_schema=DIRECTION_SET_SCHEMA,
+    )
+
+
+def selection_generation() -> GenerationParams:
+    return replace(
+        _isolated_generation(128),
+        temperature=0.0,
+        response_schema=CARD_SELECTION_SCHEMA,
+    )
+
+
+def render_generation() -> GenerationParams:
+    # 正例已把分布拉向短简介；再压输出预算，减少滑向第一卷梗概的续写空间。
+    return replace(
+        _isolated_generation(320),
+        temperature=0.7,
+        response_schema=RENDER_SCHEMA,
+    )
 
 
 def _log_candidate_trace(
@@ -258,13 +308,21 @@ async def _gateway_complete(
     *,
     generation: GenerationParams,
     think_char_budget: int,
+    model_route: tuple[str, str] | None = None,
 ) -> CompleteResult:
-    from app.model.config import resolve_model_config
+    from app.model.config import resolve_model_config, resolve_routed_model_config
     from app.model.factory import create_gateway
     from app.tenant_context import current_owner_user_id
 
     owner = current_owner_user_id()
-    config = await resolve_model_config(owner_user_id=owner)
+    if model_route is None:
+        config = await resolve_model_config(owner_user_id=owner)
+    else:
+        config = await resolve_routed_model_config(
+            owner_user_id=owner,
+            scenario_id=model_route[0],
+            role=model_route[1],
+        )
     gateway = create_gateway(
         config,
         messages=messages,
@@ -290,6 +348,7 @@ async def _run_complete(
     complete: CompleteFn | None,
     generation: GenerationParams,
     think_char_budget: int,
+    model_route: tuple[str, str] | None = None,
 ) -> CompleteResult:
     if complete is not None:
         return CompleteResult(text=(await complete(messages)).strip())
@@ -297,26 +356,50 @@ async def _run_complete(
         messages,
         generation=generation,
         think_char_budget=think_char_budget,
+        model_route=model_route,
     )
 
 
 def _card_payload(
     *,
     sample_id: str,
-    raw: str,
-    parsed: dict[str, str],
+    parsed: dict[str, Any],
 ) -> dict[str, Any]:
     pitch = parsed["pitch"]
     return {
         "id": sample_id,
         "sample_id": sample_id,
-        "raw": raw,
+        # premise 是形成材料，不进入 UI 的 work/raw 投影。
+        "raw": json.dumps(
+            {"title": parsed["title"], "pitch": pitch}, ensure_ascii=False
+        ),
         "title": parsed["title"],
         "flavor": parsed.get("flavor") or "",
         "opening": pitch,
         "pitch": pitch,
         "work": pitch,
     }
+
+
+async def judge_candidate_shadow(
+    user_text: str,
+    parsed: dict[str, Any],
+    *,
+    complete: CompleteFn | None = None,
+) -> list[str]:
+    """独立模型只标注原因码；不改写候选，也不决定是否保留。"""
+    judged = await _run_complete(
+        gate_messages(
+            user_text,
+            title=str(parsed.get("title") or ""),
+            pitch=str(parsed.get("pitch") or ""),
+            premise=parsed.get("premise") if isinstance(parsed.get("premise"), dict) else None,
+        ),
+        complete=complete,
+        generation=gate_generation(),
+        think_char_budget=512,
+    )
+    return parse_gate_payload(judged.text)
 
 
 def _is_excluded(
@@ -359,6 +442,7 @@ async def sample_one_candidate(
             complete=complete,
             generation=form_generation(),
             think_char_budget=_FORM_THINK_CHAR_BUDGET,
+            model_route=_CANDIDATE_MODEL_ROUTE,
         )
         last_raw = formed.text.strip()
         if formed.aborted and not last_raw:
@@ -370,7 +454,10 @@ async def sample_one_candidate(
             )
             return None
         parsed = parse_card(last_raw)
-        if parsed is not None and obvious_meta_text(parsed["pitch"]):
+        if parsed is not None and (
+            obvious_meta_text(parsed["pitch"])
+            or not 20 <= len(str(parsed.get("pitch") or "")) <= 180
+        ):
             parsed = None
         if parsed is None:
             _log_candidate_trace(
@@ -390,7 +477,25 @@ async def sample_one_candidate(
         ):
             logger.info("candidate excluded id=%s title=%s", sample_id, parsed["title"])
             continue
-        card = _card_payload(sample_id=sample_id, raw=last_raw, parsed=parsed)
+        card = _card_payload(sample_id=sample_id, parsed=parsed)
+        self_codes = [
+            code
+            for code in str(parsed.get("intent_codes") or "").split(",")
+            if code
+        ]
+        # 测试注入的 complete 只模拟候选形成；生产路径另起全新 messages 独立判断。
+        codes = (
+            await judge_candidate_shadow(user_text, parsed)
+            if complete is None
+            else self_codes
+        )
+        if codes:
+            logger.info(
+                "candidate intent shadow id=%s codes=%s self_codes=%s",
+                sample_id,
+                ",".join(codes),
+                ",".join(self_codes),
+            )
         _log_candidate_trace(
             sample_id=sample_id,
             sample_raw=last_raw,
@@ -449,7 +554,7 @@ async def sample_independent_pair(
     exclude_fingerprints: set[str] | None = None,
     exclude_titles: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """独立抽两本；候选之间不传结构分析，过近时换题材重抽第二本。"""
+    """有界铺开方向、独立成文，再按成文质量选出至多两本。"""
 
     _ = (held, gate)
     token = _sample_turn_id.set(turn_id)
@@ -458,6 +563,13 @@ async def sample_independent_pair(
         buffered.start_stream_liveness(0)
     await _mark_candidate_thinking()
     try:
+        if complete is None:
+            return await _search_candidate_pair(
+                user_text,
+                exclude_ids=set(exclude_ids or ()),
+                exclude_fingerprints=set(exclude_fingerprints or ()),
+                exclude_titles=set(exclude_titles or ()),
+            )
         return await _sample_independent_pair_body(
             user_text,
             complete=complete,
@@ -470,6 +582,187 @@ async def sample_independent_pair(
         if buffered is not None:
             await buffered.stop_stream_liveness()
         _sample_turn_id.reset(token)
+
+
+async def _map_directions(user_text: str, *, discovery_pass: int) -> list[str]:
+    for _attempt in range(_SLOT_RETRIES + 1):
+        result = await _run_complete(
+            direction_set_messages(user_text, discovery_pass=discovery_pass),
+            complete=None,
+            generation=direction_generation(),
+            think_char_budget=512,
+            model_route=_CANDIDATE_MODEL_ROUTE,
+        )
+        ideas = parse_direction_set(result.text)
+        if len(ideas) >= 2:
+            return ideas
+    return []
+
+
+async def _select_rendered_cards(
+    user_text: str,
+    cards: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not cards:
+        return []
+    selected = await _run_complete(
+        card_selection_messages(user_text, cards),
+        complete=None,
+        generation=selection_generation(),
+        think_char_budget=512,
+        model_route=_CANDIDATE_MODEL_ROUTE,
+    )
+    chosen = [
+        cards[index]
+        for index in parse_card_selection(selected.text, len(cards))
+        if 0 <= index < len(cards)
+    ]
+    return diversify_selected_cards(cards, chosen)
+
+
+async def _render_direction(
+    user_text: str,
+    idea: str,
+    *,
+    sample_id: str,
+    exclude_fingerprints: set[str],
+    exclude_titles: set[str],
+) -> dict[str, Any] | None:
+    for _attempt in range(_SLOT_RETRIES + 1):
+        rendered = await _run_complete(
+            render_messages(user_text, idea),
+            complete=None,
+            generation=render_generation(),
+            think_char_budget=512,
+            model_route=_CANDIDATE_MODEL_ROUTE,
+        )
+        parsed = parse_card(rendered.text)
+        pitch = str(parsed.get("pitch") or "") if parsed is not None else ""
+        if (
+            parsed is None
+            or not 20 <= len(pitch) <= 180
+            or obvious_meta_text(pitch)
+        ):
+            continue
+        if _is_excluded(
+            parsed,
+            exclude_ids=set(),
+            exclude_fingerprints=exclude_fingerprints,
+            exclude_titles=exclude_titles,
+            sample_id=sample_id,
+        ):
+            continue
+        card = _card_payload(sample_id=sample_id, parsed=parsed)
+        logger.info(
+            "candidate render affinity id=%s score=%.2f",
+            sample_id,
+            listing_affinity(pitch),
+        )
+        _log_candidate_trace(
+            sample_id=sample_id,
+            sample_raw=rendered.text,
+            work=card["pitch"],
+            selected=False,
+            title=card["title"],
+            opening=card["pitch"],
+            think_chars_form=rendered.think_chars,
+            output_tokens_form=rendered.output_tokens,
+        )
+        return card
+    return None
+
+
+async def _search_candidate_pair(
+    user_text: str,
+    *,
+    exclude_ids: set[str],
+    exclude_fingerprints: set[str],
+    exclude_titles: set[str],
+) -> list[dict[str, Any]]:
+    _ = exclude_ids
+    if not (request_is_long_novel(user_text) or serves_urban_pool(user_text)):
+        return []
+    await _emit_thinking_delta("\n—— 短方向搜索 ——\n")
+    accepted: list[dict[str, Any]] = []
+    seen_fingerprints = set(exclude_fingerprints)
+    seen_titles = set(exclude_titles)
+    for discovery_pass in range(1, _SEARCH_PASSES + 1):
+        ideas = await _map_directions(user_text, discovery_pass=discovery_pass)
+        if len(ideas) < 2:
+            logger.info(
+                "candidate direction map too small pass=%s count=%s",
+                discovery_pass,
+                len(ideas),
+            )
+            continue
+        rendered = await asyncio.gather(
+            *(
+                _render_direction(
+                    user_text,
+                    idea,
+                    sample_id=f"p{discovery_pass}-{index + 1:02d}",
+                    exclude_fingerprints=seen_fingerprints,
+                    exclude_titles=seen_titles,
+                )
+                for index, idea in enumerate(ideas)
+            )
+        )
+        available = [card for card in rendered if card is not None]
+        chosen = await _select_rendered_cards(user_text, available)
+        for card in chosen:
+            title = str(card.get("title") or "").strip()
+            pitch = str(card.get("pitch") or "").strip()
+            if not title or not pitch:
+                continue
+            if any(
+                title.casefold() == str(existing.get("title") or "").strip().casefold()
+                or pitches_too_close(
+                    pitch,
+                    str(existing.get("pitch") or ""),
+                )
+                for existing in accepted
+            ):
+                continue
+            accepted.append(card)
+            seen_titles.add(title.casefold())
+            seen_fingerprints.add(candidate_fingerprint(pitch))
+            if len(accepted) >= _SAMPLE_POOL:
+                break
+        if len(accepted) >= _SAMPLE_POOL:
+            break
+
+    cards: list[dict[str, Any]] = []
+    for index, card in enumerate(accepted[:_SAMPLE_POOL], start=1):
+        final = {**card, "id": f"c{index:02d}", "sample_id": f"c{index:02d}"}
+        cards.append(final)
+        _log_candidate_trace(
+            sample_id=final["sample_id"],
+            work=str(final.get("pitch") or ""),
+            selected=True,
+            title=str(final.get("title") or ""),
+            opening=str(final.get("pitch") or ""),
+        )
+    if cards:
+        shadow_codes = await asyncio.gather(
+            *(
+                judge_candidate_shadow(
+                    user_text,
+                    {
+                        "title": card.get("title"),
+                        "pitch": card.get("pitch"),
+                    },
+                )
+                for card in cards
+            )
+        )
+        for card, codes in zip(cards, shadow_codes):
+            if codes:
+                logger.info(
+                    "candidate intent shadow id=%s codes=%s",
+                    card["sample_id"],
+                    ",".join(codes),
+                )
+    return cards
 
 
 async def resolve_sample_user_text(user_text: str, session_id: Any = None) -> str:
@@ -545,9 +838,6 @@ async def _sample_independent_pair_body(
         first_title = str(first.get("title") or "").strip()
         if first_title:
             second_exclude_titles.add(first_title.casefold())
-    taken = ""
-    if first is not None:
-        taken = str(first.get("title") or "").strip()
     second = await _sample_with_seed(
         user_text,
         complete=complete,
@@ -556,7 +846,6 @@ async def _sample_independent_pair_body(
         exclude_ids=exclude_ids,
         exclude_fingerprints=exclude_fingerprints,
         exclude_titles=second_exclude_titles,
-        taken_title=taken,
     )
     if (
         first is not None
@@ -582,7 +871,6 @@ async def _sample_independent_pair_body(
             exclude_ids=exclude_ids,
             exclude_fingerprints=exclude_fingerprints,
             exclude_titles=second_exclude_titles,
-            taken_title=taken,
         )
     sampled = [first, second]
     seen_fps = set(exclude_fingerprints)

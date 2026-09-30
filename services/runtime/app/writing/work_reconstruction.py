@@ -34,24 +34,69 @@ _META_HEADS = (
 CANDIDATE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["title", "pitch"],
+    "required": ["premise", "title", "pitch", "intent"],
     "properties": {
+        "premise": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "reader_pull",
+                "genre_promise",
+                "story_motion",
+            ],
+            "properties": {
+                "reader_pull": {"type": "string", "minLength": 1},
+                "genre_promise": {"type": "string", "minLength": 1},
+                "story_motion": {"type": "string", "minLength": 1},
+            },
+        },
         "title": {"type": "string", "minLength": 2, "maxLength": 16},
         "pitch": {"type": "string", "minLength": 1},
+        "intent": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "no_human_pull",
+                "genre_decorative",
+                "noun_graft",
+                "moral_pre_solved",
+                "no_serial_engine",
+            ],
+            "properties": {
+                "no_human_pull": {"type": "boolean"},
+                "genre_decorative": {"type": "boolean"},
+                "noun_graft": {"type": "boolean"},
+                "moral_pre_solved": {"type": "boolean"},
+                "no_serial_engine": {"type": "boolean"},
+            },
+        },
     },
 }
 
-_FORM_SYSTEM = """根据用户原话，借题材参照交一本新书的书名和简介。
+_FORM_SYSTEM = """根据用户原话交一本新书的书名和简介。
 
-用户原话优先。题材只供参照，不是模板。参照只用来对齐世界和年代的尺度，不要换名复述。
+用户原话优先。用户点名的设定保持原样，不要改写成另一类故事。
 
-书名点出世界或年代，不要点一件具体的事。
+先按读者通常理解校准用户点名的题材。宽泛题材不是设定改造题：先兑现它原本承诺的阅读体验，不要为了显得新奇，把日常职业、城市设施、行政登记或合同流程改名成一套超自然系统。题材可以按其传统形态进入现代生活，不必证明每个城市制度都被它重造。
 
-简介按书页上的作品介绍来写。只用几句话说说这个世界、它所处的年代，以及力量在这个时代里是什么样子。不要写到某一个人和某一件事，不要给人物起名。不要解释创作思路，不要罗列卖点，也不要写成预告片。
+再填写不展示给用户的 premise：
+- reader_pull：读者为什么愿意进入这本书，可以来自人物位置、世界想象、能力、关系、气质或成长空间；
+- genre_promise：这本书具体兑现用户所选题材的什么体验，而不是借用哪些名词；
+- story_motion：长篇大致会向怎样的天地展开，不写第一卷步骤。
+
+premise 只检查作品身份是否成立，不规定冲突形状。作品不必有深刻议题、亲属创伤、自我牺牲、道德两难、对称愿望或代价公式，也不必从冷门职业开场。
+
+简介是网文书页上的作品介绍，不是大纲，也不是第一章梗概。目标抽象层级接近商业长篇开书文案：用几句话说清这个世界凭什么成立、主角大致站在何处、读者将进入怎样一片可延展的生活或天地。可以有一个鲜明钩子，但不要推进到连续场面、查案步骤、亲属嫌疑、能力代价清单或主题结论。
+
+不要写“是……还是……”“必须决定”“作出选择”这类收束；不要用倒计时、牺牲公式或秘密机构硬造深度。数字、履历、日常职责、地点和异常清单不能只用来制造真实感。不要解释创作思路、罗列卖点或写成预告片。通常六十到一百四十个汉字。
+
+书名要像该题材的一本书，命名世界、时代、区域、意象或核心概念，不用机构名、职业名或一句道德难题代替书名。
+
+若 premise 任一项不成立，仍如实完成候选，并在 intent 中标 true；不要回头给简介打补丁。intent 只使用这些键：no_human_pull、genre_decorative、noun_graft、moral_pre_solved、no_serial_engine。
 
 若给出已用书名，那个书名已经用过，这一本换一本。
 
-只交一本。"""
+只交一本。输出 premise、title、pitch 和 intent；界面只展示 title 和 pitch。"""
 
 
 @dataclass(frozen=True)
@@ -168,6 +213,32 @@ def obvious_meta_text(text: str) -> bool:
     return any(body.startswith(head) for head in _META_HEADS)
 
 
+_SAMPLE_RHETORIC_RES = (
+    re.compile(r"是[^。！？\n]{0,24}还是"),
+    re.compile(r"必须(决定|在|选择|弄清|面对)"),
+    re.compile(r"他(将)?必须"),
+    re.compile(r"(作出|做出)选择"),
+    re.compile(r"(最终|终于).{0,12}(真相|凶手|幕后)"),
+)
+
+
+def obvious_sample_rhetoric(text: str) -> bool:
+    """采样卡表层套话：结论式二选一、强制抉择、提前揭底。不做题材语义判断。"""
+    body = (text or "").strip()
+    if not body:
+        return True
+    return any(pattern.search(body) for pattern in _SAMPLE_RHETORIC_RES)
+
+
+def obvious_sample_overplot(text: str) -> bool:
+    """采样卡过细：句拍过多，像第一卷梗概而不像书页简介。"""
+    body = (text or "").strip()
+    if not body:
+        return True
+    beats = body.count("。") + body.count("！") + body.count("？")
+    return beats >= 5 or len(body) > 180
+
+
 def first_json_object(raw: str) -> dict[str, Any] | None:
     text = (raw or "").strip()
     if not text:
@@ -194,7 +265,7 @@ def first_json_object(raw: str) -> dict[str, Any] | None:
     return None
 
 
-def parse_card(raw: str) -> dict[str, str] | None:
+def parse_card(raw: str) -> dict[str, Any] | None:
     title = ""
     flavor = ""
     opening = ""
@@ -226,7 +297,22 @@ def parse_card(raw: str) -> dict[str, str] | None:
     opening = _clip_draft(opening, _OPENING_MAX)
     if not (2 <= len(title) <= 16 and opening):
         return None
-    return {"title": title, "flavor": flavor, "opening": opening, "pitch": opening}
+    out: dict[str, Any] = {
+        "title": title,
+        "flavor": flavor,
+        "opening": opening,
+        "pitch": opening,
+    }
+    if data is not None:
+        premise = data.get("premise")
+        if isinstance(premise, dict):
+            out["premise"] = premise
+        from app.writing.premise_gate import intent_codes_from_payload
+
+        codes = intent_codes_from_payload(data)
+        if codes:
+            out["intent_codes"] = ",".join(codes)
+    return out
 
 
 def parse_candidate(raw: str) -> dict[str, str] | None:

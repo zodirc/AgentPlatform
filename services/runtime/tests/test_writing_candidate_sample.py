@@ -6,6 +6,7 @@ import logging
 
 import pytest
 
+from app.writing import candidate_sample as candidate_sample_module
 from app.writing.candidate_sample import (
     _FORM_MAX_OUTPUT_TOKENS,
     _FORM_THINK_CHAR_BUDGET,
@@ -16,6 +17,8 @@ from app.writing.candidate_sample import (
     consume_complete,
     form_generation,
     form_messages,
+    gate_generation,
+    judge_candidate_shadow,
     sample_independent_pair,
     sample_one_candidate,
     pitches_too_close,
@@ -115,29 +118,23 @@ def test_form_is_a_direct_candidate_job() -> None:
         "genre": "都市修真",
         "fresh_work": True,
     }
-    blob = _content_text(
-        form_messages(
-            "写一篇长篇都市修真小说",
-            subject=pool_for("都市修真")[0],
-        )
-    )
+    blob = _content_text(form_messages("写一篇长篇都市修真小说"))
     assert "用户原话：写一篇长篇都市修真小说" in blob
     assert "类型参考：都市修真" in blob
     assert "用户原话优先" in blob
-    assert "题材只供参照，不是模板" in blob
-    assert "简介按书页上的作品介绍来写" in blob
-    assert "书名点出世界或年代" in blob
-    assert "不要写到某一个人和某一件事" in blob
-    assert "不要给人物起名" in blob
-    assert "不要罗列卖点" in blob
-    assert "持续兑现" not in blob
-    assert "因果核心" not in blob
-    assert "结构不同的落法" not in blob
-    assert "不需要寻找更好的方向" not in blob
-    assert f"题材：{pool_for('都市修真')[0]}" in blob
-    assert "抽签：" not in blob
-    assert "均匀取一本" not in blob
-    assert "根据用户原话，借题材参照交一本新书的书名和简介" in blob
+    assert "先按读者通常理解校准用户点名的题材" in blob
+    assert "宽泛题材不是设定改造题" in blob
+    assert "题材可以按其传统形态进入现代生活" in blob
+    assert "不规定冲突形状" in blob
+    assert "亲属创伤、自我牺牲" in blob
+    assert "网文书页上的作品介绍" in blob
+    assert "不是大纲，也不是第一章梗概" in blob
+    assert "是……还是……" in blob
+    assert "通常六十到一百四十个汉字" in blob
+    assert "不要写到某一个人和某一件事" not in blob
+    assert "不要给人物起名" not in blob
+    assert "罗列卖点" in blob
+    assert "题材：" not in blob
     assert "只交一本" in blob
     assert "大概是什么样子" not in blob
     assert "不用寻找最优方案" not in blob
@@ -197,10 +194,8 @@ def test_owned_subject_pool_is_the_draw_support() -> None:
         for right in pool[index + 1 :]:
             assert left not in right
             assert right not in left
-    drawn = draw_subjects("都市修真", 2)
-    assert len(set(drawn)) == 2
-    assert set(drawn) <= set(pool)
-    assert family_of(drawn[0]) != family_of(drawn[1])
+    assert draw_subjects("都市修真", 2) == []
+    assert family_of(pool[0])
     assert draw_subjects("历史", 2) == []
     assert draw_subjects("写一篇历史小说", 2) == []
     assert draw_subjects("写一篇都市故事", 2) == []
@@ -208,8 +203,8 @@ def test_owned_subject_pool_is_the_draw_support() -> None:
     urban_ask = "我期望你给我的是一本，传统都市+一些异能（只有主角有系统）的小说"
     assert draw_subjects(urban_ask, 2) == []
     assert pool_for("都市修真") == pool_for("都市异能") == pool_for("都市玄幻")
-    assert draw_subjects("都市玄幻", 2)
-    assert len(draw_subjects("写一篇长篇的异能小说", 2)) == 2
+    assert draw_subjects("都市玄幻", 2) == []
+    assert draw_subjects("写一篇长篇的异能小说", 2) == []
     assert select_seeds("写一部历史小说", 2) == []
     assert request_is_long_novel("写一部历史小说") is True
 
@@ -223,15 +218,8 @@ def test_specific_requests_bypass_random_references() -> None:
         "系统、金手指、爽文的异能小说",
     )
     assert all(select_seeds(request, 2) == [] for request in directed)
-    assert len(select_seeds("写一本系统文", 2)) == 2
-    urban = select_seeds("写一本都市文", 2)
-    assert len(urban) == 2
-    assert {seed.shelf for seed in urban} <= {
-        "现代人生",
-        "都市生活",
-        "都市隐秘",
-        "都市异变",
-    }
+    assert select_seeds("写一本系统文", 2) == []
+    assert select_seeds("写一本都市文", 2) == []
 
 
 @pytest.mark.asyncio
@@ -256,10 +244,8 @@ async def test_generic_ability_request_reaches_model_with_seed_and_raw_request()
     assert len(pair) == 2
     assert len(seen) == 2
     assert all("用户原话：写一篇长篇的异能小说" in text for text in seen)
-    assert all(_drawn_subject(text) for text in seen)
-    assert len({_drawn_subject(text) for text in seen}) == 2
-    assert "已用书名：" not in seen[0]
-    assert "已用书名：余烬" in seen[1]
+    assert all("题材：" not in text for text in seen)
+    assert all("已用书名：" not in text for text in seen)
 
 
 @pytest.mark.asyncio
@@ -323,7 +309,7 @@ async def test_close_second_card_is_resampled_once() -> None:
     assert pitches_too_close(shared, shared) is True
     assert [it["title"] for it in pair] == ["余烬", "潮汐"]
     assert shared not in pair[1]["pitch"]
-    assert len(set(subjects)) == 3
+    assert subjects == ["", "", ""]
 
 
 def test_choice_turn_keeps_the_named_genre() -> None:
@@ -344,7 +330,7 @@ def test_later_urban_sentence_keeps_earlier_direction_and_the_pool() -> None:
     text = sample_user_text("我要其他的", [latest, mid, first])
     assert text == "\n".join((first, mid, latest))
     assert "我要其他的" not in text
-    assert len(select_seeds(text, 2)) == 2
+    assert select_seeds(text, 2) == []
 
 
 def test_parse_card_and_meta_guard() -> None:
@@ -356,6 +342,13 @@ def test_parse_card_and_meta_guard() -> None:
     assert parse_candidate(_card("余烬", "我觉得这个故事可以很长。")) is None
     assert obvious_meta_text("我觉得这个故事可以很长。") is True
     assert obvious_meta_text(_PITCH) is False
+    from app.writing.work_reconstruction import (
+        obvious_sample_overplot,
+        obvious_sample_rhetoric,
+    )
+
+    assert obvious_sample_rhetoric("是留下自己，还是救下别人。") is True
+    assert obvious_sample_overplot("一。二。三。四。五。") is True
     assert parse_card(_card("烬")) is None
     assert parse_card(_card("灵潮纪元：地铁末班车")) is not None
     assert parse_card(_card("这是一个过长的书名还要再长一些才行")) is None
@@ -370,8 +363,98 @@ def test_form_budget_is_medium_not_30k() -> None:
     assert form.thinking_enabled is False
     assert form.reasoning_effort == "none"
     assert form.response_schema == CANDIDATE_SCHEMA
-    assert form.response_schema["required"] == ["title", "pitch"]
+    assert form.response_schema["required"] == ["premise", "title", "pitch", "intent"]
+    assert set(form.response_schema["properties"]["premise"]["required"]) == {
+        "reader_pull",
+        "genre_promise",
+        "story_motion",
+    }
+    assert form.temperature is not None
+    assert gate_generation().temperature == 0.0
     assert _SAMPLE_POOL == 2
+
+
+@pytest.mark.asyncio
+async def test_independent_intent_gate_uses_fresh_messages_and_keeps_codes() -> None:
+    seen = ""
+
+    async def complete(messages):
+        nonlocal seen
+        seen = _content_text(messages)
+        return json.dumps(
+            {
+                "intent": {
+                    "no_human_pull": True,
+                    "genre_decorative": False,
+                    "noun_graft": True,
+                    "moral_pre_solved": False,
+                    "no_serial_engine": True,
+                }
+            }
+        )
+
+    codes = await judge_candidate_shadow(
+        "写都市修真",
+        {
+            "title": "城里人也会渡劫",
+            "pitch": "一个人处理外卖工作，随后收到新任务。",
+            "premise": {"reader_pull": "他第一次发现自己能修行"},
+        },
+        complete=complete,
+    )
+    assert codes == ["no_human_pull", "noun_graft", "no_serial_engine"]
+    assert "独立判断给定候选" in seen
+    assert "不提供修改建议" in seen
+    assert "一个人处理外卖工作" in seen
+
+
+@pytest.mark.asyncio
+async def test_live_sample_path_runs_independent_gate_but_keeps_shadow_card(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    formed = {
+        "premise": {
+            "reader_pull": "他第一次发现自己能修行",
+            "genre_promise": "现代生活里真实存在的修行、成长和交锋",
+            "story_motion": "他每次突破都会进入更大的修行圈子",
+        },
+        "title": "旧路",
+        "pitch": "他第一次能离开这座城时，最先来找他的却是一直劝他走的朋友。",
+        "intent": {
+            "no_human_pull": False,
+            "genre_decorative": False,
+            "noun_graft": False,
+            "moral_pre_solved": False,
+            "no_serial_engine": False,
+        },
+    }
+    gate = {
+        "intent": {
+            "no_human_pull": False,
+            "genre_decorative": True,
+            "noun_graft": False,
+            "moral_pre_solved": False,
+            "no_serial_engine": False,
+        }
+    }
+
+    async def fake_run(messages, **_kwargs):
+        calls.append(_content_text(messages))
+        payload = formed if len(calls) == 1 else gate
+        return candidate_sample_module.CompleteResult(
+            text=json.dumps(payload, ensure_ascii=False)
+        )
+
+    monkeypatch.setattr(candidate_sample_module, "_run_complete", fake_run)
+    item = await sample_one_candidate("写一篇长篇都市修真小说")
+    assert item is not None
+    assert item["title"] == "旧路"
+    assert len(calls) == 2
+    assert "形成前提" in calls[1]
+    assert "不提供修改建议" in calls[1]
+    assert "premise" not in item["raw"]
+    assert "reader_pull" not in item["raw"]
 
 
 @pytest.mark.asyncio
@@ -402,15 +485,10 @@ async def test_two_independent_sketches_then_cards() -> None:
     assert {it["pitch"][:2] for it in pair} == {"余烬", "潮汐"}
     assert form_i == 2
     assert len(seen) == 2
-    drawn = [_drawn_subject(s) for s in seen]
-    assert len(set(drawn)) == 2
-    assert set(drawn) <= set(pool_for("都市修真"))
-    for text, subject in zip(seen, drawn):
+    assert all("题材：" not in text for text in seen)
+    for text in seen:
         assert "抽签：" not in text
         assert "均匀取一本" not in text
-        for other in drawn:
-            if other != subject:
-                assert other not in text
     assert not any("《余烬》" in s or "已经写过" in s for s in seen)
 
 
