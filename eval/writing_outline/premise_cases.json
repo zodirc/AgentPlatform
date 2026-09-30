@@ -1,0 +1,117 @@
+[
+  {
+    "id": "broad-genre",
+    "layer": "baseline",
+    "text": "写一部都市修真长篇",
+    "note": "只给宽泛题材。第一层不自动拒，交给采样。"
+  },
+  {
+    "id": "named-desire",
+    "layer": "baseline",
+    "text": "他想保住夜里那班工，又欠着师父一条不能公开的命",
+    "note": "用户已经点名人物愿望。"
+  },
+  {
+    "id": "huishui-lane",
+    "layer": "genre_fail",
+    "expect_codes": ["noun_graft"],
+    "text": "灵气接入城市热力管网，检修员听管壁回声。修真只替换能源介质。",
+    "note": "《回水巷》失败夹具。退回理由是修真没有改变城市和人物关系，不是因为出现了管网。"
+  },
+  {
+    "id": "facility-first",
+    "layer": "genre_fail",
+    "expect_codes": ["no_human_pull"],
+    "text": "先写一座用灵气供暖的老城热力站，职业是夜班检修。",
+    "note": "设施或职业开场，人物缺席。"
+  },
+  {
+    "id": "genre-wrapper",
+    "layer": "genre_fail",
+    "expect_codes": ["genre_decorative"],
+    "text": "儿子想替父亲隐瞒旧账。修真只给管网换了一套专名，成功的含义没变。",
+    "note": "人物成立，类型只是包装。"
+  },
+  {
+    "id": "genre-promise-success",
+    "layer": "pass",
+    "expect_codes": [],
+    "text": "普通现代城市里确实存在修行传承。主角意外入门后，要学习、突破、结识同道并面对力量带来的新选择。",
+    "note": "先兑现都市修真的通常体验，不要求把城市制度改造成修真系统。"
+  },
+  {
+    "id": "user-wants-trope",
+    "layer": "user",
+    "text": "我就要传统升级打脸，参考常见系统文，不要改我的口味。",
+    "note": "用户主动要求套路时，立意门不改写用户原话。"
+  },
+  {
+    "id": "want-others",
+    "layer": "resample",
+    "text": "我要其他的",
+    "note": "换卡令牌。排除旧候选，不修补上一张。"
+  },
+  {
+    "id": "delivery-cultivation",
+    "layer": "genre_fail",
+    "expect_codes": ["noun_graft", "no_serial_engine"],
+    "text": "外卖员送餐时顺手替人理气，自己的雷劫正在进城。",
+    "note": "职业日常加修真服务与逼近异常，人物关系和长期发动机没有成立。"
+  },
+  {
+    "id": "secret-office",
+    "layer": "genre_fail",
+    "expect_codes": ["moral_pre_solved", "no_serial_engine"],
+    "text": "保安被秘密科室招募，接手失踪前任留下的城市裂缝任务。",
+    "note": "秘密机构、失踪前任和逐个处理异常不能代替人物欲望与可变关系。"
+  },
+  {
+    "id": "precision-as-texture",
+    "layer": "genre_fail",
+    "expect_codes": ["genre_decorative"],
+    "text": "三十四岁，做了十一年巡检，母亲住院；末班车出现七个异常乘客。",
+    "note": "精确履历和异常数字提供的是生成质感，不会自动改变成功含义。"
+  },
+  {
+    "id": "registry-cultivation",
+    "layer": "genre_fail",
+    "expect_codes": ["noun_graft", "genre_decorative"],
+    "text": "产权、户籍和姓名就是修行凭证，注销房屋会让人从亲属记忆里消失。",
+    "note": "把行政登记整体魔法化，不等于兑现都市修真的修行体验。"
+  },
+  {
+    "id": "family-erasure-formula",
+    "layer": "genre_fail",
+    "expect_codes": ["no_serial_engine"],
+    "text": "为救失踪父亲或沉睡妹妹，每使用一次能力，自己的名字就淡一分。",
+    "note": "亲属受难加自我消失是一次性倒计时，不应成为宽泛题材的默认长篇发动机。"
+  },
+  {
+    "id": "generic-hidden-city-tour",
+    "layer": "selection_fail",
+    "expect_selection": "reject",
+    "text": "普通白领意外接触隐藏修真世界，白天应付工作，晚上修炼；写字楼、地铁、医院不断出现异象，各方势力和秘境陆续入局。",
+    "note": "地点与势力清单不能代替人物行动造成的后续条件变化。"
+  },
+  {
+    "id": "generic-retired-master",
+    "layer": "selection_fail",
+    "expect_selection": "reject",
+    "text": "昔日强者只想隐藏身份过普通生活，但麻烦不断找上门，旧日故人、恩怨和更强对手相继出现。",
+    "note": "强者身份只是壳；靠来访麻烦和旧怨续写，没有由主角行动生长的长篇发动机。"
+  },
+  {
+    "id": "overplotted-memory-bargain",
+    "layer": "selection_fail",
+    "expect_selection": "reject",
+    "text": "青年以自己的记忆换死者视角，找到遗骨后发现死者指认母亲为凶手；他逐项核对证词，最后必须选择下一段愿意交出的记忆。",
+    "note": "候选卡越权交代案件进展、核心嫌疑、能力代价和终局式选择，已经接近第一卷梗概。"
+  },
+  {
+    "id": "forced-garden-dilemma",
+    "layer": "selection_fail",
+    "expect_selection": "reject",
+    "text": "青年种出灵花并抽空城区灵气，随后挨户推广共种；最终必须在把城市变成自己的花圃与给所有人留下活路之间选择。",
+    "note": "从第一次行动一路推到价值结论，并用二选一替作品定题，不是泛化的作品候选。"
+  }
+]

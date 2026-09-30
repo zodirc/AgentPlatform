@@ -52,7 +52,7 @@ Child 不决定「什么时候交卷」。Sample 是 handler 创建的原子 job
 - `should_gate_opening_choice` 为真时，本轮工具白名单只剩 `propose_book_candidates`。别名 `propose_opening_ponds` 不在这份白名单里。`stub_echo` 仍注册给测试，不交给模型。
 - volatile 灌 `opening_choice.md`：只触发空调用。
 - 点选成功后引擎 `TERMINATE`，原因 `opening_ponds_awaiting_choice`。
-- outline 相位记成 `open`，说明是长篇开写、工具内部两本独立采样、不要写进聊天。
+- outline 相位记成 `open`，说明是长篇开写、工具内部有界搜索并终审、不要写进聊天。
 
 `「我看看」` 不是「再采一组」。只有整句 `我要其他的` 才会把当前池记入拒池再采新的两本。
 
@@ -264,7 +264,7 @@ Child 流结束时：优先从 `tool_calls[].input`（或 `arguments`）取对�
 
 TOOLS：
 
-> 只给题材或说看看 → `propose_book_candidates`（工具内部两本独立采样，交两张书页简介；卡片是交卷，不要写进聊天；停下来等用户点选或说「我要其他的」）
+> 只给题材或说看看 → `propose_book_candidates`（工具内部有界搜索、分别成文并终审，交两张书页简介；卡片是交卷，不要写进聊天；停下来等用户点选或说「我要其他的」）
 
 Parent 不负责写出两本书。它只负责调用工具。真正的闸在 `picking`，不在这几句提示。
 

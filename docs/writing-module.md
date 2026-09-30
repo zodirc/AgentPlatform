@@ -35,6 +35,8 @@
 
 稿树在 Work 根，不在 Session：`outline.md`、`drafts/manuscript.md`、`drafts/archive/`、`sources/`、`sources/cards`、`.agent/work/`（`story_state`、`editor_notes`、`author_notes`、`surface`、`manifest`、`patch_budget`）。
 
+大纲怎么从点选走到 `outline.md`、何时停转，见 [writing-outline.md](writing-outline.md)。分层文件、立意 shadow 和写作包投影也写在那里。
+
 ## 空转
 
 这些代码还在仓库里，不进产品 Turn 的改稿回路：
