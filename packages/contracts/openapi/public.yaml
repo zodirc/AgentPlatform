@@ -442,6 +442,59 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelProviderProfile'
+  /admin/model-routes/{scenario_id}/{role}:
+    get:
+      operationId: getModelRoute
+      summary: Get a model route preference for the logged-in end user
+      security:
+        - endUserCookie: []
+      parameters:
+        - name: scenario_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: role
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Model route preference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelRoutePreference'
+    put:
+      operationId: updateModelRoute
+      summary: Set or clear a model route preference for the logged-in end user
+      security:
+        - endUserCookie: []
+      parameters:
+        - name: scenario_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: role
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateModelRouteRequest'
+      responses:
+        '200':
+          description: Model route preference updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelRoutePreference'
 components:
   securitySchemes:
     adminBasicAuth:
@@ -833,6 +886,28 @@ components:
         updated_at:
           type: string
           format: date-time
+    UpdateModelRouteRequest:
+      type: object
+      required: [profile_id]
+      additionalProperties: false
+      properties:
+        profile_id:
+          type: string
+          format: uuid
+          nullable: true
+    ModelRoutePreference:
+      type: object
+      required: [scenario_id, role, profile_id]
+      additionalProperties: false
+      properties:
+        scenario_id:
+          type: string
+        role:
+          type: string
+        profile_id:
+          type: string
+          format: uuid
+          nullable: true
     WritingPrefsResponse:
       type: object
       required:

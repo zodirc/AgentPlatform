@@ -8,8 +8,10 @@ import {
   createModelProvider,
   deleteModelProvider,
   fetchDefaultWork,
+  getBookCandidateModelRoute,
   listModelProviders,
   patchWorkVisibilitySeed,
+  setBookCandidateModelRoute,
   updateModelProvider,
 } from "../shared/api/client";
 import { useEndUserAuth } from "../shared/auth/EndUserAuth";
@@ -177,7 +179,8 @@ function AccountSection() {
       <section className="rounded-xl border border-border bg-card/60 p-4">
         <h2 className="text-sm font-medium text-foreground">账户</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          当前登录身份与默认 Work（只读）。多租户隔离在服务端完成，此处不提供切换 Work。
+          当前登录身份与默认
+          Work（只读）。多租户隔离在服务端完成，此处不提供切换 Work。
         </p>
         <dl className="mt-4 space-y-2 text-sm">
           <div className="flex gap-2">
@@ -305,8 +308,8 @@ function AppearanceSection() {
     <section className="rounded-xl border border-border bg-card/60 p-4">
       <h2 className="text-sm font-medium text-foreground">外观</h2>
       <p className="mt-1 text-xs text-muted-foreground">
-        仅影响 Web 显示主题，不改变 Agent 交互与速率。偏好按账号保存在本机浏览器。
-        当前：{meta[theme].label}。
+        仅影响 Web 显示主题，不改变 Agent
+        交互与速率。偏好按账号保存在本机浏览器。 当前：{meta[theme].label}。
       </p>
       <div className="mt-3">
         <ThemeSwitcher variant="grid" />
@@ -526,6 +529,16 @@ export function SettingsPage() {
     retry: false,
     enabled: tab === "model",
   });
+  const {
+    data: candidateRoute,
+    isLoading: isRouteLoading,
+    error: routeError,
+  } = useQuery({
+    queryKey: ["model-route", "writing", "book_candidates"],
+    queryFn: getBookCandidateModelRoute,
+    retry: false,
+    enabled: tab === "model",
+  });
 
   const sortedProviders = useMemo(
     () =>
@@ -549,10 +562,16 @@ export function SettingsPage() {
       : null;
 
   useEffect(() => {
-    if (error instanceof Error && error.message.includes("401")) {
+    const authError =
+      error instanceof Error
+        ? error
+        : routeError instanceof Error
+          ? routeError
+          : null;
+    if (authError?.message.includes("401")) {
       setLoginRequired(true);
     }
-  }, [error]);
+  }, [error, routeError]);
 
   useEffect(() => {
     const next = nextModelPanelAfterListChange({
@@ -577,6 +596,10 @@ export function SettingsPage() {
 
   const invalidate = () =>
     void qc.invalidateQueries({ queryKey: ["model-providers"] });
+  const invalidateCandidateRoute = () =>
+    void qc.invalidateQueries({
+      queryKey: ["model-route", "writing", "book_candidates"],
+    });
 
   const onMutationError = (err: Error) => {
     if (err.message.includes("401")) {
@@ -621,7 +644,14 @@ export function SettingsPage() {
       setSelectedId(null);
       setPanelMode("view");
       invalidate();
+      invalidateCandidateRoute();
     },
+    onError: onMutationError,
+  });
+
+  const candidateRouteMut = useMutation({
+    mutationFn: setBookCandidateModelRoute,
+    onSuccess: () => invalidateCandidateRoute(),
     onError: onMutationError,
   });
 
@@ -629,7 +659,9 @@ export function SettingsPage() {
     createMut.error ??
     updateMut.error ??
     activateMut.error ??
-    deleteMut.error;
+    deleteMut.error ??
+    candidateRouteMut.error ??
+    routeError;
 
   function startCreate() {
     setSelectedId(null);
@@ -687,7 +719,14 @@ export function SettingsPage() {
     createMut.isPending ||
     updateMut.isPending ||
     activateMut.isPending ||
-    deleteMut.isPending;
+    deleteMut.isPending ||
+    candidateRouteMut.isPending;
+
+  const candidateRouteProfileId =
+    candidateRoute?.profile_id &&
+    providers.some((provider) => provider.id === candidateRoute.profile_id)
+      ? candidateRoute.profile_id
+      : "";
 
   return (
     <div className="mx-auto max-w-4xl p-6">
@@ -780,199 +819,240 @@ export function SettingsPage() {
           {isLoading ? (
             <p className="mt-6 text-sm text-muted-foreground">加载中…</p>
           ) : loginRequired ? null : (
-            <div className="mt-6 grid gap-4 md:grid-cols-[minmax(220px,260px)_minmax(0,1fr)]">
-              <aside className="rounded-xl border border-border bg-background p-3">
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    已保存配置
-                  </h2>
-                  <button
-                    type="button"
-                    className="rounded-md bg-primary/20 px-2 py-1 text-xs text-primary hover:bg-primary/30"
-                    onClick={startCreate}
-                  >
-                    + 添加
-                  </button>
-                </div>
-                {sortedProviders.length === 0 ? (
-                  <p className="text-xs text-muted-foreground/80">
-                    暂无，请添加第一条配置
-                  </p>
-                ) : (
-                  <ul className="space-y-1">
-                    {sortedProviders.map((p) => {
-                      const selected =
-                        selectedId === p.id && panelMode !== "create";
-                      return (
-                        <li key={p.id}>
-                          <button
-                            type="button"
-                            className={`w-full rounded-lg px-2 py-2 text-left text-sm transition-colors ${
-                              selected
-                                ? "bg-primary/15 ring-1 ring-primary/40"
-                                : "hover:bg-muted"
-                            }`}
-                            onClick={() => {
-                              setSelectedId(p.id);
-                              setPanelMode("view");
-                            }}
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="truncate font-medium text-foreground">
-                                {p.label}
-                              </span>
-                              {p.is_active ? (
-                                <span className="shrink-0 rounded bg-primary/25 px-1.5 py-0.5 text-[10px] text-primary">
-                                  当前
-                                </span>
-                              ) : null}
-                            </div>
-                            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                              {profileSummary(p)}
-                            </p>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </aside>
-
-              <section className="rounded-xl border border-border bg-card/60 p-4">
-                {panelMode === "create" ? (
-                  <>
-                    <h2 className="mb-4 text-sm font-medium text-foreground/90">
-                      添加模型配置
+            <>
+              <section className="mt-6 rounded-xl border border-border bg-card/60 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-sm font-medium text-foreground/90">
+                      写作模型路由
                     </h2>
-                    <ModelConfigForm
-                      draft={draft}
-                      onChange={setDraft}
-                      onSubmit={onSubmit}
-                      onCancel={providers.length > 0 ? cancelPanel : undefined}
-                      mode="create"
-                      pending={pending}
-                      submitLabel="保存配置"
-                      showActivateOnCreate={providers.length > 0}
-                      activateOnCreate={activateOnCreate}
-                      onActivateOnCreateChange={setActivateOnCreate}
-                    />
-                  </>
-                ) : selectedProvider && panelMode === "view" ? (
-                  <>
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs text-muted-foreground">配置详情</p>
-                        <h2 className="mt-1 text-lg font-medium text-foreground">
-                          {selectedProvider.label}
-                        </h2>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {!selectedProvider.is_active ? (
-                          <button
-                            type="button"
-                            className="rounded-lg bg-primary px-3 py-1.5 text-xs disabled:opacity-50"
-                            disabled={pending}
-                            onClick={() =>
-                              activateMut.mutate(selectedProvider.id)
-                            }
-                          >
-                            设为当前
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="rounded-lg border border-input px-3 py-1.5 text-xs text-foreground/90"
-                          onClick={startEdit}
-                        >
-                          编辑
-                        </button>
-                        {!selectedProvider.is_active ? (
-                          <button
-                            type="button"
-                            className="rounded-lg border border-destructive/40 px-3 py-1.5 text-xs text-destructive disabled:opacity-50"
-                            disabled={pending}
-                            onClick={() => {
-                              if (
-                                window.confirm(
-                                  `确定删除「${selectedProvider.label}」？`,
-                                )
-                              ) {
-                                deleteMut.mutate(selectedProvider.id);
+                    <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
+                      作品候选的方向搜索、筛选与卡片成文使用这里指定的模型。质量影子标注仍使用当前模型。
+                    </p>
+                  </div>
+                  <label className="min-w-[240px] space-y-1">
+                    <span className="block text-xs font-medium text-muted-foreground">
+                      作品候选模型
+                    </span>
+                    <select
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                      value={candidateRouteProfileId}
+                      disabled={isRouteLoading || candidateRouteMut.isPending}
+                      onChange={(event) =>
+                        candidateRouteMut.mutate(event.target.value || null)
+                      }
+                    >
+                      <option value="">继承当前模型</option>
+                      {sortedProviders.map((provider) => (
+                        <option key={provider.id} value={provider.id}>
+                          {provider.label} · {profileSummary(provider)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </section>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-[minmax(220px,260px)_minmax(0,1fr)]">
+                <aside className="rounded-xl border border-border bg-background p-3">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      已保存配置
+                    </h2>
+                    <button
+                      type="button"
+                      className="rounded-md bg-primary/20 px-2 py-1 text-xs text-primary hover:bg-primary/30"
+                      onClick={startCreate}
+                    >
+                      + 添加
+                    </button>
+                  </div>
+                  {sortedProviders.length === 0 ? (
+                    <p className="text-xs text-muted-foreground/80">
+                      暂无，请添加第一条配置
+                    </p>
+                  ) : (
+                    <ul className="space-y-1">
+                      {sortedProviders.map((p) => {
+                        const selected =
+                          selectedId === p.id && panelMode !== "create";
+                        return (
+                          <li key={p.id}>
+                            <button
+                              type="button"
+                              className={`w-full rounded-lg px-2 py-2 text-left text-sm transition-colors ${
+                                selected
+                                  ? "bg-primary/15 ring-1 ring-primary/40"
+                                  : "hover:bg-muted"
+                              }`}
+                              onClick={() => {
+                                setSelectedId(p.id);
+                                setPanelMode("view");
+                              }}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="truncate font-medium text-foreground">
+                                  {p.label}
+                                </span>
+                                {p.is_active ? (
+                                  <span className="shrink-0 rounded bg-primary/25 px-1.5 py-0.5 text-[10px] text-primary">
+                                    当前
+                                  </span>
+                                ) : null}
+                              </div>
+                              <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                                {profileSummary(p)}
+                              </p>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </aside>
+
+                <section className="rounded-xl border border-border bg-card/60 p-4">
+                  {panelMode === "create" ? (
+                    <>
+                      <h2 className="mb-4 text-sm font-medium text-foreground/90">
+                        添加模型配置
+                      </h2>
+                      <ModelConfigForm
+                        draft={draft}
+                        onChange={setDraft}
+                        onSubmit={onSubmit}
+                        onCancel={
+                          providers.length > 0 ? cancelPanel : undefined
+                        }
+                        mode="create"
+                        pending={pending}
+                        submitLabel="保存配置"
+                        showActivateOnCreate={providers.length > 0}
+                        activateOnCreate={activateOnCreate}
+                        onActivateOnCreateChange={setActivateOnCreate}
+                      />
+                    </>
+                  ) : selectedProvider && panelMode === "view" ? (
+                    <>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs text-muted-foreground">
+                            配置详情
+                          </p>
+                          <h2 className="mt-1 text-lg font-medium text-foreground">
+                            {selectedProvider.label}
+                          </h2>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {!selectedProvider.is_active ? (
+                            <button
+                              type="button"
+                              className="rounded-lg bg-primary px-3 py-1.5 text-xs disabled:opacity-50"
+                              disabled={pending}
+                              onClick={() =>
+                                activateMut.mutate(selectedProvider.id)
                               }
-                            }}
+                            >
+                              设为当前
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="rounded-lg border border-input px-3 py-1.5 text-xs text-foreground/90"
+                            onClick={startEdit}
                           >
-                            删除
+                            编辑
                           </button>
-                        ) : null}
+                          {!selectedProvider.is_active ? (
+                            <button
+                              type="button"
+                              className="rounded-lg border border-destructive/40 px-3 py-1.5 text-xs text-destructive disabled:opacity-50"
+                              disabled={pending}
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    `确定删除「${selectedProvider.label}」？`,
+                                  )
+                                ) {
+                                  deleteMut.mutate(selectedProvider.id);
+                                }
+                              }}
+                            >
+                              删除
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
-                    </div>
-                    <dl className="mt-4 space-y-2 text-sm">
-                      <div className="flex gap-2">
-                        <dt className="w-24 shrink-0 text-muted-foreground">
-                          供应商
-                        </dt>
-                        <dd className="text-foreground/90">
-                          {selectedProvider.provider}
-                        </dd>
-                      </div>
-                      <div className="flex gap-2">
-                        <dt className="w-24 shrink-0 text-muted-foreground">模型</dt>
-                        <dd className="text-foreground/90">
-                          {selectedProvider.model_name}
-                        </dd>
-                      </div>
-                      <div className="flex gap-2">
-                        <dt className="w-24 shrink-0 text-muted-foreground">
-                          API Key
-                        </dt>
-                        <dd className="text-foreground/90">
-                          已保存 {selectedProvider.api_key_hint}
-                        </dd>
-                      </div>
-                      <div className="flex gap-2">
-                        <dt className="w-24 shrink-0 text-muted-foreground">
-                          上下文窗口
-                        </dt>
-                        <dd className="text-foreground/90">
-                          {formatContextWindow(
-                            selectedProvider.context_window_tokens,
-                          )}
-                        </dd>
-                      </div>
-                      {selectedProvider.base_url ? (
+                      <dl className="mt-4 space-y-2 text-sm">
                         <div className="flex gap-2">
                           <dt className="w-24 shrink-0 text-muted-foreground">
-                            API 地址
+                            供应商
                           </dt>
-                          <dd className="break-all text-foreground/90">
-                            {selectedProvider.base_url}
+                          <dd className="text-foreground/90">
+                            {selectedProvider.provider}
                           </dd>
                         </div>
-                      ) : null}
-                    </dl>
-                  </>
-                ) : selectedProvider && panelMode === "edit" ? (
-                  <>
-                    <h2 className="mb-4 text-sm font-medium text-foreground/90">
-                      编辑「{selectedProvider.label}」
-                    </h2>
-                    <ModelConfigForm
-                      draft={draft}
-                      onChange={setDraft}
-                      onSubmit={onSubmit}
-                      onCancel={cancelPanel}
-                      mode="update"
-                      apiKeyHint={selectedProvider.api_key_hint}
-                      pending={pending}
-                    />
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    从左侧选择配置，或添加新配置。
-                  </p>
-                )}
-              </section>
-            </div>
+                        <div className="flex gap-2">
+                          <dt className="w-24 shrink-0 text-muted-foreground">
+                            模型
+                          </dt>
+                          <dd className="text-foreground/90">
+                            {selectedProvider.model_name}
+                          </dd>
+                        </div>
+                        <div className="flex gap-2">
+                          <dt className="w-24 shrink-0 text-muted-foreground">
+                            API Key
+                          </dt>
+                          <dd className="text-foreground/90">
+                            已保存 {selectedProvider.api_key_hint}
+                          </dd>
+                        </div>
+                        <div className="flex gap-2">
+                          <dt className="w-24 shrink-0 text-muted-foreground">
+                            上下文窗口
+                          </dt>
+                          <dd className="text-foreground/90">
+                            {formatContextWindow(
+                              selectedProvider.context_window_tokens,
+                            )}
+                          </dd>
+                        </div>
+                        {selectedProvider.base_url ? (
+                          <div className="flex gap-2">
+                            <dt className="w-24 shrink-0 text-muted-foreground">
+                              API 地址
+                            </dt>
+                            <dd className="break-all text-foreground/90">
+                              {selectedProvider.base_url}
+                            </dd>
+                          </div>
+                        ) : null}
+                      </dl>
+                    </>
+                  ) : selectedProvider && panelMode === "edit" ? (
+                    <>
+                      <h2 className="mb-4 text-sm font-medium text-foreground/90">
+                        编辑「{selectedProvider.label}」
+                      </h2>
+                      <ModelConfigForm
+                        draft={draft}
+                        onChange={setDraft}
+                        onSubmit={onSubmit}
+                        onCancel={cancelPanel}
+                        mode="update"
+                        apiKeyHint={selectedProvider.api_key_hint}
+                        pending={pending}
+                      />
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      从左侧选择配置，或添加新配置。
+                    </p>
+                  )}
+                </section>
+              </div>
+            </>
           )}
 
           {!isLoading && providers.length === 0 ? (

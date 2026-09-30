@@ -45,6 +45,7 @@ from app.routers import (
     works,
 )
 from app.routers.admin import model_providers as admin_model_providers
+from app.routers.admin import model_routes as admin_model_routes
 from app.routers.admin import ux_signals as admin_ux_signals
 from app.routers.admin import workspace as admin_workspace
 from app.routers.admin import writing_prefs as admin_writing_prefs
@@ -241,6 +242,7 @@ app.include_router(works.router, prefix="/api/v1")
 app.include_router(turns.router, prefix="/api/v1")
 app.include_router(runs.router, prefix="/api/v1")
 app.include_router(admin_model_providers.router, prefix="/api/v1")
+app.include_router(admin_model_routes.router, prefix="/api/v1")
 app.include_router(admin_workspace.router, prefix="/api/v1")
 app.include_router(admin_ux_signals.router, prefix="/api/v1")
 app.include_router(admin_writing_prefs.router, prefix="/api/v1")

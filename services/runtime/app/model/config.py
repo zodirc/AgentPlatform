@@ -75,6 +75,61 @@ async def resolve_model_config(*, owner_user_id: UUID | None = None) -> ModelCon
     return None
 
 
+async def resolve_routed_model_config(
+    *,
+    owner_user_id: UUID | None,
+    scenario_id: str,
+    role: str,
+) -> ModelConfig | None:
+    """Resolve one narrow role route, otherwise inherit the normal active model.
+
+    A per-turn override remains authoritative for evaluations and explicit runs.
+    Broken, missing, foreign, or undecryptable route targets fail open to the
+    owner's active profile rather than disabling generation.
+    """
+    from app.model.turn_override import current_turn_model_mode, current_turn_model_override
+
+    effective_mode = current_turn_model_mode() or settings.model_mode
+    if effective_mode in {"stub", "recorded"}:
+        return None
+    override = current_turn_model_override()
+    if override is not None:
+        return override
+    if owner_user_id is not None:
+        pool = await get_pool()
+        row = await pool.fetchrow(
+            """
+            SELECT p.provider, p.model_name, p.api_key_ciphertext,
+                   p.base_url, p.context_window_tokens
+            FROM model_route_preferences r
+            JOIN model_provider_profiles p
+              ON p.id = r.profile_id
+             AND p.owner_user_id = r.owner_user_id
+            WHERE r.owner_user_id = $1
+              AND r.scenario_id = $2
+              AND r.role = $3
+            LIMIT 1
+            """,
+            owner_user_id,
+            scenario_id,
+            role,
+        )
+        if row is not None:
+            try:
+                api_key = decrypt_api_key(row["api_key_ciphertext"])
+            except Exception:
+                api_key = ""
+            if api_key:
+                return ModelConfig(
+                    provider=row["provider"],
+                    model_name=row["model_name"],
+                    api_key=api_key,
+                    base_url=row["base_url"],
+                    context_window_tokens=row["context_window_tokens"],
+                )
+    return await resolve_model_config(owner_user_id=owner_user_id)
+
+
 async def resolve_active_profile_metadata(
     *,
     owner_user_id: UUID | None = None,

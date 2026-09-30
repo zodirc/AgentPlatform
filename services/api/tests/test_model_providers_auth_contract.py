@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.routers.admin import model_providers as routes
+from app.routers.admin import model_routes
 from app.services.end_user.auth import require_session_actor
 
 
@@ -15,5 +16,12 @@ def test_model_provider_routes_use_require_session_actor() -> None:
     """
     assert routes.require_session_actor is require_session_actor
     source = Path(routes.__file__).read_text(encoding="utf-8")
+    assert "require_session_actor" in source
+    assert "require_end_user" not in source
+
+
+def test_model_route_preferences_use_require_session_actor() -> None:
+    assert model_routes.require_session_actor is require_session_actor
+    source = Path(model_routes.__file__).read_text(encoding="utf-8")
     assert "require_session_actor" in source
     assert "require_end_user" not in source

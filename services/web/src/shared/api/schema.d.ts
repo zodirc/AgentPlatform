@@ -338,6 +338,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/model-routes/{scenario_id}/{role}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a model route preference for the logged-in end user */
+        get: operations["getModelRoute"];
+        /** Set or clear a model route preference for the logged-in end user */
+        put: operations["updateModelRoute"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -523,6 +541,16 @@ export interface components {
             config_version: number;
             /** Format: date-time */
             updated_at: string;
+        };
+        UpdateModelRouteRequest: {
+            /** Format: uuid */
+            profile_id: string | null;
+        };
+        ModelRoutePreference: {
+            scenario_id: string;
+            role: string;
+            /** Format: uuid */
+            profile_id: string | null;
         };
         WritingPrefsResponse: {
             preset_label: string;
@@ -1106,6 +1134,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelProviderProfile"];
+                };
+            };
+        };
+    };
+    getModelRoute: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: string;
+                role: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Model route preference */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelRoutePreference"];
+                };
+            };
+        };
+    };
+    updateModelRoute: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: string;
+                role: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateModelRouteRequest"];
+            };
+        };
+        responses: {
+            /** @description Model route preference updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelRoutePreference"];
                 };
             };
         };

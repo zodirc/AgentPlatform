@@ -15,6 +15,9 @@ const ADMIN_AUTH_KEY = "admin_basic_auth";
 export type TurnView = components["schemas"]["TurnView"];
 /** 模型供应商配置。 */
 export type ModelProvider = components["schemas"]["ModelProviderProfile"];
+/** 窄场景模型路由；profile_id=null 表示继承当前模型。 */
+export type ModelRoutePreference =
+  components["schemas"]["ModelRoutePreference"];
 /** startTurn 响应体。 */
 export type TurnResponse = components["schemas"]["TurnResponse"];
 
@@ -379,7 +382,12 @@ export async function markWritingTaste(body: {
   excerpt: string;
   note?: string;
   path?: string;
-}): Promise<{ ok: boolean; book?: WritingBook; mark?: unknown; cut?: { status?: string; path?: string } }> {
+}): Promise<{
+  ok: boolean;
+  book?: WritingBook;
+  mark?: unknown;
+  cut?: { status?: string; path?: string };
+}> {
   const res = await fetch(`${API_BASE}/works/default/book/taste`, {
     ...sessionFetchInit,
     method: "POST",
@@ -387,7 +395,11 @@ export async function markWritingTaste(body: {
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`markWritingTaste failed: ${res.status}`);
-  return res.json() as Promise<{ ok: boolean; book?: WritingBook; mark?: unknown }>;
+  return res.json() as Promise<{
+    ok: boolean;
+    book?: WritingBook;
+    mark?: unknown;
+  }>;
 }
 
 /**
@@ -522,7 +534,9 @@ export type SessionView = {
  * GET /sessions/:id/view — 会话级摘要。
  * @param sessionId 会话 UUID
  */
-export async function fetchSessionView(sessionId: string): Promise<SessionView> {
+export async function fetchSessionView(
+  sessionId: string,
+): Promise<SessionView> {
   const res = await fetch(`${API_BASE}/sessions/${sessionId}/view`, {
     ...sessionFetchInit,
     headers: apiAuthHeaders(),
@@ -611,9 +625,7 @@ export async function fetchTurnView(turnId: string): Promise<TurnView> {
   const cached = viewCache.get(turnId);
   const res = await fetch(`${API_BASE}/turns/${turnId}/view`, {
     ...sessionFetchInit,
-    headers: apiAuthHeaders(
-      cached ? { "If-None-Match": cached.etag } : {},
-    ),
+    headers: apiAuthHeaders(cached ? { "If-None-Match": cached.etag } : {}),
   });
   if (res.status === 304 && cached) return cached.view;
   if (!res.ok) throw new Error(`fetchTurnView failed: ${res.status}`);
@@ -870,6 +882,40 @@ export async function deleteModelProvider(id: string) {
   if (!res.ok) throw new Error(`deleteModelProvider failed: ${res.status}`);
 }
 
+/** 获取作品候选链使用的模型路由。 */
+export async function getBookCandidateModelRoute(): Promise<ModelRoutePreference> {
+  const res = await fetch(
+    `${API_BASE}/admin/model-routes/writing/book_candidates`,
+    {
+      ...sessionFetchInit,
+      headers: apiAuthHeaders(),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`getBookCandidateModelRoute failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+/** 设置作品候选链模型；null 恢复继承当前模型。 */
+export async function setBookCandidateModelRoute(
+  profileId: string | null,
+): Promise<ModelRoutePreference> {
+  const res = await fetch(
+    `${API_BASE}/admin/model-routes/writing/book_candidates`,
+    {
+      ...sessionFetchInit,
+      method: "PUT",
+      headers: apiAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ profile_id: profileId }),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`setBookCandidateModelRoute failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 /** 工作区目录列表响应。 */
 export type WorkspaceEntries = {
   path: string;
@@ -972,7 +1018,12 @@ export async function renameWorkspacePath(
   path: string,
   newPath: string,
   overwrite = false,
-): Promise<{ path: string; new_path: string; status: string; summary?: string }> {
+): Promise<{
+  path: string;
+  new_path: string;
+  status: string;
+  summary?: string;
+}> {
   const res = await fetch(`${API_BASE}/admin/workspace/entries/rename`, {
     method: "POST",
     ...sessionFetchInit,
@@ -1388,8 +1439,10 @@ export type WritingExemplarRef = {
 export type WritingPrefs = {
   preset_label: string;
   fragment_weights: Record<string, Record<string, number>>;
-  signal_penalties: Record<string, Record<string, number>> | Record<string, number>;
-  signal_rewards: Record<string, Record<string, number>> | Record<string, number>;
+  signal_penalties:
+    Record<string, Record<string, number>> | Record<string, number>;
+  signal_rewards:
+    Record<string, Record<string, number>> | Record<string, number>;
   exemplars?: Record<string, WritingExemplarRef[]>;
   schema_version: number;
   updated_at: string | null;
@@ -1413,8 +1466,10 @@ export async function fetchWritingPrefs(): Promise<WritingPrefs> {
 export async function updateWritingPrefs(body: {
   preset_label?: string;
   fragment_weights?: Record<string, Record<string, number>>;
-  signal_penalties?: Record<string, Record<string, number>> | Record<string, number>;
-  signal_rewards?: Record<string, Record<string, number>> | Record<string, number>;
+  signal_penalties?:
+    Record<string, Record<string, number>> | Record<string, number>;
+  signal_rewards?:
+    Record<string, Record<string, number>> | Record<string, number>;
 }): Promise<WritingPrefs> {
   const res = await fetch(`${API_BASE}/admin/writing-prefs`, {
     method: "PUT",
