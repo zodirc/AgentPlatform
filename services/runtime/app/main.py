@@ -1016,6 +1016,9 @@ async def lifespan(app):
 
     settings.validate_production_security()
     configure_logging(service="agent-runtime", level=settings.log_level)
+    from app.writing.version import core_version
+
+    logger.info("writing core version=%s", core_version())
     await init_pool()
 
     # --- 启动：孤儿 Run 对账与场景注册 ---
