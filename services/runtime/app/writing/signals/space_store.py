@@ -29,9 +29,9 @@ async def load_overlay_exemplars(
     if owner_user_id is None and work_id is None:
         return "platform", {}
     try:
-        from app.db.pool import get_pool
+        from app.ports import acquire_pool
 
-        pool = await get_pool()
+        pool = await acquire_pool()
     except Exception:
         return "platform", {}
 
@@ -117,7 +117,7 @@ async def upsert_work_overlay_beat(
     promoted_from_eval_id: Any = None,
 ) -> None:
     """把修好的拍写入 work overlay（签名；正文在 sidecar）。"""
-    from app.db.pool import get_pool
+    from app.ports import acquire_pool
 
     body = (text or "").strip()
     if not body:
@@ -128,7 +128,7 @@ async def upsert_work_overlay_beat(
     slug = f"local:{section_id or 'ch'}"
     beat = section_id or "local"
     eval_id = promoted_from_eval_id if promoted_from_eval_id else None
-    pool = await get_pool()
+    pool = await acquire_pool()
     await pool.execute(
         """
         INSERT INTO writing_exemplars (

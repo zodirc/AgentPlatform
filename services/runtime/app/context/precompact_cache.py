@@ -14,7 +14,6 @@ from app.context.summary import (
     build_context_summary_record,
     incremental_summary_from_messages,
 )
-from app.db.pool import get_pool
 from app.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -22,11 +21,9 @@ logger = logging.getLogger(__name__)
 
 async def load_precompact_cache(session_id: UUID) -> dict[str, Any] | None:
     """作用：读取 session precompact 缓存并校验 TTL。"""
-    pool = await get_pool()
-    row = await pool.fetchval(
-        "SELECT context_summary FROM sessions WHERE id = $1",
-        session_id,
-    )
+    from app.ports import load_context_summary
+
+    row = await load_context_summary(session_id)
     if not row:
         return None
     if isinstance(row, str):
@@ -92,16 +89,9 @@ async def refresh_soft_precompact(
             turn_count=0,
             source="soft_precompact",
         )
-        pool = await get_pool()
-        await pool.execute(
-            """
-            UPDATE sessions
-            SET context_summary = $2::jsonb, updated_at = now()
-            WHERE id = $1
-            """,
-            session_id,
-            json.dumps(record, ensure_ascii=False),
-        )
+        from app.ports import save_context_summary
+
+        await save_context_summary(session_id, record)
     except Exception:
         logger.warning(
             "soft precompact failed session_id=%s turn_id=%s",

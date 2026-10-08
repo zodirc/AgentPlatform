@@ -10,7 +10,6 @@ from app.writing.signals.prefs_loader import _module as _writing_prefs
 
 normalize_fragment = _writing_prefs().normalize_fragment
 
-from app.controller.session_context import load_session_owner_user_id, load_session_work
 from app.writing.focus import infer_focus_section_id
 from app.writing.manuscript import (
     extract_section,
@@ -303,6 +302,14 @@ async def _resolve_owner_and_work(session_id: object | None) -> tuple[UUID | Non
         sid = session_id if isinstance(session_id, UUID) else UUID(str(session_id))
     except (TypeError, ValueError):
         return None, None
+    from app.tenant_context import current_owner_user_id, current_work_id
+
+    owner_id = current_owner_user_id()
+    work_id = current_work_id()
+    if owner_id is not None and work_id is not None:
+        return owner_id, work_id
+    from app.ports import load_session_owner_user_id, load_session_work
+
     work_id, _, owner_id, _ = await load_session_work(sid)
     if owner_id is None:
         owner_id = await load_session_owner_user_id(sid)

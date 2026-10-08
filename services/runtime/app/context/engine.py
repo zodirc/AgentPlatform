@@ -370,8 +370,7 @@ class ContextEngine:
                 if settings.context_hard_autocompact_allow_llm:
                     compact_gateway = gateway
                     if settings.compact_model_name.strip():
-                        from app.controller.session_context import load_session_owner_user_id
-                        from app.model.config import resolve_model_config
+                        from app.ports import load_session_owner_user_id, resolve_model_config
                         from app.model.factory import create_gateway
 
                         owner_user_id = await load_session_owner_user_id(state.session_id)

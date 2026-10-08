@@ -1,13 +1,9 @@
-"""评分持久化 Postgres。"""
+"""评分持久化。服务器走 Postgres 端口，宿主可绑定只写文件的实现。"""
 
 from __future__ import annotations
 
-import hashlib
-import json
 from typing import Any
 from uuid import UUID
-
-from app.db.pool import get_pool
 
 
 async def persist_fragment_evaluation(
@@ -26,62 +22,21 @@ async def persist_fragment_evaluation(
     prototype_scope: str = "",
     nearest_exemplar_slug: str | None = None,
 ) -> str | None:
-    """写 writing_fragment_evaluations。
-    
-    参数:
-        owner/work/session/turn/section/fragments/signals/text/索引字段。
-    
-    返回:
-        evaluation id 或 None。"""
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    payload = json.dumps(writing_signals, ensure_ascii=False)
-    sig_payload = signature
-    pool = await get_pool()
-    try:
-        row = await pool.fetchrow(
-            """
-            INSERT INTO writing_fragment_evaluations (
-                owner_user_id, work_id, session_id, turn_id, section_id,
-                fragment_declared, fragment_detected, writing_signals, text_sha256,
-                feature_schema_id, signature, prototype_scope, nearest_exemplar_slug
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11::jsonb, $12, $13)
-            RETURNING id
-            """,
-            owner_user_id,
-            work_id,
-            session_id,
-            turn_id,
-            section_id or None,
-            fragment_declared,
-            fragment_detected,
-            payload,
-            digest,
-            feature_schema_id or None,
-            json.dumps(sig_payload, ensure_ascii=False) if sig_payload else None,
-            prototype_scope or None,
-            nearest_exemplar_slug,
-        )
-    except Exception:
-        row = await pool.fetchrow(
-            """
-            INSERT INTO writing_fragment_evaluations (
-                owner_user_id, work_id, session_id, turn_id, section_id,
-                fragment_declared, fragment_detected, writing_signals, text_sha256
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
-            RETURNING id
-            """,
-            owner_user_id,
-            work_id,
-            session_id,
-            turn_id,
-            section_id or None,
-            fragment_declared,
-            fragment_detected,
-            payload,
-            digest,
-        )
-    if row is None:
-        return None
-    return str(row["id"])
+    """写 writing_fragment_evaluations，或宿主绑定的文件存储。"""
+    from app.ports import evaluation_store
+
+    return await evaluation_store().persist_fragment(
+        owner_user_id=owner_user_id,
+        work_id=work_id,
+        session_id=session_id,
+        turn_id=turn_id,
+        section_id=section_id,
+        fragment_declared=fragment_declared,
+        fragment_detected=fragment_detected,
+        writing_signals=writing_signals,
+        text=text,
+        feature_schema_id=feature_schema_id,
+        signature=signature,
+        prototype_scope=prototype_scope,
+        nearest_exemplar_slug=nearest_exemplar_slug,
+    )

@@ -185,9 +185,9 @@ async def _emit_thinking_delta(text: str) -> None:
     delta = (text or "")[:_THINKING_DELTA_MAX]
     if not delta:
         return
-    from app.controller.runtime_context import get_event_writer
+    from app.ports import current_event_writer
 
-    writer = get_event_writer()
+    writer = current_event_writer()
     if writer is None:
         return
     async with _think_emit_lock:
@@ -202,9 +202,9 @@ async def _emit_thinking_delta(text: str) -> None:
 
 
 async def _mark_candidate_thinking() -> None:
-    from app.controller.runtime_context import get_event_writer
+    from app.ports import current_event_writer
 
-    writer = get_event_writer()
+    writer = current_event_writer()
     if writer is None:
         return
     try:
@@ -221,7 +221,7 @@ def _buffered_writer():
     raw = _sample_turn_id.get()
     if raw is None:
         return None
-    from app.controller.event_writer import get_event_writer as get_buffered
+    from app.ports import buffered_writer as get_buffered
 
     try:
         turn_id = raw if isinstance(raw, UUID) else UUID(str(raw))
@@ -773,7 +773,7 @@ async def resolve_sample_user_text(user_text: str, session_id: Any = None) -> st
     if session_id:
         try:
             sid = session_id if isinstance(session_id, UUID) else UUID(str(session_id))
-            from app.controller.session_compact import load_session_turn_history
+            from app.ports import load_session_turn_history
 
             rows = await load_session_turn_history(sid, limit=20)
             priors = [str(row.get("user_input") or "") for row in rows]

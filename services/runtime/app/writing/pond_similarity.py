@@ -65,7 +65,8 @@ def compute_pond_similarity(
     shadow: bool | None = None,
 ) -> dict[str, Any]:
     """组内两两 cos、vs 被拒旧组最大 cos。失败或词法回退时 usable=False。"""
-    from app.retrieval.embedder import cosine_similarity, embed_many, get_embedder
+    from app.ports import get_embedder
+    from app.retrieval.embedder import cosine_similarity, embed_many
 
     is_shadow = settings.ponds_similarity_shadow if shadow is None else bool(shadow)
     declared = [
@@ -95,6 +96,8 @@ def compute_pond_similarity(
         embedder = get_embedder()
     except Exception:
         logger.info("pond similarity skipped: embedder unavailable", exc_info=True)
+        return empty
+    if embedder is None:
         return empty
 
     kind = embedder_kind(embedder)

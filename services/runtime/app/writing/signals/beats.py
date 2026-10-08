@@ -274,33 +274,6 @@ async def maybe_promote_local_beats(*, turn_id: UUID, session_id: UUID | None) -
 
 
 async def _load_turn_evaluations(turn_id: UUID) -> list[dict[str, Any]]:
-    from app.db.pool import get_pool
+    from app.ports import evaluation_store
 
-    pool = await get_pool()
-    rows = await pool.fetch(
-        """
-        SELECT id, section_id, fragment_declared, writing_signals, created_at
-        FROM writing_fragment_evaluations
-        WHERE turn_id = $1
-        ORDER BY created_at ASC
-        """,
-        turn_id,
-    )
-    out: list[dict[str, Any]] = []
-    for row in rows:
-        signals = row["writing_signals"]
-        if isinstance(signals, str):
-            try:
-                signals = json.loads(signals)
-            except json.JSONDecodeError:
-                signals = {}
-        out.append(
-            {
-                "id": row["id"],
-                "section_id": row["section_id"],
-                "fragment_declared": row["fragment_declared"],
-                "writing_signals": signals if isinstance(signals, dict) else {},
-                "created_at": str(row["created_at"] or ""),
-            }
-        )
-    return out
+    return await evaluation_store().load_turn(turn_id)

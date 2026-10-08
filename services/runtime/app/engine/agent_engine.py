@@ -32,7 +32,6 @@ from typing import Any, Awaitable, Callable
 
 from app.context.engine import ContextEngine, ToolExecutor
 from app.context.policy import CompactionPolicy
-from app.controller.event_writer import get_event_writer
 from app.engine.read_registry import (
     consume_evicted_reread,
     deny_redundant_read,
@@ -570,7 +569,7 @@ class AgentEngine:
         English: Optionally drop late-stage tools from the schema when
         ``stage_tool_scope_mutate_schema`` is on; prefer runtime block for cache stability.
         """
-        from app.tools.bootstrap import stage_tool_scope
+        from app.tools.scope import stage_tool_scope
 
         scoped = stage_tool_scope(
             self._tool_specs,
@@ -642,10 +641,10 @@ class AgentEngine:
                 try:
                     import asyncio
 
-                    from app.controller.session_raw import append_raw_snapshot
+                    from app.ports import schedule_raw_snapshot
 
                     asyncio.get_running_loop().create_task(
-                        append_raw_snapshot(
+                        schedule_raw_snapshot(
                             session_id=state.session_id,
                             turn_id=state.turn_id,
                             step_index=step_index,
@@ -678,10 +677,10 @@ class AgentEngine:
                 try:
                     import asyncio
 
-                    from app.observability.model_envelope import maybe_persist_model_envelope
+                    from app.ports import persist_model_envelope
 
                     asyncio.get_running_loop().create_task(
-                        maybe_persist_model_envelope(
+                        persist_model_envelope(
                             turn_id=state.turn_id,
                             session_id=state.session_id,
                             step_index=step_index,
@@ -758,7 +757,9 @@ class AgentEngine:
                 step_cache_read = 0
                 step_cache_creation = 0
                 usage_source = "estimated"
-                live_writer = get_event_writer(state.turn_id)
+                from app.ports import buffered_writer
+
+                live_writer = buffered_writer(state.turn_id)
 
                 try:
                     await self._write_event(
@@ -879,6 +880,8 @@ class AgentEngine:
                         float(estimated) / float(step_input_tokens), 4
                     )
                 if step_cache_read or step_cache_creation:
+                    state.usage.cache_read_input_tokens += int(step_cache_read or 0)
+                    state.usage.cache_creation_input_tokens += int(step_cache_creation or 0)
                     usage_payload["cache_read_input_tokens"] = step_cache_read
                     usage_payload["cache_creation_input_tokens"] = step_cache_creation
                     usage_payload["cache_hit"] = step_cache_read > 0
@@ -1046,6 +1049,12 @@ class AgentEngine:
         limit = int(getattr(state, "turn_token_budget", 0) or 0)
         if limit <= 0:
             limit = settings.turn_token_budget
+        max_in = int(getattr(state, "max_input_tokens", 0) or 0)
+        max_out = int(getattr(state, "max_output_tokens", 0) or 0)
+        if max_in > 0 and state.usage.input_tokens >= max_in:
+            return True
+        if max_out > 0 and state.usage.output_tokens >= max_out:
+            return True
         if limit <= 0:
             return False
         total = state.usage.input_tokens + state.usage.output_tokens
@@ -1273,7 +1282,7 @@ class AgentEngine:
         )
 
         # C2: keep tools schema static; reject late-stage tools at runtime.
-        from app.tools.bootstrap import stage_tool_runtime_blocked
+        from app.tools.scope import stage_tool_runtime_blocked
 
         if stage_tool_runtime_blocked(
             tool_name,
@@ -1747,10 +1756,10 @@ class AgentEngine:
                 except ValueError:
                     _profile = None
                 if _profile and _profile.patch_auto_apply:
-                    from app.tools.core import tools as core_tools
+                    from app.tools.core.patch_tools import apply_patch
 
                     try:
-                        applied = await core_tools.apply_patch(
+                        applied = await apply_patch(
                             path=str(result.get("path", "")),
                             new_text=str(result.get("new_text", "")),
                             old_text=str(result.get("old_text") or ""),

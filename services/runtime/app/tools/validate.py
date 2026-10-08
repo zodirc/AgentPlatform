@@ -8,8 +8,45 @@ from __future__ import annotations
 
 from typing import Any
 
-from jsonschema import Draft202012Validator
-from jsonschema.exceptions import SchemaError
+
+def _validate_without_jsonschema(
+    tool_name: str,
+    arguments: dict[str, Any],
+    schema: dict[str, Any],
+) -> dict[str, Any] | None:
+    """jsonschema 不在宿主白名单里时，校验写作工具用到的 object/required/类型。"""
+    missing = [name for name in schema.get("required") or [] if name not in arguments]
+    details: list[str] = []
+    properties = schema.get("properties") or {}
+    if isinstance(properties, dict):
+        for key, value in arguments.items():
+            prop = properties.get(key)
+            if not isinstance(prop, dict):
+                continue
+            expected = prop.get("type")
+            if expected == "string" and not isinstance(value, str):
+                details.append(f"{key}: expected string")
+            elif expected == "integer" and not isinstance(value, int):
+                details.append(f"{key}: expected integer")
+            elif expected == "boolean" and not isinstance(value, bool):
+                details.append(f"{key}: expected boolean")
+            elif expected == "array" and not isinstance(value, list):
+                details.append(f"{key}: expected array")
+            elif expected == "object" and not isinstance(value, dict):
+                details.append(f"{key}: expected object")
+    if not missing and not details:
+        return None
+    return {
+        "error": "invalid_arguments",
+        "tool_name": tool_name,
+        "summary": (
+            f"Tool {tool_name} rejected invalid arguments"
+            + (f" (missing: {', '.join(missing)})" if missing else "")
+        ),
+        "details": [f"missing {name}" for name in missing] + details,
+        "missing": missing,
+        "expected": _expected_summary(schema),
+    }
 
 
 def validate_tool_arguments(
@@ -40,6 +77,11 @@ def validate_tool_arguments(
         }
 
     schema = parameters if isinstance(parameters, dict) and parameters else {"type": "object"}
+    try:
+        from jsonschema import Draft202012Validator
+        from jsonschema.exceptions import SchemaError
+    except ImportError:
+        return _validate_without_jsonschema(tool_name, arguments, schema)
     try:
         validator = Draft202012Validator(schema)
         errors = sorted(validator.iter_errors(arguments), key=lambda e: list(e.path))
