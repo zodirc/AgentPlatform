@@ -74,6 +74,24 @@ def tool_scope(
         for extra in ("reread_book", "author_state", "propose_retcon"):
             if extra not in names and registry.get(extra) is not None:
                 names.append(extra)
+    # L0 smoke routes on stub_echo. Live and recorded turns keep it off the
+    # model tool list. Phase allowlists stay closed so planning / editor
+    # gates do not grow a debug tool.
+    gated = bool(
+        phase == "planning"
+        or opening_choice
+        or outline_wait
+        or revision_phase
+        or editor_phase
+        or reread_phase
+    )
+    if (
+        not gated
+        and _stub_mode()
+        and "stub_echo" not in names
+        and registry.get("stub_echo") is not None
+    ):
+        names.append("stub_echo")
     specs: list[ToolSpec] = []
     for name in names:
         base = registry.get(name)
@@ -91,6 +109,12 @@ def tool_scope(
             requires = False
         specs.append(replace(base, requires_approval=requires))
     return specs
+
+
+def _stub_mode() -> bool:
+    from app.settings import settings
+
+    return settings.model_mode == "stub"
 
 
 def late_stage_tools_disabled(

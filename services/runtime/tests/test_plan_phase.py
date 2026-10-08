@@ -120,6 +120,23 @@ def test_agent_executing_waives_write_approvals() -> None:
     assert executing["run_command"].requires_approval is True
 
 
+def test_stub_mode_offers_echo_only_outside_phase_gates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """L0 smoke needs stub_echo. Phase gates and live mode keep it off the model list."""
+    from app.settings import settings
+
+    ScenarioRegistry.load()
+    profile = ScenarioRegistry.get("writing")
+    registry = build_registry()
+    monkeypatch.setattr(settings, "model_mode", "stub")
+    names = {s.name for s in tool_scope(profile, registry)}
+    assert "stub_echo" in names
+    editor = {s.name for s in tool_scope(profile, registry, editor_phase=True)}
+    assert "stub_echo" not in editor
+    monkeypatch.setattr(settings, "model_mode", "live")
+    live = {s.name for s in tool_scope(profile, registry)}
+    assert "stub_echo" not in live
+
+
 def test_executing_block_mentions_preauthorized_edits() -> None:
     block = plan_phase_block("executing")
     assert "pre-authorized" in block.lower() or "按此执行" in block
