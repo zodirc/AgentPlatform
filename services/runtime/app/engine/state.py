@@ -23,6 +23,8 @@ class Usage:
 
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
 
 
 @dataclass
@@ -52,6 +54,8 @@ class TurnState:
     termination_reason: str = "final"
     budget_exceeded: bool = False
     turn_token_budget: int = 0
+    max_input_tokens: int = 0
+    max_output_tokens: int = 0
     fill_ratio_max: float = 0.0
     model_queue_wait_s: float = 0.0
     pointerized_n: int = 0
