@@ -17,6 +17,7 @@ HOOK_SLOTS = frozenset(
         "step_checkpoint",
         "post_turn",
         "compact_bookmark",
+        "empty_transcript",
     }
 )
 """Profile 可绑定的固定钩子槽位名集合。"""
@@ -203,6 +204,12 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
         logger.exception("wn1 continuity pending failed turn_id=%s", turn_id)
 
 
+def _writing_release_ponds(message: str) -> None:
+    from app.writing.opening_ponds import release_unadopted_ponds
+
+    release_unadopted_ponds(message or "")
+
+
 def _writing_focus_bookmark(
     *,
     record: dict[str, Any],
@@ -292,6 +299,7 @@ def ensure_builtins_registered() -> None:
     register("collab_gap_hint", _collab_gap_hint)
     register("writing_continuity", _writing_continuity)
     register("writing_focus", _writing_focus_bookmark)
+    register("writing_release_ponds", _writing_release_ponds)
 
 
 ensure_builtins_registered()

@@ -10,7 +10,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 # 发布流水线的公钥。私钥不在仓库里；测试验包时传入本次生成的公钥。
-PUBLIC_KEY_HEX = "0fdd9d8c82efe5178f1481f75bc67f363d98982f732b67c786bca03524d8baa8"
+PUBLIC_KEY_HEX = "0fdd9d8c82efe5178f1481f75bc67f363d98982f732b67c786bca03524d8baa8"  # gitleaks:allow
 
 
 def public_key() -> Ed25519PublicKey | None:

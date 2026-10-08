@@ -1445,10 +1445,12 @@ async def _run_turn(
     compiled = compiler.compile(message, scenario_id=scenario_id)
     compiled = await compiler.enrich_with_preread(compiled)
     prior = await load_session_transcript(session_id)
-    if scenario_id == "writing" and not prior:
-        from app.writing.opening_ponds import release_unadopted_ponds
+    if not prior:
+        from app.scenarios.hooks import resolve
 
-        release_unadopted_ponds(message or "")
+        opening = resolve(profile.hooks.get("empty_transcript"))
+        if opening is not None:
+            opening(message or "")
     if prior:
         # 滚动会话历史：接上 prior messages；有 transcript 则不再塞薄摘要以免重复。
         compiled.messages = [*prior, *compiled.messages]
@@ -1829,8 +1831,8 @@ async def _run_turn(
                 gateway=gateway,
                 trace_id=trace_id,
                 pending_tool_call=interrupt,
-                system_prompt=system_prompt,
-                volatile_context=volatile_context,
+                system_prompt=assembly.system_prompt,
+                volatile_context=assembly.volatile_context,
             ),
         )
     elif summary == "waiting_approval":

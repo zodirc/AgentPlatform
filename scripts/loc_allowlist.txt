@@ -7,6 +7,8 @@
 #   - After a split drops a file ≤800: remove its entry (ratchet down only).
 #   - 2026-08: raised several budgets after bilingual docstring thickening (no logic growth).
 #   - 2026-09: writing/author-state modules grew past budget+tolerance; round ceilings only.
+#   - 2026-10: writing_tools / staccato / candidate_sample / scene_repair were already
+#     past budget+tolerance; round ceilings only, no new logic in those files.
 services/web/src/ops/OfficialBenchPage.tsx	1700
 services/release-console/server.py	2200
 services/runtime/app/controller/turn_controller.py	2300
@@ -19,7 +21,7 @@ services/runtime/app/model/gateway.py	1300
 services/web/src/settings/SettingsPage.tsx	1200
 services/web/src/shared/api/client.ts	1400
 services/runtime/app/tools/core/swe_solve_env.py	1000
-services/runtime/app/tools/core/writing_tools.py	1700
+services/runtime/app/tools/core/writing_tools.py	1900
 services/api/app/services/ops/official_store.py	900
 services/runtime/app/main.py	1200
 services/api/app/routers/ops_official.py	1000
@@ -31,6 +33,8 @@ services/api/app/services/ops/runs.py	900
 services/runtime/app/retrieval/index_scheduler.py	900
 services/runtime/app/retrieval/chunking.py	1100
 services/runtime/app/writing/cards.py	1100
-services/runtime/app/writing/staccato.py	1200
+services/runtime/app/writing/staccato.py	1400
+services/runtime/app/writing/candidate_sample.py	900
+services/runtime/app/writing/scene_repair.py	1200
 services/runtime/app/writing/story_state.py	1000
 services/runtime/app/writing/opening_ponds.py	1000

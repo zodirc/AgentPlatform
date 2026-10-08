@@ -57,3 +57,4 @@ hooks:
   system_prompt_composer: writing_cards
   compact_bookmark: writing_focus
   post_turn: writing_continuity
+  empty_transcript: writing_release_ponds
