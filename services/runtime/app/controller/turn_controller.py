@@ -9,7 +9,8 @@ terminal status. Does not own the AgentEngine while-loop (assemble → model →
   ``BufferedEventWriter`` 注入、审批挂起/续跑、终态事件（completed/failed/cancelled）、
   启动孤儿 reconcile 与关机 drain。
 - **不在本模块**：组窗 fill、模型流式、工具执行细节 → ``AgentEngine``；
-  场景工具裁剪 → ``tools.bootstrap.tool_scope``；租约 SQL 原语 → ``run_lock``。
+  写作回合的工具裁剪与提示组装 → ``app.writing.turn_assembly``；
+  租约 SQL 原语 → ``run_lock``。
 
 对外入口（HTTP/命令经 runtime router 调用）
 ------------------------------------------
@@ -76,9 +77,10 @@ from app.observability.metrics import metrics, record_turn_finished
 from app.observability.token_budget import check_monthly_token_alert
 from app.scenarios.registry import ScenarioRegistry
 from app.settings import settings
-from app.tools.bootstrap import build_registry, tool_scope
+from app.tools.bootstrap import build_registry
 from app.tools.core import tools as core_tools
-from app.controller.plan_phase import normalize_plan_phase, plan_phase_block
+from app.controller.plan_phase import normalize_plan_phase
+from app.writing.turn_assembly import assemble_writing_turn, select_turn_tools
 
 logger = logging.getLogger(__name__)
 
@@ -93,50 +95,6 @@ _active_turns: set[UUID] = set()
 # 中文：approve/deny 在飞集合。必须在任何 await 之前抢占；仅靠 pending pop
 # 不够——两方都会回落 checkpoint 并双执行同一 tool_call。
 _inflight_commands: set[UUID] = set()
-
-
-def _tools_for_turn(
-    profile: Any,
-    registry: Any,
-    *,
-    plan_phase: str | None,
-    message: str,
-) -> tuple[list[Any], bool, bool, bool]:
-    """Plan 规划闸优先；否则开篇候选闸；再编辑 / 回读相位。"""
-    from app.writing.opening_ponds import should_gate_opening_choice
-    from app.writing.reread import should_gate_editor_phase, should_gate_reread_phase
-    from app.writing.revision import should_gate_revision_phase
-
-    opening_choice = False
-    editor_phase = False
-    reread_phase = False
-    outline_wait = False
-    if (plan_phase or "").strip().lower() != "planning":
-        opening_choice = should_gate_opening_choice(
-            message or "",
-            tool_names=list(profile.tool_names),
-        )
-        if not opening_choice:
-            from app.writing.turn_phase import should_gate_outline_wait
-
-            outline_wait = should_gate_outline_wait(message or "")
-        if not opening_choice and not outline_wait:
-            editor_phase = should_gate_revision_phase(message or "") or should_gate_editor_phase(
-                message or ""
-            )
-            if not editor_phase:
-                reread_phase = should_gate_reread_phase(message or "")
-    tools = tool_scope(
-        profile,
-        registry,
-        plan_phase=plan_phase,
-        opening_choice=opening_choice,
-        outline_wait=outline_wait,
-        editor_phase=editor_phase,
-        reread_phase=reread_phase,
-        revision_phase=should_gate_revision_phase(message or ""),
-    )
-    return tools, opening_choice, editor_phase, reread_phase
 
 
 def _track_turn_started(turn_id: UUID) -> None:
@@ -661,7 +619,7 @@ async def _pending_from_checkpoint(run_id: UUID) -> PendingTurn | None:
     profile = ScenarioRegistry.get(state.scenario_id)
     registry = build_registry()
     # Preserve Plan executing write-waiver when restoring from checkpoint.
-    tools, _opening_choice, _editor_phase, _reread_phase = _tools_for_turn(
+    tools, _opening_choice, _editor_phase, _reread_phase = select_turn_tools(
         profile,
         registry,
         plan_phase=state.plan_phase,
@@ -1688,12 +1646,6 @@ async def _run_turn(
     )
 
     registry = build_registry()
-    tools, opening_choice, editor_phase, reread_phase = _tools_for_turn(
-        profile,
-        registry,
-        plan_phase=phase,
-        message=message or "",
-    )
     # Structural lane: soft prewarm when Profile declares it — never await on StartTurn / first token.
     if settings.structural_prewarm and profile.structural_prewarm:
         from app.structural.adapters import prewarm
@@ -1732,103 +1684,26 @@ async def _run_turn(
             step_index=step_index,
         )
 
-    from app.scenarios.hooks import resolve as resolve_hook
-
-    system_prompt = profile.system_prompt
-    volatile_context = ""
-    composer = resolve_hook(profile.hooks.get("system_prompt_composer"))
-    if composer is not None:
-        new_prompt, vol, events = composer(profile.system_prompt, message)
-        if new_prompt is not None:
-            system_prompt = new_prompt
-        if vol:
-            volatile_context = vol
-        for etype, payload in events or []:
-            await write_event(event_type=etype, payload=payload, step_index=0)
-    else:
-        vcomp = resolve_hook(profile.hooks.get("volatile_composer"))
-        if vcomp is not None:
-            _np, vol, events = vcomp(profile.system_prompt, message)
-            if vol:
-                volatile_context = vol
-            for etype, payload in events or []:
-                await write_event(event_type=etype, payload=payload, step_index=0)
-    # AQ1/WN3: Plan phase stays out of the cacheable system prefix.
-    phase_block = plan_phase_block(phase)
-    if phase_block:
-        volatile_context = (
-            f"{volatile_context.rstrip()}\n\n{phase_block}\n"
-            if volatile_context.strip()
-            else f"{phase_block}\n"
-        )
-    if opening_choice:
-        from app.writing.opening_ponds import opening_choice_block
-
-        choice_block = opening_choice_block()
-        volatile_context = (
-            f"{volatile_context.rstrip()}\n\n{choice_block}\n"
-            if volatile_context.strip()
-            else f"{choice_block}\n"
-        )
-    elif editor_phase:
-        from app.writing.editor import editor_phase_block, format_observations_block
-        from app.writing.revision import revision_phase_block, should_gate_revision_phase
-
-        if should_gate_revision_phase(message or ""):
-            from app.writing.revision import build_revision_context
-
-            system_prompt = revision_phase_block()
-            volatile_context = build_revision_context(message or "")
-        else:
-            edit_block = editor_phase_block()
-            system_prompt = edit_block or system_prompt
-            obs = format_observations_block()
-            volatile_context = obs or ""
-    elif reread_phase:
-        from app.writing.reread import reread_phase_block
-
-        reread_block = reread_phase_block()
-        if reread_block:
-            volatile_context = (
-                f"{volatile_context.rstrip()}\n\n{reread_block}\n"
-                if volatile_context.strip()
-                else f"{reread_block}\n"
-            )
-
-    # docs/27 — when Work disabled product seed, steer model away from seed paths.
     from app.tenant_context import current_visibility_seed
 
-    if not current_visibility_seed():
-        seed_off = (
-            "## Product seed corpus (disabled for this Work)\n"
-            "Standing `sources/seed/**` is off. Do not search, cite, list, or "
-            "`path_prefix` into seed. Use only user uploads under `sources/` "
-            "(excluding seed) and writing cards."
-        )
-        volatile_context = (
-            f"{volatile_context.rstrip()}\n\n{seed_off}\n"
-            if volatile_context.strip()
-            else f"{seed_off}\n"
-        )
-
-    # Persist for step/interrupt checkpoint resume (HA) — not welded into system.
-    if compiled.metadata.get("recall_hint"):
-        recall_line = (
-            "[memory_hint] User may refer to prior notes — use the recall tool if relevant; "
-            "do not invent memories and do not auto-inject long-term memory."
-        )
-        volatile_context = (
-            f"{volatile_context.rstrip()}\n\n{recall_line}\n"
-            if volatile_context.strip()
-            else f"{recall_line}\n"
-        )
-    state.volatile_context = volatile_context
+    assembly = assemble_writing_turn(
+        profile=profile,
+        registry=registry,
+        message=message or "",
+        plan_phase=phase,
+        recall_hint=bool(compiled.metadata.get("recall_hint")),
+        seed_visible=current_visibility_seed(),
+    )
+    for etype, payload in assembly.events:
+        await write_event(event_type=etype, payload=payload, step_index=0)
+    state.volatile_context = assembly.volatile_context
+    tools = assembly.tools
 
     engine = AgentEngine(
         gateway=gateway,
         tools=tools,
-        system_prompt=system_prompt,
-        volatile_context=volatile_context,
+        system_prompt=assembly.system_prompt,
+        volatile_context=assembly.volatile_context,
         write_event=write_event,
         check_cancel=check_cancel,
         on_step_checkpoint=on_step_checkpoint,
