@@ -40,9 +40,8 @@ export function approvalCopy(toolName: string | null | undefined): {
   if (kind === "write_file") {
     return {
       title: "待审批：写文件",
-      description:
-        "Agent 要把内容写入磁盘。批准后，本回合内后续写盘/编辑将不再询问（Shell 命令仍单独审批）。",
-      approveLabel: "批准写文件（本回合后续免批）",
+      description: "这次批准只覆盖这一次写入。下一份文件仍会再问。",
+      approveLabel: "批准这一次写文件",
     };
   }
   if (kind === "run_command") {
@@ -56,9 +55,8 @@ export function approvalCopy(toolName: string | null | undefined): {
   if (kind === "edit_file") {
     return {
       title: "待审批：编辑文件",
-      description:
-        "Agent 要修改已有文件。批准后，本回合内后续写盘/编辑将不再询问（Shell 命令仍单独审批）。",
-      approveLabel: "批准编辑（本回合后续免批）",
+      description: "这次批准只覆盖这一次编辑。下一处修改仍会再问。",
+      approveLabel: "批准这一次编辑",
     };
   }
   if (kind === "run_tests") {
@@ -106,6 +104,22 @@ export function lastApprovalEvent<
  * @param path 可选的文件路径（优先于 args.path）
  * @returns 单行展示文本
  */
+export function approvalContextLine(
+  payload: Record<string, unknown> | undefined,
+): string {
+  if (!payload) return "";
+  const taint = typeof payload.window_taint === "string" ? payload.window_taint : "";
+  const source =
+    typeof payload.external_source === "string" ? payload.external_source : "";
+  const host = typeof payload.host === "string" ? payload.host : "";
+  const method = typeof payload.method === "string" ? payload.method : "";
+  const parts: string[] = [];
+  if (taint) parts.push(`窗口污点 ${taint}`);
+  if (source) parts.push(`最近外部来源 ${source}`);
+  if (host) parts.push(`${method || "GET"} ${host}`);
+  return parts.join(" · ");
+}
+
 export function approvalDetailLine(
   toolName: string | null | undefined,
   args: Record<string, unknown> | undefined,

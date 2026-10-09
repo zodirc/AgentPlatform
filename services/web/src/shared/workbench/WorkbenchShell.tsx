@@ -8,7 +8,7 @@ import { Button } from "../../components/ui/button";
 import { Card, CardTitle } from "../../components/ui/card";
 import { Textarea } from "../../components/ui/textarea";
 import { artifactToWritePreview } from "./filePreview";
-import { approvalCopy, lastApprovalEvent } from "./toolApproval";
+import { approvalContextLine, approvalCopy, lastApprovalEvent } from "./toolApproval";
 import { ErrorBanner } from "./ErrorBanner";
 import { onChatEnterSend } from "./chatKeyboard";
 import { placeholderForScenario } from "./scenarioMeta";
@@ -125,6 +125,11 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
           <p className="mb-1 text-sm text-foreground/90">
             {approval.description}
           </p>
+          {approvalContextLine(pendingApprovalEvent?.payload) ? (
+            <p className="mb-2 text-xs text-foreground/80">
+              {approvalContextLine(pendingApprovalEvent?.payload)}
+            </p>
+          ) : null}
           {wb.pendingWriteFile ? (
             <div className="mb-3">
               <WriteFileDiffPanel
@@ -136,6 +141,11 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
           {wb.pendingToolName === "run_command" && pendingArgs?.command ? (
             <pre className="mb-3 max-h-40 overflow-auto rounded-lg bg-background p-3 text-xs text-warning">
               $ {String(pendingArgs.command)}
+            </pre>
+          ) : null}
+          {pendingArgs ? (
+            <pre className="mb-3 max-h-40 overflow-auto rounded-lg bg-background p-3 text-xs">
+              {JSON.stringify(pendingArgs, null, 2)}
             </pre>
           ) : null}
           {wb.pendingToolCallId ? (

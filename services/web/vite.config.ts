@@ -15,6 +15,10 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    headers: {
+      "Content-Security-Policy":
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; font-src 'self' data:; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
+    },
     fs: {
       allow: [
         path.resolve(__dirname),
