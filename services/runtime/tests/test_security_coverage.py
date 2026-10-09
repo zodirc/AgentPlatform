@@ -140,6 +140,68 @@ def test_corrupt_emergency_file_is_unreadable(tmp_path: Path, monkeypatch: pytes
         matrix.emergency_clear()
 
 
+def test_cgroup_limits_follow_the_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.tools.core import sandbox
+
+    saved = dict(sandbox._CGROUP_STATE)
+    orig_is_file = Path.is_file
+    orig_mkdir = Path.mkdir
+    orig_write = Path.write_text
+    try:
+        def is_file(self: Path) -> bool:
+            if self == Path("/sys/fs/cgroup/cgroup.controllers"):
+                return False
+            return orig_is_file(self)
+
+        monkeypatch.setattr(Path, "is_file", is_file)
+        assert sandbox.apply_cgroup_limits()["configured"] is False
+
+        def is_file_ready(self: Path) -> bool:
+            if self == Path("/sys/fs/cgroup/cgroup.controllers"):
+                return True
+            return orig_is_file(self)
+
+        def mkdir(self: Path, *args: object, **kwargs: object) -> None:
+            if self == Path("/sys/fs/cgroup/agent-sandbox"):
+                return None
+            return orig_mkdir(self, *args, **kwargs)
+
+        def write_text(self: Path, text: str, *args: object, **kwargs: object) -> int:
+            if str(self).startswith("/sys/fs/cgroup/agent-sandbox"):
+                return len(text)
+            return orig_write(self, text, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "is_file", is_file_ready)
+        monkeypatch.setattr(Path, "mkdir", mkdir)
+        monkeypatch.setattr(Path, "write_text", write_text)
+        sandbox._CGROUP_STATE["pid_attached"] = False
+        report = sandbox.apply_cgroup_limits()
+        assert report["configured"] is True
+        assert sandbox.attach_sandbox_cgroup(42) is True
+    finally:
+        sandbox._CGROUP_STATE.clear()
+        sandbox._CGROUP_STATE.update(saved)
+
+
+def test_escape_probe_records_a_real_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.tools.core import sandbox
+
+    saved = dict(sandbox._PROBE_CACHE)
+
+    class Completed:
+        returncode = 0
+
+    try:
+        monkeypatch.setattr(sandbox, "_which_bwrap", lambda: "/usr/bin/bwrap")
+        monkeypatch.setattr(sandbox, "_bwrap_can_exec", lambda: True)
+        monkeypatch.setattr(sandbox.subprocess, "run", lambda *_a, **_k: Completed())
+        assert sandbox._probe_command_fails("/usr/bin/bwrap", ["true"]) is False
+        report = sandbox.refresh_escape_probes()
+        assert report["ok"] is False
+    finally:
+        sandbox._PROBE_CACHE = saved
+
+
 def test_disk_quota_and_cgroup_attach(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.tools.core import sandbox
 
@@ -184,7 +246,10 @@ def test_escape_probe_does_not_pass_when_it_cannot_spawn(monkeypatch: pytest.Mon
 async def test_probe_loop_can_be_stopped(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.tools.core import sandbox
 
-    monkeypatch.setattr(sandbox, "refresh_escape_probes", lambda: {"ran": False, "ok": None})
+    def explode() -> dict[str, object]:
+        raise RuntimeError("probe down")
+
+    monkeypatch.setattr(sandbox, "refresh_escape_probes", explode)
     monkeypatch.setattr(settings, "sandbox_probe_interval_seconds", 30)
     sandbox._probe_task = None
     sandbox.start_escape_probe_loop()
@@ -235,7 +300,7 @@ async def test_http_fetch_repeats_the_destination_check(monkeypatch: pytest.Monk
     async def proxy(*_args, **_kwargs):
         return Response()
 
-    monkeypatch.setattr("app.policy.egress.classify_http", lambda *args, **kwargs: "allow")
+    monkeypatch.setattr("app.tools.core.http_fetch.classify_http", lambda *args, **kwargs: "allow")
     monkeypatch.setattr("app.policy.egress.proxy_request", proxy)
     credentials.set_broker_token("example.com", "sekret")
     try:
