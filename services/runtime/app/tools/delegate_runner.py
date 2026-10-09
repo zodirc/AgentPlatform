@@ -2,14 +2,13 @@
 
 父 Turn 通过 ``delegate`` 工具 spawn 专注子 agent（researcher/drafter/explore 等）。
 本模块负责：深度限制、Profile 白名单、工具解析、prompt 组装、事件转发与产物引用解析。
-子 agent 共享父 Turn 的 step 预算；嵌套写操作强制 ``requires_approval=False``，
-避免子层 approval 与父层 ``pending_approval`` 状态冲突。
+子 agent 共享父 Turn 的 step 预算。允许名单内的 S2 在子层执行。
+其余需要审批的调用带着 ``origin: child/<id>`` 冒泡到父 Turn，批准后 ``child_join`` 恢复该子 Run。
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import replace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -17,6 +16,8 @@ from app.controller.runtime_context import get_event_writer
 from app.engine.agent_engine import AgentEngine
 from app.engine.state import TurnState, user_message
 from app.tools.bootstrap import build_registry
+
+_PARKED_CHILDREN: dict[str, dict[str, Any]] = {}
 from app.tools.delegate_context import (
     bump_delegate_depth,
     current_delegate_depth,
@@ -122,12 +123,12 @@ def _resolve_sub_tools(parent_tools: list[ToolSpec], agent_type: str) -> list[To
         agent_type: 子 agent 类型键（见 ``SUBAGENT_TOOL_NAMES``）。
 
     返回:
-        已强制 ``requires_approval=False`` 的工具列表。
+        子代理可见的工具。审批标志保持原样，不在这里关掉。
 
     说明:
         - ``goto_definition``/``find_references`` 仅当父 Profile 已包含时才注入，不从全局 registry 偷渡。
         - 其它工具优先父列表，缺失时回退 ``build_registry()`` 全局查找。
-        - 嵌套 worker 的 approval 归属父 Turn；子层 write 若仍要 approval 会导致父层 summary 卡在 waiting_approval。
+        - 不在允许名单里的调用由执行器冒泡，origin 为 ``child/<id>``。
     """
     by_name = {spec.name: spec for spec in parent_tools}
     registry = None
@@ -149,10 +150,14 @@ def _resolve_sub_tools(parent_tools: list[ToolSpec], agent_type: str) -> list[To
         found = registry.get(name)
         if found is not None:
             specs.append(found)
-    # Nested workers run inside an already-scheduled delegate. Approvals belong to
-    # the parent Turn; a subagent write_file gate would emit approval.requested but
-    # leave parent pending_approval empty (summary "waiting_approval" collision).
-    return [replace(spec, requires_approval=False) for spec in specs]
+    # Reads, reversible writes, and S2. Off-list commands are not pre-approved;
+    # the executor bubbles those to the parent turn.
+    kept: list[ToolSpec] = []
+    for spec in specs:
+        sink = str(getattr(spec, "sink_class", "") or "")
+        if sink in {"S0", "S1", "S2"}:
+            kept.append(spec)
+    return kept
 
 
 async def run_delegate(
@@ -267,6 +272,8 @@ async def run_delegate(
             return
         stamped = dict(payload)
         stamped["subagent_id"] = subagent_id
+        if event_type == "approval.requested":
+            stamped["origin"] = f"child/{subagent_id}"
         await ctx.write_event(
             event_type=event_type, payload=stamped, step_index=step_index
         )
@@ -291,15 +298,29 @@ async def run_delegate(
     finally:
         reset_delegate_depth(depth_token)
 
+    if summary == "waiting_approval":
+        pending = dict(getattr(engine, "pending_approval", None) or {})
+        _PARKED_CHILDREN[subagent_id] = {"engine": engine, "state": sub_state}
+        return {
+            "status": "approval_required",
+            "origin": f"child/{subagent_id}",
+            "subagent_id": subagent_id,
+            "summary": "子代理等待审批",
+            "window_taint": str(pending.get("window_taint") or getattr(sub_state, "window_taint", "") or ""),
+            "sink_class": str(pending.get("sink_class") or ""),
+            "child_tool_name": pending.get("tool_name"),
+            "child_tool_call_id": pending.get("tool_call_id"),
+            "child_arguments": pending.get("arguments") or {},
+            "approval_id": pending.get("approval_id"),
+            "args_hash": pending.get("args_hash"),
+            "policy_version": pending.get("policy_version"),
+            "expires_at": pending.get("expires_at"),
+            "_taint": str(getattr(sub_state, "window_taint", "") or "workspace"),
+        }
+
     if sub_state.cancelled:
         status = "cancelled"
         summary = summary or "sub-agent cancelled"
-    elif summary == "waiting_approval":
-        # Should not happen after approval waiver; keep parent Turn from hanging.
-        status = "failed"
-        summary = (
-            "sub-agent hit an approval gate; nested writes must not require approval"
-        )
     else:
         status = "completed"
         summary = (summary or "sub-agent completed").strip()
@@ -315,12 +336,17 @@ async def run_delegate(
         },
     )
 
+    child_taint = "external" if getattr(sub_state, "saw_external", False) else str(
+        getattr(sub_state, "window_taint", "workspace") or "workspace"
+    )
     return {
         "subagent_id": subagent_id,
         "agent_type": agent_type,
         "summary": summary,
         "artifact_refs": artifact_refs,
         "status": status,
+        "window_taint": child_taint,
+        "_taint": child_taint,
     }
 
 
@@ -409,3 +435,61 @@ async def execute_delegate(**kwargs: Any) -> dict[str, Any]:
     """Run a spawned child (never re-parks). Used by the controller join loop."""
     kwargs["wait"] = False
     return await run_delegate(**kwargs)
+
+
+async def resume_parked_child(subagent_id: str, approval: Any) -> dict[str, Any]:
+    """Continue one child that parked on approval. Missing state fails closed."""
+    parked = _PARKED_CHILDREN.get(subagent_id)
+    if not parked:
+        return {
+            "status": "failed",
+            "error": "子代理已结束",
+            "summary": "子代理已结束，请重试",
+            "subagent_id": subagent_id,
+            "origin": f"child/{subagent_id}",
+        }
+    engine = parked["engine"]
+    state = parked["state"]
+    depth = bump_delegate_depth()
+    try:
+        summary = await engine.resume_after_tool_approval(state, approval)
+    finally:
+        reset_delegate_depth(depth)
+    if summary == "waiting_approval":
+        pending = dict(getattr(engine, "pending_approval", None) or {})
+        return {
+            "status": "approval_required",
+            "origin": f"child/{subagent_id}",
+            "subagent_id": subagent_id,
+            "summary": "子代理等待审批",
+            "window_taint": str(pending.get("window_taint") or ""),
+            "sink_class": str(pending.get("sink_class") or ""),
+            "child_tool_name": pending.get("tool_name"),
+            "child_tool_call_id": pending.get("tool_call_id"),
+            "child_arguments": pending.get("arguments") or {},
+            "approval_id": pending.get("approval_id"),
+            "args_hash": pending.get("args_hash"),
+            "policy_version": pending.get("policy_version"),
+            "expires_at": pending.get("expires_at"),
+        }
+    _PARKED_CHILDREN.pop(subagent_id, None)
+    writer = get_event_writer()
+    text = (summary or "sub-agent completed").strip()
+    if writer is not None:
+        await writer(
+            event_type="subagent.completed",
+            payload={
+                "subagent_id": subagent_id,
+                "agent_type": str(getattr(state, "scenario_id", "") or ""),
+                "summary": text[:500],
+            },
+        )
+    taint = "external" if getattr(state, "saw_external", False) else str(
+        getattr(state, "window_taint", "workspace") or "workspace"
+    )
+    return {
+        "status": "completed" if not getattr(state, "cancelled", False) else "cancelled",
+        "subagent_id": subagent_id,
+        "summary": text[:500],
+        "_taint": taint,
+    }

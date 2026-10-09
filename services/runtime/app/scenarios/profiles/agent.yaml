@@ -22,6 +22,7 @@ tool_names:
   - run_tests
   - read_lints
   - delegate
+  - http_fetch
   - slow_tool
 subagent_types:
   - explore
@@ -43,3 +44,16 @@ generation:
 structural_prewarm: true
 plan_suggest:
   threshold: 4
+security:
+  version: agent-1
+  mode: observe
+  paths:
+    - .
+  memory:
+    workspace: work
+    external: approval
+  commands:
+    - pytest
+    - python
+    - python3
+    - git

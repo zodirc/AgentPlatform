@@ -209,6 +209,31 @@ class Settings(BaseSettings):
     sources_retrieval_url: str = ""
     model_gateway_url: str = ""
     sandbox_plane_url: str = ""
+    # dev keeps local bwrap. single is one tenant. saas refuses a shared kernel.
+    deployment_tier: str = "dev"
+    sandbox_isolation: str = "bwrap"
+    # Empty means the in-process observe stub. A URL is an independent detector.
+    detector_url: str = ""
+    detector_timeout_ms: int = 300
+    detector_injection_mode: str = "observe"
+    # A waiting_approval older than this is a deny. Seconds.
+    approval_timeout_seconds: int = 600
+    # Comma-separated hosts http_fetch may GET. Empty allowlist denies every host.
+    egress_host_allowlist: str = ""
+    # Skills outside the shipped packs. A changed body stays offline until re-review.
+    external_skills_dir: str = ""
+    # When set, an ops_eval turn binds this directory instead of the session Work.
+    eval_work_root: str = ""
+    # host=token pairs. The proxy injects them. The model never sees the values.
+    egress_broker: str = ""
+    sandbox_memory_max: str = "512M"
+    sandbox_pids_max: str = "128"
+    sandbox_cpu_max: str = "100000 100000"
+    # Userspace cap on the Work tree. 0 disables the walk. cgroup has no disk controller.
+    sandbox_disk_quota_bytes: int = 2_000_000_000
+    sandbox_probe_interval_seconds: int = 300
+    # When the role exists, turn_events INSERT runs as this insert-only role.
+    turn_events_insert_role: str = "agent_runtime_append"
 
     # --- Sources 同步与 Embedding ---
     index_via_worker: bool = True
@@ -343,8 +368,7 @@ class Settings(BaseSettings):
     # Cap files/parse threads for eval so indexing cannot starve StartTurn.
     workspace_ast_eval_max_files: int = 4_000
     workspace_ast_eval_parse_concurrency: int = 2
-    # Ops / SWE-bench Lite: when True, ops_eval Turns run shell/LSP children with
-    # no egress (bwrap --unshare-net). Daily non-ops Turns keep host network.
+    # Kept for older deploys. Sandbox network is closed for every turn.
     # Map OFFICIAL_SWE_NETWORK=deny → OPS_EVAL_DENY_NETWORK=true in compose.
     ops_eval_deny_network: bool = False
 

@@ -63,6 +63,8 @@ class ScenarioProfile:
     post_turn_jobs: list[str] = field(default_factory=list)
     # C2: named hook bindings (slot → implementation name). Empty until hooks land.
     hooks: dict[str, str] = field(default_factory=dict)
+    # Optional security overlay. Empty inherits the baseline matrix.
+    security: dict = field(default_factory=dict)
 
 
 # Retired ids stay readable in history but cannot StartTurn (docs/39 TI6).
@@ -121,6 +123,7 @@ class ScenarioRegistry:
                 subagent_prompt_suffix=str(data.get("subagent_prompt_suffix") or ""),
                 post_turn_jobs=list(data.get("post_turn_jobs") or []),
                 hooks=hooks,
+                security=dict(data.get("security") or {}),
             )
             cls.register(profile)
 

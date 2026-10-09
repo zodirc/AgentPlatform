@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
@@ -21,6 +22,46 @@ from app.db.pool import get_pool
 from app.observability.metrics import metrics
 
 logger = logging.getLogger(__name__)
+
+_ROLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+async def _insert_turn_event(conn, statement: str, *values: object) -> None:
+    """INSERT as the append-only role when it exists. Otherwise insert as the pool user.
+
+    A missing role must not abort the caller's transaction. Unique violations
+    still propagate so the sequence retry can run.
+    """
+    from app.settings import settings
+
+    role = str(getattr(settings, "turn_events_insert_role", "") or "").strip()
+    if not role or not _ROLE_NAME.match(role):
+        await conn.execute(statement, *values)
+        return
+    try:
+        await conn.execute("SAVEPOINT agent_append_role")
+    except Exception:
+        logger.debug("append-role savepoint unavailable", exc_info=True)
+        await conn.execute(statement, *values)
+        return
+    try:
+        await conn.execute(f"SET LOCAL ROLE {role}")
+        await conn.execute(statement, *values)
+        await conn.execute("RESET ROLE")
+        await conn.execute("RELEASE SAVEPOINT agent_append_role")
+    except asyncpg.UniqueViolationError:
+        try:
+            await conn.execute("ROLLBACK TO SAVEPOINT agent_append_role")
+        except Exception:
+            logger.debug("append-role savepoint rollback skipped", exc_info=True)
+        raise
+    except Exception:
+        logger.debug("turn_events insert role %s unavailable", role, exc_info=True)
+        try:
+            await conn.execute("ROLLBACK TO SAVEPOINT agent_append_role")
+        except Exception:
+            logger.debug("append-role savepoint rollback skipped", exc_info=True)
+        await conn.execute(statement, *values)
 
 
 async def next_sequence(conn, turn_id: UUID) -> int:
@@ -88,7 +129,8 @@ async def append_event(
         event_id = uuid4()
         now = datetime.now(timezone.utc)
         try:
-            await conn.execute(
+            await _insert_turn_event(
+                conn,
                 """
                 INSERT INTO turn_events (
                     event_id, turn_id, stream_id, sequence, type, run_id,
@@ -155,32 +197,18 @@ async def run_exists(turn_id: UUID, run_id: UUID) -> bool:
 
 
 async def purge_thinking_deltas(turn_id: UUID) -> int:
-    """Turn 终态后删除 turn.thinking.delta 行，减轻投影与存储。
+    """Runtime does not delete turn_events. Retention uses a different role.
 
     参数:
         turn_id: 已结束的 Turn。
 
     返回:
-        删除行数；开关关闭时为 0。
+        Always 0. The runtime role is insert-only.
     """
     from app.settings import settings
 
-    if not bool(getattr(settings, "purge_thinking_deltas_on_finalize", True)):
-        return 0
-    pool = await get_pool()
-    result = await pool.execute(
-        "DELETE FROM turn_events WHERE turn_id = $1 AND type = $2",
-        turn_id,
-        "turn.thinking.delta",
-    )
-    try:
-        deleted = int(str(result).split()[-1])
-    except (ValueError, IndexError):
-        deleted = 0
-    if deleted:
-        logger.info("purged thinking.delta turn_id=%s n=%s", turn_id, deleted)
-        try:
-            metrics.inc("thinking_delta_purged_total", float(deleted))
-        except Exception:
-            pass
-    return deleted
+    # The runtime database role is insert-only on turn_events. Retention runs
+    # as a different role and is the only place that may delete rows.
+    _ = (turn_id, settings)
+    logger.info("thinking.delta purge skipped; runtime role is insert-only")
+    return 0

@@ -71,10 +71,18 @@ class TurnState:
     ops_eval: bool = False
     # docs/30 WN3/AQ1 — cards/focus/plan 阶段；checkpoint 恢复后保留（不焊进 system）。
     volatile_context: str = ""
-    # 用户在本 Turn 批准一次写类工具后，同 Turn 后续 sticky 写操作跳过审批。
+    # 保留字段：旧 checkpoint 仍会带上。写审批不再据此放行后续写操作。
     writes_preapproved: bool = False
-    # 用户在本 Turn 批准 run_command 后，同 Turn 后续 run_command 跳过审批。
+    # 旧字段。执行门不再据此跳过审批；评测走命令集策略。
     exec_preapproved: bool = False
+    # 本 Turn 是否出现过 external 结果。压缩不能把它清掉。
+    saw_external: bool = False
+    # 窗口污点：system < user < workspace < external。缺省 user。
+    window_taint: str = "user"
+    last_external_tool: str = ""
+    # Version pinned when the turn started. Loosening waits for the next turn.
+    pinned_policy_version: str = ""
+    s1_snapshots: dict[str, Any] = field(default_factory=dict)
     # docs/34 RC1 — Turn 级 read_file 覆盖（read-after-complete 硬门）。
     read_registry: dict[str, PathReadState] = field(default_factory=dict)
     # C1：完整 read 正文已离开可见 assemble 窗口（fold/collapse/snip）的路径。
@@ -141,7 +149,7 @@ def user_message(text: str) -> dict[str, Any]:
     返回:
         Anthropic/OpenAI 兼容的 ``{"role": "user", "content": [...]}`` dict。
     """
-    return {"role": "user", "content": [{"type": "text", "text": text}]}
+    return {"role": "user", "content": [{"type": "text", "text": text}], "_taint": "user"}
 
 
 def assistant_text(text: str) -> dict[str, Any]:
@@ -205,7 +213,12 @@ def assistant_tool_uses(tool_calls: list[dict[str, Any]], *, text: str = "") -> 
     return {"role": "assistant", "content": content}
 
 
-def tool_result_message(tool_call_id: str, result: str, is_error: bool = False) -> dict[str, Any]:
+def tool_result_message(
+    tool_call_id: str,
+    result: str,
+    is_error: bool = False,
+    taint: str | None = None,
+) -> dict[str, Any]:
     """构造 tool 角色消息，回传某次 tool_use 的执行结果。
 
     参数:
@@ -216,7 +229,7 @@ def tool_result_message(tool_call_id: str, result: str, is_error: bool = False) 
     返回:
         tool 消息 dict。
     """
-    return {
+    message: dict[str, Any] = {
         "role": "tool",
         "content": [
             {
@@ -227,3 +240,6 @@ def tool_result_message(tool_call_id: str, result: str, is_error: bool = False) 
             }
         ],
     }
+    if taint:
+        message["_taint"] = taint
+    return message

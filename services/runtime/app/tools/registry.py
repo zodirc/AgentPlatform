@@ -40,6 +40,24 @@ class ToolSpec:
     handler: Callable[..., Awaitable[dict[str, Any]]]
     requires_approval: bool = False
     timeout_s: float = 60.0
+    sink_class: str = ""
+    result_taint: str = ""
+    dynamic: bool = False
+    definition_hash: str = ""
+
+
+def _refuse_registration(name: str, reason: str) -> None:
+    from app.policy.audit import append_security_log
+
+    append_security_log(
+        {
+            "decision": "deny",
+            "reason": "registration refused",
+            "detail": reason,
+            "tool_name": name,
+            "sink_class": "",
+        }
+    )
 
 
 class ToolRegistry:
@@ -49,11 +67,30 @@ class ToolRegistry:
         self._tools: dict[str, ToolSpec] = {}
 
     def register(self, spec: ToolSpec) -> None:
-        """注册或覆盖同名工具。
+        """注册或覆盖同名工具。未声明 sink 的名字拒绝注册。
 
-        参数:
-            spec: 完整工具契约。
+        动态工具的定义哈希变了就下线，等重新审核后才能再注册。
         """
+        from app.policy.definition_lock import accept_dynamic, definition_hash
+        from app.policy.matrix import declared_class
+
+        sink, taint = declared_class(spec.name)
+        if not spec.sink_class:
+            spec.sink_class = sink
+        if not spec.result_taint:
+            spec.result_taint = taint
+        if not spec.sink_class:
+            _refuse_registration(spec.name, "undeclared sink")
+            raise ValueError(f"tool {spec.name} has no sink_class")
+        digest = definition_hash(
+            name=spec.name,
+            description=spec.description,
+            parameters=spec.parameters,
+        )
+        if spec.dynamic and not accept_dynamic(spec.name, digest):
+            _refuse_registration(spec.name, "definition changed")
+            raise ValueError(f"tool {spec.name} definition changed; offline until re-review")
+        spec.definition_hash = digest
         self._tools[spec.name] = spec
 
     def get(self, name: str) -> ToolSpec | None:

@@ -71,6 +71,7 @@ async def _dispatch_command(row: dict) -> None:
             run_id=run_id,
             tool_call_id=str(payload.get("tool_call_id") or ""),
             trace_id=trace_id,
+            approver_user_id=str(payload.get("approver_user_id") or ""),
         )
     elif cmd_type == "deny":
         await deny_tool_call(

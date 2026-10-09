@@ -9,6 +9,40 @@ from uuid import UUID
 from app.engine.read_registry import deserialize_read_registry, serialize_read_registry
 from app.engine.state import TurnState
 
+_SNAPSHOT_BUDGET = 200_000
+
+
+def _snapshot_payload(raw: Any) -> dict[str, str]:
+    """Keep rollback text inside the checkpoint, capped so one file cannot fill it."""
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    used = 0
+    for key, value in raw.items():
+        if isinstance(value, dict) and "b64" in value:
+            text = "b64:" + str(value.get("b64") or "")
+        else:
+            text = str(value)
+        if used + len(text) > _SNAPSHOT_BUDGET:
+            break
+        out[str(key)] = text
+        used += len(text)
+    return out
+
+
+def _snapshot_load(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for key, value in raw.items():
+        text = str(value)
+        if text.startswith("b64:"):
+            out[str(key)] = {"b64": text[4:]}
+        else:
+            out[str(key)] = text
+    return out
+
+
 def serialize_state(state: TurnState) -> dict[str, Any]:
     return {
         "turn_id": str(state.turn_id),
@@ -44,6 +78,11 @@ def serialize_state(state: TurnState) -> dict[str, Any]:
         "volatile_context": state.volatile_context or "",
         "writes_preapproved": bool(state.writes_preapproved),
         "exec_preapproved": bool(state.exec_preapproved),
+        "saw_external": bool(getattr(state, "saw_external", False)),
+        "window_taint": str(getattr(state, "window_taint", "user") or "user"),
+        "last_external_tool": str(getattr(state, "last_external_tool", "") or ""),
+        "pinned_policy_version": str(getattr(state, "pinned_policy_version", "") or ""),
+        "s1_snapshots": _snapshot_payload(getattr(state, "s1_snapshots", None)),
         "read_registry": serialize_read_registry(state.read_registry),
         # C1: survive approve/deny checkpoint resume.
         "evicted_paths": sorted(state.evicted_paths),
@@ -143,6 +182,11 @@ def deserialize_state(data: dict[str, Any]) -> TurnState:
         volatile_context=str(data.get("volatile_context") or ""),
         writes_preapproved=bool(data.get("writes_preapproved", False)),
         exec_preapproved=bool(data.get("exec_preapproved", False)),
+        saw_external=bool(data.get("saw_external", False)),
+        window_taint=str(data.get("window_taint") or "user"),
+        last_external_tool=str(data.get("last_external_tool") or ""),
+        pinned_policy_version=str(data.get("pinned_policy_version") or ""),
+        s1_snapshots=_snapshot_load(data.get("s1_snapshots")),
         read_registry=deserialize_read_registry(data.get("read_registry")),
         evicted_paths={
             str(p) for p in (data.get("evicted_paths") or []) if str(p).strip()

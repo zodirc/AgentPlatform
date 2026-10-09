@@ -579,6 +579,56 @@ class AgentEngine:
         )
         return self._tools_payload(scoped)
 
+    async def resume_after_tool_approval(self, state: TurnState, approval: Any) -> str | None:
+        """Run the parked tool with the grant, then continue the loop."""
+        pending = dict(self.pending_approval or {})
+        self.pending_approval = None
+        tool_name = str(pending.get("tool_name") or "")
+        tool_call_id = str(pending.get("tool_call_id") or "")
+        arguments = pending.get("arguments") if isinstance(pending.get("arguments"), dict) else {}
+        if not tool_name or not tool_call_id:
+            return await self.run(state)
+        result = await self._executor.run(
+            tool_name=tool_name,
+            tool_call_id=tool_call_id,
+            arguments=arguments,
+            state=state,
+            approval=approval,
+        )
+        if isinstance(result, dict) and result.get("status") == "approval_required":
+            self.pending_approval = {
+                "tool_call_id": str(result.get("child_tool_call_id") or tool_call_id),
+                "tool_name": str(result.get("child_tool_name") or tool_name),
+                "arguments": result.get("child_arguments") or arguments,
+                "step_index": pending.get("step_index"),
+                "args_hash": result.get("args_hash") or pending.get("args_hash"),
+                "policy_version": result.get("policy_version") or pending.get("policy_version"),
+                "expires_at": result.get("expires_at") or pending.get("expires_at"),
+                "window_taint": result.get("window_taint") or pending.get("window_taint"),
+                "sink_class": result.get("sink_class") or "",
+                "approval_id": result.get("approval_id") or pending.get("approval_id"),
+                "origin": result.get("origin") or pending.get("origin") or "",
+                "parent_tool_call_id": pending.get("parent_tool_call_id") or "",
+                "parent_arguments": pending.get("parent_arguments") or {},
+            }
+            return "waiting_approval"
+        model_result = dict(result) if isinstance(result, dict) else {"result": result}
+        taint = model_result.pop("_taint", None)
+        is_error = bool(model_result.get("error")) or model_result.get("status") == "error"
+        state.messages.append(
+            tool_result_message(
+                tool_call_id,
+                json.dumps(model_result, ensure_ascii=False),
+                is_error=is_error,
+                taint=str(taint) if taint else None,
+            )
+        )
+        if taint:
+            from app.policy.taint import raise_window
+
+            raise_window(state, str(taint))
+        return await self.run(state)
+
     async def run(self, state: TurnState) -> str | None:
         """执行 while 循环直至终稿、取消、失败或 ``waiting_approval``。
 
@@ -1582,13 +1632,35 @@ class AgentEngine:
             return "CANCELLED"
 
         if result.get("status") == "approval_required":
+            origin = str(result.get("origin") or "")
+            if origin.startswith("child/"):
+                child_args = result.get("child_arguments") if isinstance(result.get("child_arguments"), dict) else {}
+                self.pending_approval = {
+                    "approval_id": result.get("approval_id"),
+                    "tool_call_id": str(result.get("child_tool_call_id") or tool_call_id),
+                    "tool_name": str(result.get("child_tool_name") or tool_name),
+                    "arguments": child_args,
+                    "step_index": step_index,
+                    "args_hash": result.get("args_hash"),
+                    "policy_version": result.get("policy_version"),
+                    "expires_at": result.get("expires_at"),
+                    "window_taint": str(result.get("window_taint") or getattr(state, "window_taint", "") or ""),
+                    "sink_class": str(result.get("sink_class") or ""),
+                    "origin": origin,
+                    "parent_tool_call_id": tool_call_id,
+                    "parent_arguments": arguments if isinstance(arguments, dict) else {},
+                }
+                return "waiting_approval"
+            from app.policy.snapshot import canonicalize_arguments
+
+            card_args = canonicalize_arguments(arguments if isinstance(arguments, dict) else {})
             approval_payload: dict[str, Any] = {
                 "tool_call_id": tool_call_id,
                 "tool_name": tool_name,
-                "arguments": arguments,
+                "arguments": card_args,
             }
             if tool_name == "write_file":
-                path = str(arguments.get("path", ""))
+                path = str(card_args.get("path", ""))
                 old_text = ""
                 if path:
                     try:
@@ -1603,22 +1675,60 @@ class AgentEngine:
                         pass
                 approval_payload["path"] = path
                 approval_payload["old_text"] = old_text
-                approval_payload["new_text"] = str(arguments.get("content", ""))
+                approval_payload["new_text"] = str(card_args.get("content", arguments.get("content", "")))
             elif tool_name == "edit_file":
                 # Span replace — surface old/new for UI unified diff (not whole file).
-                approval_payload["path"] = str(arguments.get("path", ""))
+                approval_payload["path"] = str(card_args.get("path", ""))
                 approval_payload["old_text"] = str(arguments.get("old_text", ""))
                 approval_payload["new_text"] = str(arguments.get("new_text", ""))
+            import uuid
+
+            from app.policy.approval import POLICY_VERSION, canonical_args_hash
+            from app.settings import settings as runtime_settings
+
+            approved_args = card_args
+            approval_id = uuid.uuid4().hex
+            timeout_s = float(getattr(runtime_settings, "approval_timeout_seconds", 600) or 600)
+            approval_payload["approval_id"] = approval_id
+            approval_payload["args_hash"] = canonical_args_hash(approved_args)
+            approval_payload["policy_version"] = str(
+                getattr(state, "pinned_policy_version", "") or POLICY_VERSION
+            )
+            approval_payload["expires_at"] = time.time() + timeout_s
+            try:
+                from app.observability.metrics import metrics
+
+                metrics.inc("approval_requested_total", tool=tool_name)
+            except Exception:
+                pass
+            approval_payload["window_taint"] = str(
+                result.get("window_taint") or getattr(state, "window_taint", "user") or "user"
+            )
+            approval_payload["sink_class"] = str(result.get("sink_class") or "")
+            approval_payload["external_source"] = str(
+                result.get("external_source") or getattr(state, "last_external_tool", "") or ""
+            )
+            if tool_name == "http_fetch":
+                from urllib.parse import urlparse
+
+                parsed = urlparse(str((arguments or {}).get("url") or ""))
+                approval_payload["host"] = parsed.hostname or ""
+                approval_payload["method"] = str((arguments or {}).get("method") or "GET").upper()
             await self._write_event(
                 event_type="approval.requested",
                 payload=approval_payload,
                 step_index=step_index,
             )
             self.pending_approval = {
+                "approval_id": approval_id,
                 "tool_call_id": tool_call_id,
                 "tool_name": tool_name,
-                "arguments": arguments,
+                "arguments": approved_args,
                 "step_index": step_index,
+                "args_hash": approval_payload["args_hash"],
+                "policy_version": approval_payload["policy_version"],
+                "expires_at": approval_payload["expires_at"],
+                "window_taint": approval_payload["window_taint"],
             }
             return "waiting_approval"
 
@@ -1859,6 +1969,9 @@ class AgentEngine:
             status=tool_status,
             summary=summary,
         )
+        quarantine_id = result.get("quarantine_id") if isinstance(result, dict) else None
+        if isinstance(quarantine_id, str) and quarantine_id:
+            completed_payload["quarantine_id"] = quarantine_id
         # CTX-9: light read coverage fields (no full content on the bus).
         if tool_name == "read_file" and isinstance(result, dict) and not result.get("error"):
             content = result.get("content")
@@ -2029,13 +2142,27 @@ class AgentEngine:
                 self._volatile_context or ""
             )
         else:
+            taint = None
+            if isinstance(model_result, dict):
+                taint = model_result.pop("_taint", None)
+            if not taint:
+                from app.policy.matrix import declared_class
+
+                _sink, declared = declared_class(tool_name)
+                if declared in {"system", "user", "workspace", "external"}:
+                    taint = declared
             state.messages.append(
                 tool_result_message(
                     tool_call_id,
                     json.dumps(model_result, ensure_ascii=False),
                     is_error=is_error,
+                    taint=str(taint) if taint else None,
                 )
             )
+            if taint:
+                from app.policy.taint import raise_window
+
+                raise_window(state, str(taint))
         if tool_name == "stub_echo":
             return "TERMINATE"
         # Planning phase: after a proposed checklist, stop — wait for「按此执行」(docs/25).

@@ -14,14 +14,30 @@ from app.controller.session_context import load_session_owner_user_id
 from app.db.pool import get_pool
 
 try:
-    from agent_contracts.command_allowlist import command_matches_prefix
+    from agent_contracts.command_allowlist import command_argv, command_matches_prefix
 except ImportError:  # pragma: no cover - stale venv/image still on older agent-contracts
+    import shlex
+
+    _SHELL_META = frozenset(";|&`$<>(){}!\n\r")
+
+    def command_argv(command: str) -> list[str] | None:
+        raw = command or ""
+        if not raw.strip() or any(ch in raw for ch in "\n\r"):
+            return None
+        try:
+            argv = shlex.split(raw, posix=True)
+        except ValueError:
+            return None
+        if not argv or any(any(ch in token for ch in _SHELL_META) for token in argv):
+            return None
+        return argv
+
     def command_matches_prefix(command: str, prefix: str) -> bool:
-        cmd = " ".join((command or "").replace("\n", " ").replace("\t", " ").split())
-        pre = " ".join((prefix or "").replace("\n", " ").replace("\t", " ").split())
-        if not pre or not cmd:
+        cmd = command_argv(command)
+        pre = command_argv(prefix)
+        if not cmd or not pre or len(cmd) < len(pre):
             return False
-        return cmd == pre or cmd.startswith(pre + " ")
+        return cmd[: len(pre)] == pre
 
 
 async def command_is_allowlisted(state: Any, arguments: dict[str, Any] | None) -> bool:
@@ -50,13 +66,29 @@ async def command_is_allowlisted(state: Any, arguments: dict[str, Any] | None) -
         if owner is None:
             return False
         pool = await get_pool()
-        rows = await pool.fetch(
-            """
-            SELECT prefix FROM command_allow_prefixes
-            WHERE owner_user_id = $1
-            """,
-            UUID(str(owner)),
-        )
+        from app.tenant_context import current_work_id
+
+        work_id = current_work_id()
+        try:
+            rows = await pool.fetch(
+                """
+                SELECT prefix FROM command_allow_prefixes
+                WHERE owner_user_id = $1
+                  AND (work_id IS NULL OR work_id = $2)
+                """,
+                UUID(str(owner)),
+                work_id,
+            )
+        except Exception as exc:
+            if "work_id" not in str(exc):
+                return False
+            rows = await pool.fetch(
+                """
+                SELECT prefix FROM command_allow_prefixes
+                WHERE owner_user_id = $1
+                """,
+                UUID(str(owner)),
+            )
     except Exception:
         return False
     for row in rows:

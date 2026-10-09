@@ -52,7 +52,8 @@ async def run_command(command: str, turn_id=None, **_kwargs: Any) -> dict[str, A
     )
     from app.structural.test_summary import attach_test_summary_for_run_command
     from app.tenant_context import current_ops_eval
-    from app.tools.core.shell import run_shell_command
+    from app.tools.command_allowlist import command_argv
+    from app.tools.core.shell import run_argv_command, run_shell_command
     from app.tools.core.swe_solve_env import load_swe_instance_marker, maybe_run_swe_eval_argv
 
     pager = try_parse_pager_command(command)
@@ -128,12 +129,24 @@ async def run_command(command: str, turn_id=None, **_kwargs: Any) -> dict[str, A
 
     check_cancel = _make_cancel_checker(turn_id) if turn_id is not None else None
 
-    result = await run_shell_command(
-        command=command,
-        cwd=root,
-        timeout_s=settings.tool_default_timeout_seconds,
-        check_cancel=check_cancel,
-    )
+    # Simple argv runs without a shell. Shell syntax only reaches here after
+    # approval (the allow list rejects it) and stays inside the sandbox.
+    argv = command_argv(command)
+    if argv is not None:
+        result = await run_argv_command(
+            argv=argv,
+            cwd=root,
+            timeout_s=settings.tool_default_timeout_seconds,
+            display_command=command,
+            check_cancel=check_cancel,
+        )
+    else:
+        result = await run_shell_command(
+            command=command,
+            cwd=root,
+            timeout_s=settings.tool_default_timeout_seconds,
+            check_cancel=check_cancel,
+        )
     # Channel ②: after successful command, budgeted mtime+size light scan (§3.2).
     try:
         if int(result.get("exit_code") or 1) == 0:

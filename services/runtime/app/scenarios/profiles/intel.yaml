@@ -37,3 +37,11 @@ generation:
   temperature: 0.3
 plan_suggest:
   threshold: 4
+security:
+  version: intel-1
+  mode: observe
+  paths:
+    - .
+  memory:
+    workspace: work
+    external: deny

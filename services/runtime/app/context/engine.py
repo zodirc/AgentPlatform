@@ -8,7 +8,7 @@ volatile 前缀合并，按 ``CompactionPolicy`` 的 fill 档位（默认 0.80 /
 依次执行 read 折叠、tool 结果截断、microcompact、collapse、snip、autocompact，
 并输出 provider 可消费的 message 列表。
 
-``ToolExecutor`` 负责单工具 dispatch：审批 sticky、schema 校验、超时与 handler 调用。
+``ToolExecutor`` 负责单工具 dispatch：审批核对、schema 校验、超时与 handler 调用。
 
 模块级 ``estimate_*`` 函数供预算报表与 observability 复用同一 token 启发式。
 
@@ -33,11 +33,7 @@ from app.context.policy import CompactionPolicy
 from app.context.project import build_runtime_context, load_project_context
 from app.context.summary import structured_summary_from_messages
 from app.engine.state import TurnState
-from app.tools.registry import (
-    EXEC_APPROVAL_STICKY_TOOLS,
-    ToolSpec,
-    WRITE_APPROVAL_STICKY_TOOLS,
-)
+from app.tools.registry import ToolSpec
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +47,8 @@ class ToolExecutor:
     """工具注册表上的 sync/async 执行器；封装审批门、校验与 handler 调用。
 
     English: Dispatches registered tool handlers with approval gates, JSON Schema
-    validation, timeouts, and ops_eval / sticky-write shortcuts.
+    validation, and timeouts. A previous write approval does not cover the next
+    write. Skipping the gate requires an ``ApprovalGrant`` for this exact call.
     """
 
     def __init__(self, specs: list[ToolSpec]) -> None:
@@ -71,81 +68,124 @@ class ToolExecutor:
         tool_call_id: str,
         arguments: dict[str, Any],
         state: TurnState,
-        force_approval: bool = False,
+        approval: Any = None,
     ) -> dict[str, Any]:
         """执行单次工具调用并返回结构化结果 dict。
 
         English: Run one tool call end-to-end. Returns handler result or structured
         error / approval_required / invalid_arguments / timeout payloads.
 
-        审批逻辑：未知工具直接 error；需审批时检查 ops_eval、同 Turn sticky
-        （writes_preapproved / exec_preapproved）、run_command allowlist；否则
-        返回 ``approval_required``。通过后可选 schema 校验，再 ``wait_for`` handler。
+        审批逻辑：未知工具直接 error。需要审批时，只有与本次调用匹配的
+        ``ApprovalGrant``（工具名、call id、参数哈希、策略版本）可以跳过人工门。
+        一次写审批不覆盖后续写。``run_command`` 还可命中 argv 允许名单。
+        子代理命中审批门时不挂起父 Turn，返回「需要父代理执行」。
 
         参数:
             tool_name: 注册工具名。
             tool_call_id: 与 assistant tool_use 关联的 id（审批 payload 用）。
             arguments: 模型给出的 JSON 参数。
             state: 当前 Turn 状态（传 turn_id/run_id 等给 handler）。
-            force_approval: True 时跳过人工审批门（checkpoint 恢复等路径）。
+            approval: 恢复执行时出示的 ``ApprovalGrant``；不匹配则重新要求审批。
 
         返回:
             工具 handler 返回值，或 error/timeout/approval_required/invalid_arguments。
         """
+        from app.policy.approval import grant_matches
+        from app.policy.audit import record_decision
+        from app.policy.gate import authorize
+        from app.policy.taint import (
+            bind_window_external,
+            bind_window_taint,
+            effective_window,
+            note_external_tool,
+            reset_window_external,
+            reset_window_taint,
+        )
+
         spec = self._specs.get(tool_name)
         if spec is None:
             return {"error": f"Tool not available: {tool_name}"}
-        if spec.requires_approval and not force_approval:
-            # Ops L1 / official bench Turns are unattended — never block on human approve.
-            if bool(getattr(state, "ops_eval", False)):
-                pass
-            else:
-                # Same-Turn sticky: one write approval covers further file mutations.
-                # Shell: ops_eval exec_preapproved, or a saved command-prefix allow list.
-                write_sticky = bool(getattr(state, "writes_preapproved", False))
-                exec_sticky = bool(getattr(state, "exec_preapproved", False))
-                if write_sticky and tool_name in WRITE_APPROVAL_STICKY_TOOLS:
-                    pass
-                elif exec_sticky and tool_name in EXEC_APPROVAL_STICKY_TOOLS:
-                    pass
-                elif tool_name == "run_command":
-                    from app.tools.command_allowlist import command_is_allowlisted
+        note_external_tool(state, tool_name)
+        raw_args = arguments if isinstance(arguments, dict) else {}
+        from app.policy.snapshot import canonicalize_arguments
 
-                    if await command_is_allowlisted(state, arguments):
-                        pass
-                    else:
-                        return {
-                            "status": "approval_required",
-                            "tool_call_id": tool_call_id,
-                            "tool_name": tool_name,
-                        }
-                else:
-                    return {
-                        "status": "approval_required",
-                        "tool_call_id": tool_call_id,
-                        "tool_name": tool_name,
-                    }
+        call_args = canonicalize_arguments(raw_args)
+        if tool_name == "http_fetch":
+            from app.policy.credentials import strip_model_secrets
+
+            call_args = strip_model_secrets(call_args)
+            raw_args = strip_model_secrets(raw_args)
 
         from app.settings import settings
         from app.tools.validate import validate_tool_arguments
 
-        if settings.tool_schema_validate:
+        # Schema is mandatory. The switch is honored only in the test tier.
+        tier = str(getattr(settings, "deployment_tier", "dev") or "dev").strip().lower()
+        validate_schema = True if tier != "test" else bool(settings.tool_schema_validate)
+        if validate_schema:
             invalid = validate_tool_arguments(
                 tool_name=tool_name,
-                arguments=arguments,
+                arguments=call_args,
                 parameters=spec.parameters,
             )
             if invalid is not None:
                 from app.observability.metrics import record_tool_misuse
 
                 record_tool_misuse(kind="invalid_arguments", tool_name=tool_name)
+                await record_decision(
+                    state=state,
+                    tool_name=tool_name,
+                    arguments=call_args,
+                    decision="deny",
+                    reason="invalid_arguments",
+                    sink_class=str(getattr(spec, "sink_class", "") or ""),
+                    window_taint=effective_window(state),
+                )
                 return invalid
 
+        granted = grant_matches(
+            approval,
+            tool_name=tool_name,
+            tool_call_id=tool_call_id,
+            arguments=call_args,
+        )
+        blocked = await authorize(
+            spec=spec,
+            state=state,
+            tool_name=tool_name,
+            tool_call_id=tool_call_id,
+            arguments=call_args,
+            granted=granted,
+        )
+        if blocked is not None:
+            await record_decision(
+                state=state,
+                tool_name=tool_name,
+                arguments=call_args,
+                decision="deny" if blocked.get("status") == "error" else "require_approval",
+                reason=str(blocked.get("summary") or blocked.get("error") or ""),
+                sink_class=str(blocked.get("sink_class") or ""),
+                window_taint=str(blocked.get("window_taint") or effective_window(state)),
+            )
+            return blocked
+        await record_decision(
+            state=state,
+            tool_name=tool_name,
+            arguments=call_args,
+            decision="allow",
+            reason="matrix allow",
+            sink_class=str(getattr(spec, "sink_class", "") or ""),
+            window_taint=effective_window(state),
+        )
+
         timeout_s = spec.timeout_s
+        window = effective_window(state)
+        external_token = bind_window_external(window == "external")
+        taint_token = bind_window_taint(window)
         try:
             result = await asyncio.wait_for(
                 spec.handler(
-                    **arguments,
+                    **raw_args,
                     turn_id=state.turn_id,
                     run_id=state.run_id,
                     session_id=state.session_id,
@@ -155,6 +195,10 @@ class ToolExecutor:
                 ),
                 timeout=timeout_s,
             )
+            if isinstance(result, dict):
+                from app.policy.ingress import apply_ingress
+
+                result = await apply_ingress(tool_name, result, state)
             return result
         except asyncio.TimeoutError:
             return {
@@ -172,6 +216,9 @@ class ToolExecutor:
             }
         except Exception as exc:
             return {"error": str(exc)}
+        finally:
+            reset_window_taint(taint_token)
+            reset_window_external(external_token)
 
 
 @dataclass
@@ -349,16 +396,21 @@ class ContextEngine:
                 if cached:
                     summary = summary_from_cache_record(cached)
                     if summary.narrative or summary.task:
+                        from app.policy.taint import stamp_inherited
+
                         messages = [
-                            {
-                                "role": "user",
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": summary.to_autocompact_text(),
-                                    }
-                                ],
-                            }
+                            stamp_inherited(
+                                {
+                                    "role": "user",
+                                    "content": [
+                                        {
+                                            "type": "text",
+                                            "text": summary.to_autocompact_text(),
+                                        }
+                                    ],
+                                },
+                                list(messages),
+                            )
                         ]
                         used_cache = True
                         trace = [t for t in trace if t.get("detail") != "autocompact_pending"]
@@ -381,12 +433,21 @@ class ContextEngine:
                             scenario_id=state.scenario_id,
                             for_compact=True,
                         )
+                    from app.policy.taint import stamp_inherited
+
+                    prior = list(state.messages)
                     messages = [
-                        await summarize_messages_with_gateway(compact_gateway, state.messages)
+                        stamp_inherited(
+                            await summarize_messages_with_gateway(compact_gateway, state.messages),
+                            prior,
+                        )
                     ]
                     detail = "autocompact_llm"
                 else:
-                    messages = [_summarize_messages(list(state.messages))]
+                    from app.policy.taint import stamp_inherited
+
+                    prior = list(state.messages)
+                    messages = [stamp_inherited(_summarize_messages(prior), prior)]
                     detail = "autocompact_deterministic"
                 trace = [t for t in trace if t.get("detail") != "autocompact_pending"]
                 trace.append({"strategy": "compact", "detail": detail})
@@ -408,6 +469,9 @@ class ContextEngine:
             envelope.messages = messages
             envelope.compaction_trace = trace
 
+        from app.policy.taint import raise_window, window_taint_of
+
+        raise_window(state, window_taint_of(envelope.messages))
         envelope.assemble_ms = (time.monotonic() - started) * 1000
         self._finalize_envelope(envelope, state.turn_id)
         result = self._materialize_messages(envelope)
@@ -428,7 +492,9 @@ class ContextEngine:
             project_context=envelope.project_context,
             volatile_context=envelope.volatile_context,
         )
-        out.extend(envelope.messages)
+        from app.policy.taint import strip_taint
+
+        out.extend(strip_taint(message) for message in envelope.messages)
         runtime_msg = _runtime_user_message(envelope.runtime_context)
         if runtime_msg is not None:
             out.append(runtime_msg)
@@ -1342,19 +1408,24 @@ def _microcompact_tool_results(messages: list[dict[str, Any]]) -> tuple[list[dic
                 out.extend(run)
             else:
                 folded += len(run) - 1
+                from app.policy.taint import stamp_inherited
+
                 out.append(
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": (
-                                    f"[microcompact: folded {len(run)} tool results; "
-                                    "re-read with tools if needed]"
-                                ),
-                            }
-                        ],
-                    }
+                    stamp_inherited(
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        f"[microcompact: folded {len(run)} tool results; "
+                                        "re-read with tools if needed]"
+                                    ),
+                                }
+                            ],
+                        },
+                        run,
+                    )
                 )
         else:
             out.append(msg)
@@ -1490,10 +1561,15 @@ def _collapse_tool_history(
     pointer_text = "".join(parts)
     if pinned:
         pointer_text = f"{pointer_text} {pinned}"
-    pointer = {
-        "role": "user",
-        "content": [{"type": "text", "text": pointer_text}],
-    }
+    from app.policy.taint import stamp_inherited
+
+    pointer = stamp_inherited(
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": pointer_text}],
+        },
+        middle,
+    )
     return [*head, pointer, *tail]
 
 
@@ -1524,7 +1600,12 @@ def _summarize_messages(messages: list[dict[str, Any]]) -> dict[str, Any]:
         summary.narrative = summary.narrative[:400]
     if not summary.narrative:
         summary.narrative = f"{len(messages)} earlier messages compacted"
-    return {
-        "role": "user",
-        "content": [{"type": "text", "text": summary.to_autocompact_text()}],
-    }
+    from app.policy.taint import stamp_inherited
+
+    return stamp_inherited(
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": summary.to_autocompact_text()}],
+        },
+        messages,
+    )

@@ -49,3 +49,18 @@ subagent_prompt_suffix: >-
 hooks:
   volatile_composer: collab_orchestrator
   step_checkpoint: collab_gap_hint
+security:
+  version: collab-1
+  mode: observe
+  paths:
+    - .
+  memory:
+    workspace: work
+    external: approval
+  commands:
+    - pytest
+    - python
+    - python3
+    - git
+  network:
+    hosts: []

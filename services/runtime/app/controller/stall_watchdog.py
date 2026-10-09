@@ -114,8 +114,29 @@ async def scan_stalled_runs() -> None:
                 finalized = False
             if finalized:
                 continue
-        # Expected pause: approval gate or parent waiting on child join.
-        if str(row["turn_status"] or "") in {"waiting_approval", "waiting_child"}:
+        # A child join may wait. An approval that outlives the timeout is a deny.
+        if str(row["turn_status"] or "") == "waiting_child":
+            continue
+        if str(row["turn_status"] or "") == "waiting_approval":
+            timeout_s = float(getattr(settings, "approval_timeout_seconds", 600) or 600)
+            approval_cutoff = datetime.now(timezone.utc) - timedelta(seconds=timeout_s)
+            if last_ts is not None and last_ts < approval_cutoff:
+                from uuid import UUID
+
+                from app.controller.turn_controller import _fail_stuck_approval
+
+                try:
+                    await _fail_stuck_approval(
+                        UUID(str(row["turn_id"])),
+                        UUID(str(row["run_id"])),
+                        UUID(str(row["trace_id"])),
+                        termination_reason="approval_timeout",
+                        message="approval timed out and was denied",
+                    )
+                except Exception:
+                    logger.exception(
+                        "approval timeout failed turn_id=%s", row["turn_id"]
+                    )
             continue
         if last_ts is None or last_ts >= cutoff:
             continue

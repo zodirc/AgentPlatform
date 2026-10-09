@@ -1295,4 +1295,26 @@ def build_registry() -> ToolRegistry:
             timeout_s=8.0,
         )
     )
+    from app.tools.core.http_fetch import http_fetch
+
+    registry.register(
+        ToolSpec(
+            name="http_fetch",
+            description=(
+                "Fetch one http(s) URL. Default GET with no body. Hosts must be on the "
+                "egress allowlist. Do not put tokens in arguments."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "method": {"type": "string", "default": "GET"},
+                    "body": {"type": "string"},
+                },
+                "required": ["url"],
+            },
+            handler=http_fetch,
+            timeout_s=20.0,
+        )
+    )
     return registry

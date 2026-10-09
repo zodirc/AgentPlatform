@@ -58,3 +58,11 @@ hooks:
   compact_bookmark: writing_focus
   post_turn: writing_continuity
   empty_transcript: writing_release_ponds
+security:
+  version: writing-1
+  mode: observe
+  paths:
+    - .
+  memory:
+    workspace: work
+    external: approval

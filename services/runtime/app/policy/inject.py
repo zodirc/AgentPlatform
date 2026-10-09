@@ -105,8 +105,11 @@ def inject_tool_result(
     return out
 
 
-def remember_text_blocked(*, trust: str = "") -> str | None:
-    """Reject only when the caller explicitly labels the body as retrieved."""
-    if (trust or "").strip().lower() == "retrieved":
-        return "retrieved text cannot be stored in remember"
+def remember_text_blocked(*, window_external: bool = False) -> str | None:
+    """Block a memory write when this turn already saw retrieval or external output.
+
+    The model's ``trust`` argument is not an input. Callers pass the runtime flag.
+    """
+    if window_external:
+        return "external or retrieved content cannot be stored in remember"
     return None

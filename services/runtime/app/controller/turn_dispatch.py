@@ -148,10 +148,24 @@ async def try_claim_and_start(run_id: UUID | None = None) -> bool:
         model_mode=model_mode if ops_eval else None,
         model_override=model_override if ops_eval else None,
         ops_eval=ops_eval,
+        clear_context=await _turn_clear_context(turn_id),
         already_claimed=True,
         reject_when_full=False,
     )
     return True
+
+
+async def _turn_clear_context(turn_id: UUID) -> bool:
+    """True when the user asked this turn to drop prior taint. Missing column is false."""
+    try:
+        pool = await get_pool()
+        flag = await pool.fetchval(
+            "SELECT clear_context FROM turns WHERE id = $1",
+            turn_id,
+        )
+    except Exception:
+        return False
+    return bool(flag)
 
 
 def _spawn_claim(run_id: UUID | None) -> None:

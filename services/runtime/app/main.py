@@ -43,6 +43,7 @@ from app.settings import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/internal/commands", tags=["commands"])
+quarantine_router = APIRouter(prefix="/internal/quarantine", tags=["quarantine"])
 
 
 async def _lsp_reap_loop() -> None:
@@ -108,6 +109,47 @@ def verify_internal_token(x_internal_token: str = Header(...)) -> None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal token")
 
 
+@quarantine_router.get("/{item_id}/meta")
+async def quarantine_meta(
+    item_id: str,
+    _: None = Depends(verify_internal_token),
+):
+    from app.policy.quarantine import meta
+
+    item = meta(item_id)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    return {key: item.get(key) for key in ("id", "turn_id", "tool_name", "created_at", "expires_at", "released")}
+
+
+@quarantine_router.get("/{item_id}")
+async def quarantine_view(
+    item_id: str,
+    _: None = Depends(verify_internal_token),
+):
+    """Decrypt one isolated body. The access is recorded on the item."""
+    from app.policy.quarantine import read
+
+    body = read(item_id, actor="internal")
+    if body is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    return {"id": item_id, "body": body}
+
+
+@quarantine_router.post("/{item_id}/release")
+async def quarantine_release(
+    item_id: str,
+    _: None = Depends(verify_internal_token),
+):
+    """Return the isolated body to the caller, then delete the ciphertext."""
+    from app.policy.quarantine import release
+
+    item = release(item_id, actor="internal")
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    return item
+
+
 @router.post("/start-turn", status_code=status.HTTP_202_ACCEPTED)
 async def start_turn_command(
     body: StartTurnBody,
@@ -142,6 +184,7 @@ async def start_turn_command(
         model_mode=body.model_mode if body.ops_eval else None,
         model_override=override_dict,
         ops_eval=bool(body.ops_eval),
+        clear_context=bool(body.clear_context),
     )
     return {"accepted": True, "turn_id": str(body.turn_id)}
 
@@ -178,6 +221,7 @@ async def approve_tool_call_command(
         run_id=body.run_id,
         tool_call_id=body.tool_call_id,
         trace_id=body.trace_id,
+        approver_user_id=body.approver_user_id,
     )
     return {"accepted": True, "turn_id": str(body.turn_id)}
 
@@ -1077,6 +1121,9 @@ async def lifespan(app):
     # Agent workspace AST watch (docs/core/architecture.md · ast-indexer).
     schedule_ast_index_watch()
     lsp_reap = asyncio.create_task(_lsp_reap_loop(), name="lsp-idle-reap")
+    from app.tools.core.sandbox import start_escape_probe_loop, stop_escape_probe_loop
+
+    start_escape_probe_loop()
     try:
         yield
     finally:
@@ -1110,6 +1157,7 @@ async def lifespan(app):
             await watchdog
         except asyncio.CancelledError:
             pass
+        await stop_escape_probe_loop()
 
         # --- 关闭：Embedder 缓存与 DB 连接池 ---
         reset_embedder_cache()
@@ -1138,6 +1186,7 @@ def create_app():
     instrument_fastapi(app, enabled=settings.otel_enabled)
     app.include_router(router)
     app.include_router(workspace_router)
+    app.include_router(quarantine_router)
     from app.writing.signals.ops_http import router as writing_lab_router
 
     app.include_router(writing_lab_router)

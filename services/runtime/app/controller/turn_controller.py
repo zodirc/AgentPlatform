@@ -466,6 +466,7 @@ async def start_turn(
     model_mode: str | None = None,
     model_override: dict | None = None,
     ops_eval: bool = False,
+    clear_context: bool = False,
     already_claimed: bool = False,
     reject_when_full: bool = True,
 ) -> None:
@@ -557,6 +558,8 @@ async def start_turn(
     from app.model.turn_override import bind_turn_model, reset_turn_model
     from app.tenant_context import bind_tenant_context, ensure_work_root_exists, reset_tenant_context
 
+    if ops_eval:
+        work_root = bind_eval_work_root(work_root, str(work_id or ""))
     tokens = bind_tenant_context(
         work_root=work_root,
         work_id=work_id,
@@ -577,6 +580,7 @@ async def start_turn(
             trace_id=trace_id,
             plan_phase=plan_phase,
             ops_eval=bool(ops_eval),
+            clear_context=bool(clear_context),
         )
     except Exception as exc:
         logger.exception("start_turn failed turn_id=%s", turn_id)
@@ -673,6 +677,34 @@ async def _resolve_pending(turn_id: UUID, run_id: UUID) -> PendingTurn | None:
     return await _pending_from_checkpoint(run_id)
 
 
+def bind_eval_work_root(work_root: str, work_id: str) -> str:
+    """Bind an ops_eval turn to its own directory.
+
+    ``eval_work_root`` wins. A session that already has a directory other than
+    the shared workspace root keeps that checkout. A turn pointed at the shared
+    root gets ``data_dir/eval-works/<work_id>`` so it does not write the user's
+    interactive work.
+    """
+    from pathlib import Path
+
+    from app.settings import settings as runtime_settings
+
+    configured = str(getattr(runtime_settings, "eval_work_root", "") or "").strip()
+    if configured:
+        Path(configured).mkdir(parents=True, exist_ok=True)
+        return configured
+    shared = Path(str(runtime_settings.workspace_root)).resolve()
+    try:
+        current = Path(work_root).resolve() if work_root else shared
+    except OSError:
+        current = shared
+    if current != shared:
+        return str(current)
+    isolated = Path(runtime_settings.data_dir) / "eval-works" / (work_id or "default")
+    isolated.mkdir(parents=True, exist_ok=True)
+    return str(isolated)
+
+
 async def _with_session_tenant(session_id: UUID, coro, *, ops_eval: bool = False):
     """为审批/补丁续跑重绑与 StartTurn 相同的 TenantContext（Work 根）。
 
@@ -687,6 +719,8 @@ async def _with_session_tenant(session_id: UUID, coro, *, ops_eval: bool = False
     from app.tenant_context import bind_tenant_context, ensure_work_root_exists, reset_tenant_context
 
     work_id, work_root, owner_user_id, visibility_seed = await load_session_work(session_id)
+    if ops_eval:
+        work_root = bind_eval_work_root(work_root, str(work_id or ""))
     tokens = bind_tenant_context(
         work_root=work_root,
         work_id=work_id,
@@ -721,6 +755,7 @@ async def approve_tool_call(
     run_id: UUID,
     tool_call_id: str,
     trace_id: UUID,
+    approver_user_id: str = "",
 ) -> None:
     """批准挂起工具并在同一 ``run_id`` 上续跑（B3 防双开）。
 
@@ -771,6 +806,7 @@ async def approve_tool_call(
                     trace_id=trace_id,
                     approved=True,
                     pending=pending,
+                    approver_user_id=approver_user_id,
                 )
             finally:
                 _track_turn_finished(turn_id)
@@ -1417,6 +1453,7 @@ async def _run_turn(
     trace_id: UUID,
     plan_phase: str | None = None,
     ops_eval: bool = False,
+    clear_context: bool = False,
 ) -> None:
     """单次 Turn 主路径：Intake → ``turn.accepted`` →（本地短接 | Engine）→ 终态。
 
@@ -1451,6 +1488,30 @@ async def _run_turn(
         opening = resolve(profile.hooks.get("empty_transcript"))
         if opening is not None:
             opening(message or "")
+    if clear_context and prior:
+        from app.policy.audit import record_decision
+
+        prior = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "（用户已清理上下文。此前内容不再进入本轮。）",
+                    }
+                ],
+                "_taint": "user",
+            }
+        ]
+        await record_decision(
+            state=type("S", (), {"turn_id": turn_id, "window_taint": "user"})(),
+            tool_name="clear_context",
+            arguments={},
+            decision="allow",
+            reason="user cleared context",
+            sink_class="S0",
+            window_taint="user",
+        )
     if prior:
         # 滚动会话历史：接上 prior messages；有 transcript 则不再塞薄摘要以免重复。
         compiled.messages = [*prior, *compiled.messages]
@@ -1628,6 +1689,8 @@ async def _run_turn(
             )
             return
 
+    from app.policy.approval import POLICY_VERSION
+
     state = TurnState(
         turn_id=turn_id,
         session_id=session_id,
@@ -1639,10 +1702,11 @@ async def _run_turn(
         plan_hint=compiled.metadata.get("plan_hint"),
         plan_phase=phase,
         model_mode=current_turn_model_mode(),
-        # Official L1 / Ops eval: skip human approval gates (write_file / run_command / …).
+        # Eval is a policy profile (command set, no network). It does not pre-approve tools.
         ops_eval=bool(ops_eval),
-        writes_preapproved=bool(ops_eval),
-        exec_preapproved=bool(ops_eval),
+        writes_preapproved=False,
+        exec_preapproved=False,
+        pinned_policy_version=POLICY_VERSION,
         turn_user_text=message or "",
         turn_token_budget=int((profile.generation or {}).get("turn_token_budget") or 0),
     )
@@ -1871,6 +1935,7 @@ async def _resume_after_approval(
     approved: bool,
     pending: PendingTurn,
     deny_reason: str = "user_denied",
+    approver_user_id: str = "",
 ) -> None:
     """审批决议后续跑：执行或拒绝挂起工具，再继续 ``AgentEngine``。
 
@@ -1885,9 +1950,15 @@ async def _resume_after_approval(
         deny_reason: 拒绝时写入模型可见结果的原因。
     """
     call = pending.pending_tool_call or {}
+    if approver_user_id:
+        call["approver_user_id"] = approver_user_id
     if call.get("tool_call_id") != tool_call_id:
         logger.warning("tool_call_id mismatch turn=%s expected=%s got=%s", turn_id, call.get("tool_call_id"), tool_call_id)
         return
+    expires_at = call.get("expires_at")
+    if approved and expires_at is not None and time.time() > float(expires_at):
+        approved = False
+        deny_reason = "approval_timeout"
 
     pool = await get_pool()
     write_event = await _make_write_event(
@@ -1910,6 +1981,9 @@ async def _resume_after_approval(
                 "UPDATE runs SET status = 'running', updated_at = now() WHERE id = $1",
                 run_id,
             )
+            from app.policy.approval import POLICY_VERSION, canonical_args_hash
+
+            resolved_args = arguments if isinstance(arguments, dict) else {}
             await append_event(
                 conn,
                 turn_id=turn_id,
@@ -1920,17 +1994,24 @@ async def _resume_after_approval(
                     "tool_call_id": tool_call_id,
                     "decision": "approved" if approved else "denied",
                     "reason": None if approved else deny_reason,
+                    "args_hash": canonical_args_hash(resolved_args),
+                    "policy_version": str(call.get("policy_version") or POLICY_VERSION),
                 },
                 step_index=step_index,
             )
 
-    state = pending.state
-    from app.tools.registry import WRITE_APPROVAL_STICKY_TOOLS
+    try:
+        from app.observability.metrics import metrics
 
-    if approved and tool_name in WRITE_APPROVAL_STICKY_TOOLS:
-        state.writes_preapproved = True
-    # run_command: one-shot approve does not waive later shell. Prefix allow list
-    # is persisted by the API; ops_eval still sets exec_preapproved at StartTurn.
+        outcome = "approved" if approved else ("timeout" if deny_reason == "approval_timeout" else "denied")
+        metrics.inc("approval_resolved_total", decision=outcome)
+    except Exception:
+        pass
+
+    state = pending.state
+    # One approval does not waive later writes. run_command stays one-shot too;
+    # the prefix allow list is persisted by the API. ops_eval still sets
+    # exec_preapproved at StartTurn until the eval policy profile lands.
     owner_user_id = await load_session_owner_user_id(state.session_id)
     model_config = await resolve_model_config(owner_user_id=owner_user_id)
     context_window_tokens = await resolve_context_window_tokens(
@@ -1981,14 +2062,93 @@ async def _resume_after_approval(
     )
 
     if approved:
+        from app.policy.approval import POLICY_VERSION, ApprovalGrant, canonical_args_hash
+
+        resolved_args = arguments if isinstance(arguments, dict) else {}
+        live_hash = canonical_args_hash(resolved_args)
+        stored_hash = str(call.get("args_hash") or live_hash)
+        pinned = str(getattr(state, "pinned_policy_version", "") or POLICY_VERSION)
+        stored_version = str(call.get("policy_version") or pinned)
+        grant = None
+        if stored_hash == live_hash and stored_version == pinned == POLICY_VERSION:
+            raw_expiry = call.get("expires_at")
+            grant = ApprovalGrant(
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+                args_hash=stored_hash,
+                policy_version=stored_version,
+                approval_id=str(call.get("approval_id") or ""),
+                expires_at=float(raw_expiry) if raw_expiry else None,
+                window_taint=str(call.get("window_taint") or ""),
+                approver_user_id=str(call.get("approver_user_id") or ""),
+            )
         set_event_writer(write_event)
-        result = await engine._executor.run(
-            tool_name=tool_name,
-            tool_call_id=tool_call_id,
-            arguments=arguments,
-            state=state,
-            force_approval=True,
-        )
+        origin = str(call.get("origin") or "")
+        if origin.startswith("child/"):
+            from app.tools.delegate_runner import resume_parked_child
+
+            result = await resume_parked_child(origin.split("/", 1)[1], grant)
+            if result.get("status") != "approval_required":
+                tool_name = "delegate"
+                tool_call_id = str(call.get("parent_tool_call_id") or tool_call_id)
+                parent_args = call.get("parent_arguments")
+                if isinstance(parent_args, dict):
+                    arguments = parent_args
+                    resolved_args = parent_args
+        else:
+            result = await engine._executor.run(
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+                arguments=resolved_args,
+                state=state,
+                approval=grant,
+            )
+        if isinstance(result, dict) and result.get("status") == "approval_required":
+            interrupt = {
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "arguments": resolved_args,
+                "step_index": step_index,
+                "args_hash": live_hash,
+                "policy_version": str(getattr(state, "pinned_policy_version", "") or POLICY_VERSION),
+                "approval_id": str(call.get("approval_id") or ""),
+                "expires_at": call.get("expires_at"),
+                "window_taint": str(call.get("window_taint") or ""),
+            }
+            await write_event(
+                event_type="approval.requested",
+                payload=interrupt,
+                step_index=step_index,
+            )
+            engine.pending_approval = interrupt
+            set_event_writer(None)
+            set_delegate_runtime(None)
+            await save_checkpoint(
+                run_id=run_id,
+                turn_id=turn_id,
+                state=state,
+                step_index=int(step_index or 0),
+                interrupt_payload=interrupt,
+            )
+            save(
+                turn_id,
+                PendingTurn(
+                    state=state,
+                    profile=pending.profile,
+                    tools=pending.tools,
+                    gateway=pending.gateway,
+                    trace_id=trace_id,
+                    pending_tool_call=interrupt,
+                    system_prompt=pending.system_prompt,
+                    volatile_context=pending.volatile_context,
+                ),
+            )
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE turns SET status = 'waiting_approval', updated_at = now() WHERE id = $1",
+                    turn_id,
+                )
+            return
         set_event_writer(None)
         from app.engine.child_spawn import park_spawned_child
 
