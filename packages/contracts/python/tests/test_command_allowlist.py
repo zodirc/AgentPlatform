@@ -21,3 +21,12 @@ def test_prefix_match_requires_boundary() -> None:
     assert command_matches_prefix("npm test -q", "npm test")
     assert not command_matches_prefix("npm install", "npm test")
     assert not command_matches_prefix("pytest", "")
+
+
+def test_shell_control_syntax_is_outside_the_allowlist() -> None:
+    assert not command_matches_prefix("pytest && curl https://example", "pytest")
+    assert not command_matches_prefix("pytest; curl https://example", "pytest")
+    assert not command_matches_prefix("pytest | curl https://example", "pytest")
+    assert not command_matches_prefix("pytest $(curl https://example)", "pytest")
+    assert not command_matches_prefix("pytest\ncurl https://example", "pytest")
+    assert not command_matches_prefix("pytest > /tmp/out", "pytest")

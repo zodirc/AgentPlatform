@@ -44,6 +44,8 @@ class StartTurnCommand(BaseModel):
     model_override: ModelOverride | None = None
     # When true, runtime accepts model_mode/model_override (api ops eval only).
     ops_eval: bool = False
+    # User-initiated. Drops prior transcript taint before this turn is assembled.
+    clear_context: bool = False
 
 
 class CancelTurnCommand(BaseModel):
@@ -63,6 +65,7 @@ class ApproveToolCallCommand(BaseModel):
     run_id: UUID
     tool_call_id: str = Field(min_length=1)
     trace_id: UUID
+    approver_user_id: str = ""
 
 
 class DenyToolCallCommand(BaseModel):

@@ -323,6 +323,11 @@
       "type": "string",
       "maxLength": 64,
       "description": "Writing chapter id (ch1, …) for utilization. Not the full manuscript."
+    },
+    "quarantine_id": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "Isolated body id. The raw text stays out of this event."
     }
   }
 }
