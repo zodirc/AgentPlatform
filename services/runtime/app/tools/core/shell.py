@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
+import shutil
 import signal
 import time
 from collections.abc import Awaitable, Callable, Sequence
@@ -17,6 +19,8 @@ from pathlib import Path
 from typing import Any
 
 from app.settings import settings
+
+logger = logging.getLogger(__name__)
 
 TERMINATE_GRACE_SECONDS = 0.5
 MAX_OUTPUT_CHARS = 32_000
@@ -38,12 +42,6 @@ _ENV_ALLOW_DEFAULT = frozenset(
         "TMP",
         "TEMP",
         "TZ",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "NO_PROXY",
-        "http_proxy",
-        "https_proxy",
-        "no_proxy",
         "VIRTUAL_ENV",
         "NODE_OPTIONS",
         "npm_config_registry",
@@ -78,6 +76,65 @@ async def _terminate_process(proc: asyncio.subprocess.Process, *, force: bool) -
             os.killpg(proc.pid, signal.SIGKILL)
 
 
+def _plane_refusal(display: str) -> dict[str, Any] | None:
+    """Orchestrator without a sandbox plane, or saas on a shared kernel, does not exec."""
+    from app.policy.plane import execution_refusal
+    from app.tools.core.remote_sandbox import should_use_remote_sandbox
+
+    if should_use_remote_sandbox():
+        return None
+    reason = execution_refusal()
+    if not reason:
+        return None
+    return {
+        "status": "failed",
+        "command": display,
+        "stdout": "",
+        "stderr": reason,
+        "exit_code": None,
+        "summary": reason,
+        "sandbox": "error",
+    }
+
+
+def _path_without_work_root() -> str:
+    """Host PATH with the current Work root removed. argv[0] stays a system path."""
+    raw = os.environ.get("PATH", "/usr/bin:/bin")
+    work = ""
+    try:
+        from app.tenant_context import current_work_root
+
+        work = str(Path(current_work_root()).resolve())
+    except Exception:
+        work = ""
+    kept: list[str] = []
+    for item in raw.split(":"):
+        if not item:
+            continue
+        try:
+            resolved = str(Path(item).resolve())
+        except OSError:
+            continue
+        if work and (resolved == work or resolved.startswith(work + os.sep)):
+            continue
+        kept.append(item)
+    return ":".join(kept) or "/usr/bin:/bin"
+
+
+def _resolve_argv0(argv: Sequence[str]) -> list[str]:
+    if not argv:
+        return []
+    raw = str(argv[0])
+    # An absolute or relative path is the model's choice. which() would accept it
+    # as-is, which would let a binary in another Work become argv[0].
+    if "/" in raw or raw.startswith("."):
+        return [str(item) for item in argv]
+    found = shutil.which(raw, path=_path_without_work_root())
+    if not found:
+        return [str(item) for item in argv]
+    return [found, *[str(item) for item in argv[1:]]]
+
+
 def _safe_env() -> dict[str, str]:
     """构造子进程允许的环境变量子集（deny-by-default，见 ``_ENV_ALLOW_DEFAULT``）。
 
@@ -85,7 +142,7 @@ def _safe_env() -> dict[str, str]:
         仅含白名单键的 env dict；``PATH``/``LANG`` 保证有合理默认。
     """
     env: dict[str, str] = {
-        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "PATH": _path_without_work_root(),
         "LANG": os.environ.get("LANG") or "C.UTF-8",
     }
     for key, value in os.environ.items():
@@ -155,6 +212,9 @@ async def _run_exec(
         start_new_session=True,
         preexec_fn=preexec_fn,
     )
+    from app.tools.core.sandbox import attach_sandbox_cgroup
+
+    attach_sandbox_cgroup(int(proc.pid or 0))
     return await _finish_process(
         proc,
         command=display_command,
@@ -252,6 +312,79 @@ async def _finish_process(
     return result
 
 
+async def _execute_via_egress(argv: list[str], *, display: str) -> dict[str, Any] | None:
+    """Fetch a curl/wget URL through the egress proxy. Other commands return None.
+
+    The sandbox keeps ``--unshare-net``. A command that is only an HTTP GET is
+    performed by the proxy, and the body is marked external. A blocked
+    destination never opens a socket in the sandbox.
+    """
+    from pathlib import Path as _Path
+
+    from app.policy.egress import classify_http, proxy_request
+
+    if not argv:
+        return None
+    name = _Path(str(argv[0])).name
+    if name not in {"curl", "wget"}:
+        return None
+    url = ""
+    for token in argv[1:]:
+        text = str(token)
+        if text.startswith("http://") or text.startswith("https://"):
+            url = text
+            break
+    if not url:
+        return {
+            "status": "failed",
+            "command": display,
+            "stdout": "",
+            "stderr": "networked exec must be an http(s) URL through the egress proxy",
+            "exit_code": 1,
+            "summary": "networked exec must go through the egress proxy",
+            "_taint": "external",
+            "sandbox": "egress",
+        }
+    from types import SimpleNamespace
+
+    verdict = classify_http(
+        {"url": url, "method": "GET"},
+        window_taint="external",
+        state=SimpleNamespace(turn_user_text=url, messages=[], scenario_id=""),
+    )
+    if verdict == "deny":
+        return {
+            "status": "failed",
+            "command": display,
+            "stdout": "",
+            "stderr": "destination blocked",
+            "exit_code": 1,
+            "summary": "destination blocked",
+            "_taint": "external",
+            "sandbox": "egress",
+        }
+    from urllib.parse import urlparse
+
+    from app.policy.credentials import authorization_for
+
+    headers: dict[str, str] = {}
+    token = authorization_for(urlparse(url).hostname or "")
+    if token:
+        headers["Authorization"] = token
+    response = await proxy_request("GET", url, body=None, headers=headers)
+    body = response.text[:32_000]
+    return {
+        "status": "executed",
+        "command": display,
+        "stdout": body,
+        "stderr": "",
+        "exit_code": int(response.status_code),
+        "summary": f"egress {response.status_code}",
+        "_taint": "external",
+        "sandbox": "egress",
+    }
+
+
 async def run_argv_command(
     *,
     argv: Sequence[str],
@@ -279,7 +412,10 @@ async def run_argv_command(
     from app.tools.core.sandbox import sandbox_preexec_fn, wrap_argv_for_exec
     from app.tools.core.shell_work_jail import argv_jail_violation
 
-    display = display_command or " ".join(argv)
+    display = display_command or " ".join(str(item) for item in argv)
+    refused = _plane_refusal(display)
+    if refused is not None:
+        return refused
     jail_hit = argv_jail_violation(tuple(str(a) for a in argv), cwd)
     if jail_hit:
         return {
@@ -302,6 +438,10 @@ async def run_argv_command(
             argv=argv,
         )
 
+    argv = _resolve_argv0(list(argv))
+    proxied = await _execute_via_egress(list(argv), display=display)
+    if proxied is not None:
+        return proxied
     try:
         wrapped, backend = wrap_argv_for_exec(argv=argv, cwd=cwd)
         preexec = sandbox_preexec_fn(cwd) if backend == "landlock" else None
@@ -347,7 +487,7 @@ async def run_shell_command(
         执行结果 dict；jail 违规或沙箱不可用时 ``status=failed``。
 
     说明:
-        ``backend=off`` 且禁止网络时 fail-closed，强制 bwrap ``--unshare-net``，避免裸 shell 外连。
+        ``backend=off`` 只在 ``ALLOW_UNSANDBOXED_EXEC`` 打开时出现，此时才走裸进程。
     """
     from app.tools.core.sandbox import (
         resolve_sandbox_backend,
@@ -356,6 +496,9 @@ async def run_shell_command(
     )
     from app.tools.core.shell_work_jail import shell_command_jail_violation
 
+    refused = _plane_refusal(command)
+    if refused is not None:
+        return refused
     jail_hit = shell_command_jail_violation(command, cwd)
     if jail_hit:
         return {
@@ -377,6 +520,14 @@ async def run_shell_command(
             timeout_seconds=timeout_s,
         )
 
+    from app.tools.command_allowlist import command_argv
+
+    parsed = command_argv(command)
+    if parsed:
+        proxied = await _execute_via_egress(parsed, display=command)
+        if proxied is not None:
+            return proxied
+
     try:
         backend = resolve_sandbox_backend()
     except RuntimeError as exc:
@@ -391,31 +542,22 @@ async def run_shell_command(
         }
 
     if backend == "off":
-        from app.tenant_context import sandbox_network_allowed
+        logger.warning("unsandboxed shell exec (ALLOW_UNSANDBOXED_EXEC) command=%s", command)
+        try:
+            from app.observability.metrics import metrics
+            from app.policy.audit import append_security_log
 
-        if not sandbox_network_allowed():
-            # Fail closed: unsandboxed shell would keep host egress (SWE leak ban).
-            try:
-                wrapped, backend = wrap_shell_command_for_exec(command=command, cwd=cwd)
-            except RuntimeError as exc:
-                return {
-                    "status": "failed",
-                    "command": command,
-                    "stdout": "",
-                    "stderr": str(exc),
-                    "exit_code": None,
-                    "summary": f"sandbox unavailable: {exc}",
-                    "sandbox": "error",
+            metrics.inc("unsandboxed_exec_total")
+            append_security_log(
+                {
+                    "decision": "allow",
+                    "reason": "bare exec",
+                    "tool_name": "run_command",
+                    "summary": command[:200],
                 }
-            result = await _run_exec(
-                argv=wrapped,
-                cwd=cwd,
-                timeout_s=timeout_s,
-                display_command=command,
-                check_cancel=check_cancel,
             )
-            result["sandbox"] = backend
-            return result
+        except Exception:
+            pass
         env = _safe_env()
         env["HOME"] = str(cwd)
         env["PWD"] = str(cwd)

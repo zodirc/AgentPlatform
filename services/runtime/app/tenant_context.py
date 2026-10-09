@@ -101,10 +101,8 @@ def current_ops_eval() -> bool:
 
 
 def sandbox_network_allowed() -> bool:
-    """作用：Ops deny-network 激活时返回 False。"""
-    if settings.ops_eval_deny_network and current_ops_eval():
-        return False
-    return True
+    """Shell 和执行进程不出网。需要网络的能力走具名工具，不在这里放开。"""
+    return False
 
 
 def current_tenant_context() -> TenantContext:

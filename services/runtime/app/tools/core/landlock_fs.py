@@ -1,7 +1,8 @@
-"""Landlock FS 辅助：工具 exec 进程内写 jail（docs/36 · C0/C1）。
+"""Landlock FS 辅助：叠在 bwrap 里面的第二层。
 
-在当前进程（preexec_fn / 子进程探针）施加写限制：系统路径可读可执行；
-仅 ``work_root`` 下可写。需 Linux ≥5.13；ENOSYS 时探针返回 False 供 bwrap/off 降级。
+系统目录只读可执行，工作根可写，不给整棵 ``/`` 授权。需 Linux ≥5.13。
+内核没有 Landlock 时由调用方继续执行（bwrap 仍在）。本文件可被 bwrap
+直接当作脚本运行，不依赖应用包。
 """
 
 from __future__ import annotations
@@ -42,6 +43,30 @@ _FS_REFER = 1 << 13  # ABI ≥ 2
 _FS_TRUNCATE = 1 << 14  # ABI ≥ 3
 _FS_IOCTL_DEV = 1 << 15  # ABI ≥ 5
 
+# Read/execute roots inside the sandbox. ``/`` is intentionally absent so other
+# work trees, ``/app``, and ``/home`` are not readable. Missing paths are skipped.
+LANDLOCK_READ_ROOTS: tuple[str, ...] = (
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/lib",
+    "/lib64",
+    "/lib32",
+    "/etc",
+    "/opt",
+    "/proc",
+)
+
+# x86_64 numbers. The filter denies these and allows every other syscall.
+DENIED_SYSCALLS: dict[str, int] = {
+    "ptrace": 101,
+    "mount": 165,
+    "umount2": 166,
+    "keyctl": 250,
+    "perf_event_open": 298,
+    "bpf": 321,
+}
+
 _FS_READ_EXEC = _FS_EXECUTE | _FS_READ_FILE | _FS_READ_DIR
 _FS_WRITE_BASE = (
     _FS_WRITE_FILE
@@ -60,6 +85,17 @@ _FS_WRITE_BASE = (
 class _RulesetAttr(ctypes.Structure):
     """Landlock ``landlock_ruleset_attr`` 用户态镜像。"""
     _fields_ = [("handled_access_fs", ctypes.c_uint64)]
+
+
+class _RulesetAttrNet(ctypes.Structure):
+    """ABI ≥ 4 adds ``handled_access_net``. No allow rule means TCP connect is denied."""
+    _fields_ = [
+        ("handled_access_fs", ctypes.c_uint64),
+        ("handled_access_net", ctypes.c_uint64),
+    ]
+
+
+_NET_CONNECT_TCP = 1 << 1
 
 
 class _PathBeneathAttr(ctypes.Structure):
@@ -138,21 +174,39 @@ def _add_path_beneath(lib: ctypes.CDLL, ruleset_fd: int, path: str, allowed: int
         os.close(fd)
 
 
-def apply_landlock_fs(*, work_root: str | Path) -> None:
-    """限制当前线程：``work_root`` 可写，其余经 ``/`` 规则只读可执行。"""
-    root = str(Path(work_root).resolve())
-    if not Path(root).is_dir():
-        raise NotADirectoryError(root)
+def apply_landlock_fs(
+    *,
+    work_root: str | Path,
+    extra_writable: tuple[str, ...] = (),
+) -> None:
+    """限制当前线程：工作根可写，系统目录只读，其余路径不可读。"""
+    roots: list[str] = []
+    for raw in (work_root, *extra_writable):
+        root = str(Path(raw).resolve())
+        if Path(root).is_dir() and root not in roots:
+            roots.append(root)
+    if not roots:
+        raise NotADirectoryError(str(work_root))
 
     abi = landlock_abi_version()
     handled = _handled_access_fs(abi)
     lib = _libc()
 
-    attr = _RulesetAttr(handled_access_fs=handled)
+    if abi >= 4:
+        attr_net = _RulesetAttrNet(
+            handled_access_fs=handled,
+            handled_access_net=_NET_CONNECT_TCP,
+        )
+        attr_ref = ctypes.byref(attr_net)
+        attr_size = ctypes.sizeof(attr_net)
+    else:
+        attr = _RulesetAttr(handled_access_fs=handled)
+        attr_ref = ctypes.byref(attr)
+        attr_size = ctypes.sizeof(attr)
     ruleset_fd = lib.syscall(
         ctypes.c_long(_SYS_LANDLOCK_CREATE_RULESET),
-        ctypes.byref(attr),
-        ctypes.c_size_t(ctypes.sizeof(attr)),
+        attr_ref,
+        ctypes.c_size_t(attr_size),
         ctypes.c_uint32(0),
     )
     if ruleset_fd < 0:
@@ -160,10 +214,16 @@ def apply_landlock_fs(*, work_root: str | Path) -> None:
         raise OSError(e, f"landlock_create_ruleset: {os.strerror(e)}")
 
     try:
-        # Deny-by-default for handled rights; allow read/exec on whole tree.
-        _add_path_beneath(lib, int(ruleset_fd), "/", _read_exec_access(abi))
-        # Writable jail = current work root only (matches bwrap RW surface).
-        _add_path_beneath(lib, int(ruleset_fd), root, _rw_access(abi))
+        read_access = _read_exec_access(abi)
+        for path in LANDLOCK_READ_ROOTS:
+            if path in roots or not Path(path).is_dir():
+                continue
+            _add_path_beneath(lib, int(ruleset_fd), path, read_access)
+        write_access = _rw_access(abi)
+        for root in roots:
+            _add_path_beneath(lib, int(ruleset_fd), root, write_access)
+        if Path("/tmp").is_dir() and "/tmp" not in roots:
+            _add_path_beneath(lib, int(ruleset_fd), "/tmp", read_access | write_access)
 
         if lib.prctl(_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0:
             e = ctypes.get_errno()
@@ -179,3 +239,73 @@ def apply_landlock_fs(*, work_root: str | Path) -> None:
             raise OSError(e, f"landlock_restrict_self: {os.strerror(e)}")
     finally:
         os.close(int(ruleset_fd))
+
+
+def _main(argv: list[str]) -> None:
+    """``python landlock_fs.py --root /work [--root /abs] -- cmd args``."""
+    roots: list[str] = []
+    cmd: list[str] = []
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--root" and i + 1 < len(argv):
+            roots.append(argv[i + 1])
+            i += 2
+            continue
+        if argv[i] == "--":
+            cmd = argv[i + 1 :]
+            break
+        i += 1
+    if not roots or not cmd:
+        sys.stderr.write("landlock wrapper: expected --root ROOT -- CMD\n")
+        raise SystemExit(2)
+    try:
+        apply_landlock_fs(work_root=roots[0], extra_writable=tuple(roots[1:]))
+    except OSError as exc:
+        sys.stderr.write(f"landlock skipped: {exc}\n")
+    try:
+        apply_seccomp_deny()
+    except OSError as exc:
+        sys.stderr.write(f"seccomp refused exec: {exc}\n")
+        raise SystemExit(1)
+    os.execvp(cmd[0], cmd)
+
+
+def apply_seccomp_deny() -> None:
+    """Install a filter that returns EPERM for the credential and escape syscalls."""
+    import struct
+
+    bpf_ld_w_abs = 0x00 | 0x00 | 0x20
+    bpf_jmp_jeq = 0x05 | 0x10 | 0x00
+    bpf_ret = 0x06 | 0x00
+    kill = 0x80000000
+    errno_eperm = 0x00050000 | 1
+    allow = 0x7FFF0000
+    inst = [
+        struct.pack("HBBI", bpf_ld_w_abs, 0, 0, 4),
+        struct.pack("HBBI", bpf_jmp_jeq, 1, 0, 0xC000003E),
+        struct.pack("HBBI", bpf_ret, 0, 0, kill),
+        struct.pack("HBBI", bpf_ld_w_abs, 0, 0, 0),
+    ]
+    for number in DENIED_SYSCALLS.values():
+        inst.append(struct.pack("HBBI", bpf_jmp_jeq, 0, 1, number))
+        inst.append(struct.pack("HBBI", bpf_ret, 0, 0, errno_eperm))
+    inst.append(struct.pack("HBBI", bpf_ret, 0, 0, allow))
+    blob = b"".join(inst)
+    buf = ctypes.create_string_buffer(blob)
+
+    class _Fprog(ctypes.Structure):
+        _fields_ = [("len", ctypes.c_ushort), ("filter", ctypes.c_void_p)]
+
+    prog = _Fprog(len=len(inst), filter=ctypes.addressof(buf))
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, "prctl(NO_NEW_PRIVS)")
+    # PR_SET_SECCOMP = 22, SECCOMP_MODE_FILTER = 2
+    if libc.prctl(22, 2, ctypes.byref(prog), 0, 0) != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, "seccomp")
+
+
+if __name__ == "__main__":
+    _main(sys.argv[1:])

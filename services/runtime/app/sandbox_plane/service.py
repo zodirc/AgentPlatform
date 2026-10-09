@@ -32,6 +32,7 @@ class ExecBody(BaseModel):
     timeout_seconds: float = 60.0
     work_id: str | None = None
     argv: list[str] | None = None
+    network: bool = False
 
 
 @asynccontextmanager
@@ -49,7 +50,13 @@ async def lifespan(_app: FastAPI):
             await asyncio.to_thread(ensure_consumer_group, GROUP_SANDBOX)
         except Exception:
             logger.exception("sandbox bus group create failed")
-    yield
+    from app.tools.core.sandbox import start_escape_probe_loop, stop_escape_probe_loop
+
+    start_escape_probe_loop()
+    try:
+        yield
+    finally:
+        await stop_escape_probe_loop()
 
 
 def create_app() -> FastAPI:
@@ -61,8 +68,9 @@ def create_app() -> FastAPI:
 
     @app.get("/health/ready")
     async def health_ready() -> dict[str, Any]:
-        from app.tools.core.sandbox import sandbox_status
+        from app.tools.core.sandbox import refresh_escape_probes, sandbox_status
 
+        refresh_escape_probes()
         return {"status": "ready", "role": "sandbox", "sandbox": sandbox_status()}
 
     @app.post(
@@ -70,6 +78,11 @@ def create_app() -> FastAPI:
         dependencies=[Depends(verify_internal_token)],
     )
     async def exec_command(body: ExecBody) -> dict[str, Any]:
+        if body.network:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="sandbox plane does not allow network",
+            )
         from app.tools.core.sandbox import run_sandboxed
 
         result = await run_sandboxed(

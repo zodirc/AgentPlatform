@@ -24,6 +24,7 @@ async def remote_sandbox_exec(
         "command": command,
         "cwd": cwd,
         "timeout_seconds": float(timeout_seconds),
+        "network": False,
     }
     if argv is not None:
         body["argv"] = [str(a) for a in argv]
