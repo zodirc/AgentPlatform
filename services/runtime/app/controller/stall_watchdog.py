@@ -121,8 +121,6 @@ async def scan_stalled_runs() -> None:
             timeout_s = float(getattr(settings, "approval_timeout_seconds", 600) or 600)
             approval_cutoff = datetime.now(timezone.utc) - timedelta(seconds=timeout_s)
             if last_ts is not None and last_ts < approval_cutoff:
-                from uuid import UUID
-
                 from app.controller.turn_controller import _fail_stuck_approval
 
                 try:
