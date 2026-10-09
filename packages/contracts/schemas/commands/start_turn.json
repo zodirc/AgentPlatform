@@ -73,6 +73,11 @@
       "type": "boolean",
       "default": false,
       "description": "Enables model_mode and model_override for authenticated ops evaluations."
+    },
+    "clear_context": {
+      "type": "boolean",
+      "default": false,
+      "description": "User-initiated. Prior transcript is not assembled into this turn."
     }
   }
 }

@@ -10,6 +10,11 @@
     "turn_id": { "type": "string", "format": "uuid" },
     "run_id": { "type": "string", "format": "uuid" },
     "tool_call_id": { "type": "string", "minLength": 1 },
-    "trace_id": { "type": "string", "format": "uuid" }
+    "trace_id": { "type": "string", "format": "uuid" },
+    "approver_user_id": {
+      "type": "string",
+      "default": "",
+      "description": "Session owner or delegate who approved this one call."
+    }
   }
 }
