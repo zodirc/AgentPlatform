@@ -115,6 +115,7 @@ class RuntimeClient:
         model_mode: str | None = None,
         model_override: dict | None = None,
         ops_eval: bool = False,
+        clear_context: bool = False,
     ) -> None:
         """向 runtime 下发 StartTurn 命令。
 
@@ -142,6 +143,7 @@ class RuntimeClient:
             "trace_id": str(trace_id),
             "ops_eval": bool(ops_eval),
             "visibility_seed": bool(visibility_seed),
+            "clear_context": bool(clear_context),
         }
         if client_request_id is not None:
             payload["client_request_id"] = str(client_request_id)
@@ -199,6 +201,7 @@ class RuntimeClient:
         run_id: UUID,
         tool_call_id: str,
         trace_id: UUID,
+        approver_user_id: str = "",
     ) -> None:
         """批准 waiting_approval 状态下的工具调用。"""
         payload = {
@@ -206,8 +209,28 @@ class RuntimeClient:
             "run_id": str(run_id),
             "tool_call_id": tool_call_id,
             "trace_id": str(trace_id),
+            "approver_user_id": approver_user_id,
         }
         await self._post("/internal/commands/approve-tool-call", timeout=30.0, json=payload)
+
+    async def quarantine_meta(self, item_id: str) -> dict:
+        response = await self._get(f"/internal/quarantine/{item_id}/meta", timeout=15.0)
+        data = response.json()
+        return data if isinstance(data, dict) else {}
+
+    async def quarantine_body(self, item_id: str) -> dict:
+        response = await self._get(f"/internal/quarantine/{item_id}", timeout=15.0)
+        data = response.json()
+        return data if isinstance(data, dict) else {}
+
+    async def quarantine_release(self, item_id: str) -> dict:
+        response = await self._post(
+            f"/internal/quarantine/{item_id}/release",
+            timeout=15.0,
+            json={},
+        )
+        data = response.json()
+        return data if isinstance(data, dict) else {}
 
     async def deny_tool_call(
         self,

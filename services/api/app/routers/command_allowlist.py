@@ -22,6 +22,7 @@ class AllowPrefixBody(BaseModel):
     """新增命令前缀请求体。"""
 
     prefix: str = Field(min_length=1, max_length=200)
+    work_id: UUID | None = None
 
 
 class AllowPrefixRow(BaseModel):
@@ -72,7 +73,7 @@ async def post_command_allowlist(
         HTTP 401: 未登录。
     """
     try:
-        return await add_prefix(user.id, body.prefix)
+        return await add_prefix(user.id, body.prefix, body.work_id)
     except AllowlistError as exc:
         code = (
             status.HTTP_400_BAD_REQUEST

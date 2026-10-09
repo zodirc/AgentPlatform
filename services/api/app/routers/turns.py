@@ -402,7 +402,18 @@ async def approve_tool_call(
         from app.services.command_allowlist import AllowlistError, add_prefix
 
         try:
-            await add_prefix(actor.id, prefix)
+            from app.db.pool import get_pool
+
+            pool = await get_pool()
+            work_id = await pool.fetchval(
+                """
+                SELECT s.work_id FROM turns t
+                JOIN sessions s ON s.id = t.session_id
+                WHERE t.id = $1
+                """,
+                turn_id,
+            )
+            await add_prefix(actor.id, prefix, work_id)
         except AllowlistError as exc:
             raise HTTPException(status_code=400, detail=exc.message) from exc
     if _commands_via_db():
@@ -412,6 +423,7 @@ async def approve_tool_call(
             payload={
                 "trace_id": str(trace_id),
                 "tool_call_id": body.tool_call_id,
+                "approver_user_id": str(actor.id),
             },
         )
     else:
@@ -421,6 +433,7 @@ async def approve_tool_call(
             run_id=run["id"],
             tool_call_id=body.tool_call_id,
             trace_id=trace_id,
+            approver_user_id=str(actor.id),
         )
     await record_audit(
         actor=actor,

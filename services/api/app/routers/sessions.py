@@ -291,6 +291,7 @@ async def create_turn(
         message=body.message,
         client_request_id=body.client_request_id,
         plan_phase=body.plan_phase,
+        clear_context=bool(body.clear_context),
     )
     await session_svc.touch_session(session_id)
 
@@ -321,6 +322,7 @@ async def create_turn(
                     work_root=work.work_root,
                     owner_user_id=actor.id,
                     visibility_seed=work.visibility_seed,
+                    clear_context=bool(body.clear_context),
                 )
                 from app.observability.slo import mark_turn_accepted_at_api
 

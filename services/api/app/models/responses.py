@@ -70,6 +70,7 @@ class CreateTurnRequest(BaseModel):
     client_request_id: UUID | None = None
     # docs/25 — omit for normal Agent; planning | executing for Plan track.
     plan_phase: PlanPhase | None = None
+    clear_context: bool = False
 
     @model_validator(mode="after")
     def _resolve_scenario_alias(self) -> "CreateTurnRequest":

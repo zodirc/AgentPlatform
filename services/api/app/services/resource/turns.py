@@ -108,6 +108,7 @@ async def create_turn(
     pull_eligible: bool | None = None,
     plan_phase: str | None = None,
     ops_eval: bool = False,
+    clear_context: bool = False,
     model_mode: str | None = None,
     model_override: dict[str, Any] | None = None,
 ) -> tuple[dict, dict, bool]:
@@ -251,6 +252,16 @@ async def create_turn(
 
         if should_redis_publish_dispatch():
             publish_turn_dispatch(run_row["id"])
+
+    if clear_context and turn_row is not None:
+        try:
+            await pool.execute(
+                "UPDATE turns SET clear_context = true WHERE id = $1",
+                turn_row["id"],
+            )
+        except Exception:
+            # Column arrives with the security migration. Push mode also sends the flag.
+            pass
 
     return dict(turn_row), dict(run_row), True
 

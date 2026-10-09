@@ -10,13 +10,29 @@ from uuid import UUID
 from app.db.pool import get_pool
 
 try:
-    from agent_contracts.command_allowlist import normalize_command_prefix
+    from agent_contracts.command_allowlist import command_argv, normalize_command_prefix
 except ImportError:  # pragma: no cover - stale venv/image still on older agent-contracts
+    import shlex
+
+    _SHELL_META = frozenset(";|&`$<>(){}!\n\r")
+
     def normalize_command_prefix(raw: str, *, max_len: int = 200) -> str:
         text = " ".join((raw or "").replace("\n", " ").replace("\t", " ").split())
         if max_len > 0:
             return text[:max_len]
         return text
+
+    def command_argv(command: str) -> list[str] | None:
+        raw = command or ""
+        if not raw.strip() or any(ch in raw for ch in "\n\r"):
+            return None
+        try:
+            argv = shlex.split(raw, posix=True)
+        except ValueError:
+            return None
+        if not argv or any(any(ch in token for ch in _SHELL_META) for token in argv):
+            return None
+        return argv
 
 _MAX_PREFIXES = 100
 
@@ -63,7 +79,11 @@ async def list_prefixes(owner_user_id: UUID) -> list[dict[str, str]]:
     ]
 
 
-async def add_prefix(owner_user_id: UUID, raw: str) -> dict[str, str]:
+async def add_prefix(
+    owner_user_id: UUID,
+    raw: str,
+    work_id: UUID | None = None,
+) -> dict[str, str]:
     """新增前缀；已存在则幂等返回同行。
 
     参数:
@@ -77,8 +97,8 @@ async def add_prefix(owner_user_id: UUID, raw: str) -> dict[str, str]:
         AllowlistError: ``invalid_prefix`` / ``too_many`` / ``write_failed``。
     """
     prefix = normalize_command_prefix(raw)
-    if not prefix:
-        raise AllowlistError("invalid_prefix", "命令前缀不能为空")
+    if not prefix or command_argv(prefix) is None:
+        raise AllowlistError("invalid_prefix", "命令前缀不能为空，且不能包含 shell 控制符")
     pool = await get_pool()
     existing = await pool.fetchrow(
         """
@@ -106,15 +126,34 @@ async def add_prefix(owner_user_id: UUID, raw: str) -> dict[str, str]:
     )
     if count >= _MAX_PREFIXES:
         raise AllowlistError("too_many", f"允许列表最多 {_MAX_PREFIXES} 条")
-    row = await pool.fetchrow(
-        """
-        INSERT INTO command_allow_prefixes (owner_user_id, prefix)
-        VALUES ($1, $2)
-        RETURNING id::text AS id, prefix, created_at
-        """,
-        owner_user_id,
-        prefix,
-    )
+    if work_id is not None:
+        try:
+            row = await pool.fetchrow(
+                """
+                INSERT INTO command_allow_prefixes (owner_user_id, prefix, work_id)
+                VALUES ($1, $2, $3)
+                RETURNING id::text AS id, prefix, created_at
+                """,
+                owner_user_id,
+                prefix,
+                work_id,
+            )
+        except Exception as exc:
+            if "work_id" not in str(exc):
+                raise
+            row = None
+    else:
+        row = None
+    if row is None:
+        row = await pool.fetchrow(
+            """
+            INSERT INTO command_allow_prefixes (owner_user_id, prefix)
+            VALUES ($1, $2)
+            RETURNING id::text AS id, prefix, created_at
+            """,
+            owner_user_id,
+            prefix,
+        )
     if row is None:
         raise AllowlistError("write_failed", "无法写入允许列表")
     return {
