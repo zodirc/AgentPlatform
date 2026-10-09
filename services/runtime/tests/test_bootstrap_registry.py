@@ -20,6 +20,8 @@ async def test_registry_list_and_openai_tools() -> None:
         description="demo tool",
         parameters={"type": "object"},
         handler=handler,
+        sink_class="S0",
+        result_taint="workspace",
     )
     registry.register(spec)
     assert registry.get("demo") is spec

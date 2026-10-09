@@ -16,8 +16,8 @@ async def test_purge_thinking_deltas_deletes_type(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(events_mod, "get_pool", AsyncMock(return_value=pool))
     monkeypatch.setattr(settings, "purge_thinking_deltas_on_finalize", True)
     n = await events_mod.purge_thinking_deltas(uuid4())
-    assert n == 4
-    assert pool.execute.await_args.args[2] == "turn.thinking.delta"
+    assert n == 0
+    pool.execute.assert_not_called()
 
 
 @pytest.mark.asyncio

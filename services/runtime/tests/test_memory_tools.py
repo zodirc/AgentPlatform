@@ -62,14 +62,26 @@ async def test_remember_rejects_sources_namespace(tmp_path, monkeypatch: pytest.
 
 
 @pytest.mark.asyncio
-async def test_remember_rejects_explicit_retrieved_trust(
+async def test_remember_ignores_model_trust_argument(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The model cannot label text as user or retrieved. The runtime does."""
     monkeypatch.setattr("app.tools.core.memory.settings.data_dir", str(tmp_path))
+    monkeypatch.setattr("app.tools.core.memory.settings.memory_backend", "json")
     result = await memory_tools.remember("a quote from sources", trust="retrieved")
-    assert result["status"] == "failed"
-    ok = await memory_tools.remember("a quote from sources", trust="user")
-    assert ok["status"] == "remembered"
+    assert result["status"] == "remembered"
+    from app.policy.taint import bind_window_external, reset_window_external
+
+    token = bind_window_external(True)
+    try:
+        labeled = await memory_tools.remember("after a search", trust="user")
+    finally:
+        reset_window_external(token)
+    assert labeled["status"] == "remembered"
+    stored = memory_tools._load()
+    by_id = {item["id"]: item for item in stored}
+    assert by_id[result["id"]]["trust"] == "user"
+    assert by_id[labeled["id"]]["trust"] == "external"
 
 
 @pytest.mark.asyncio

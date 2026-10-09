@@ -85,11 +85,12 @@ def test_verify_subagent_includes_run_command() -> None:
     # Even if parent profile omits run_command, verify still gets it from registry.
     parent = [s for s in [build_registry().get("read_file"), build_registry().get("run_tests")] if s]
     sub = delegate_runner._resolve_sub_tools(parent, "verify")
-    assert {s.name for s in sub} >= {"read_file", "run_tests", "run_command"}
-    assert all(not s.requires_approval for s in sub)
+    names = {s.name for s in sub}
+    assert {"read_file", "run_tests", "run_command"} <= names
+    assert any(s.requires_approval for s in sub if s.name == "run_tests")
 
 
-def test_subagent_tools_waive_approval() -> None:
+def test_subagent_tools_keep_approval() -> None:
     from app.tools.bootstrap import build_registry
 
     registry = build_registry()
@@ -97,7 +98,7 @@ def test_subagent_tools_waive_approval() -> None:
     assert any(s.requires_approval for s in parent)
     sub = delegate_runner._resolve_sub_tools(parent, "edit")
     assert sub
-    assert all(not s.requires_approval for s in sub)
+    assert any(s.requires_approval for s in sub)
 
 
 def test_delegate_tool_timeout_covers_nested_engine() -> None:

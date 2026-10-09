@@ -55,14 +55,21 @@ async def test_scan_skips_waiting_approval() -> None:
         patch("app.controller.stall_watchdog.get_pool", new_callable=AsyncMock, return_value=pool),
         patch("app.controller.stall_watchdog.record_stall_detected") as record,
         patch("app.controller.stall_watchdog._fail_turn", new_callable=AsyncMock) as fail,
+        patch(
+            "app.controller.turn_controller._fail_stuck_approval",
+            new_callable=AsyncMock,
+        ) as expire,
         patch("app.controller.stall_watchdog.settings") as settings,
     ):
         settings.stall_threshold_seconds = 1.0
         settings.stall_auto_fail = True
+        settings.approval_timeout_seconds = 600
         await stall_watchdog.scan_stalled_runs()
 
     record.assert_not_called()
     fail.assert_not_called()
+    expire.assert_awaited()
+    assert expire.await_args.kwargs["termination_reason"] == "approval_timeout"
 
 
 @pytest.mark.asyncio

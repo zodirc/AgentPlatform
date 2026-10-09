@@ -10,8 +10,9 @@ from app.tools.core.shell import run_shell_command
 
 @pytest.fixture(autouse=True)
 def _sandbox_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Unit tests mock subprocess_shell; force unsandboxed path.
+    # Unit tests mock subprocess_shell. Bare exec is the explicit dev break-glass.
     monkeypatch.setenv("TOOL_SANDBOX", "off")
+    monkeypatch.setenv("ALLOW_UNSANDBOXED_EXEC", "true")
 
 
 @pytest.mark.asyncio

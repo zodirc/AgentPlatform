@@ -116,7 +116,7 @@ async def test_tool_executor_requires_approval() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tool_executor_ops_eval_auto_approves() -> None:
+async def test_tool_executor_ops_eval_does_not_skip_approval() -> None:
     called = {"n": 0}
 
     async def handler(**_kwargs):
@@ -153,12 +153,12 @@ async def test_tool_executor_ops_eval_auto_approves() -> None:
             },
         )(),
     )
-    assert result.get("ok") is True
-    assert called["n"] == 1
+    assert result["status"] == "approval_required"
+    assert called["n"] == 0
 
 
 @pytest.mark.asyncio
-async def test_tool_executor_sticky_write_approval_skips_gate() -> None:
+async def test_tool_executor_write_approval_is_not_sticky() -> None:
     called = {"n": 0}
 
     async def handler(**_kwargs):
@@ -196,10 +196,10 @@ async def test_tool_executor_sticky_write_approval_skips_gate() -> None:
     assert blocked["status"] == "approval_required"
     assert called["n"] == 0
 
-    allowed = await executor.run(
+    still_blocked = await executor.run(
         tool_name="edit_file",
         tool_call_id="c2",
-        arguments={},
+        arguments={"path": "a.txt"},
         state=type(
             "S",
             (),
@@ -213,12 +213,12 @@ async def test_tool_executor_sticky_write_approval_skips_gate() -> None:
             },
         )(),
     )
-    assert allowed.get("ok") is True
-    assert called["n"] == 1
+    assert still_blocked["status"] == "approval_required"
+    assert called["n"] == 0
 
 
 @pytest.mark.asyncio
-async def test_run_command_sticky_skips_approval_after_preapprove() -> None:
+async def test_exec_preapproved_does_not_skip_approval() -> None:
     called = {"n": 0}
 
     async def handler(**_kwargs):
@@ -251,8 +251,8 @@ async def test_run_command_sticky_skips_approval_after_preapprove() -> None:
         arguments={},
         state=_minimal_state(exec_preapproved=True),
     )
-    assert allowed.get("ok") is True
-    assert called["n"] == 1
+    assert allowed["status"] == "approval_required"
+    assert called["n"] == 0
 
 
 @pytest.mark.asyncio
@@ -289,6 +289,132 @@ async def test_run_command_allowlist_skips_approval(monkeypatch: pytest.MonkeyPa
     )
     assert result.get("ok") is True
     assert called["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_approval_grant_must_match_this_call() -> None:
+    from app.policy.approval import POLICY_VERSION, ApprovalGrant, canonical_args_hash
+
+    called = {"n": 0}
+
+    async def handler(**_kwargs):
+        called["n"] += 1
+        return {"ok": True}
+
+    executor = ToolExecutor(
+        [
+            ToolSpec(
+                name="edit_file",
+                description="x",
+                parameters={"type": "object"},
+                handler=handler,
+                requires_approval=True,
+            )
+        ]
+    )
+    arguments = {"path": "a.txt", "old_text": "a", "new_text": "b"}
+    grant = ApprovalGrant(
+        tool_name="edit_file",
+        tool_call_id="c1",
+        args_hash=canonical_args_hash(arguments),
+        policy_version=POLICY_VERSION,
+    )
+    allowed = await executor.run(
+        tool_name="edit_file",
+        tool_call_id="c1",
+        arguments=arguments,
+        state=_minimal_state(),
+        approval=grant,
+    )
+    assert allowed.get("ok") is True
+    swapped = await executor.run(
+        tool_name="edit_file",
+        tool_call_id="c1",
+        arguments={"path": "other.txt"},
+        state=_minimal_state(),
+        approval=grant,
+    )
+    assert swapped["status"] == "approval_required"
+    assert called["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_remember_after_external_tool_requires_approval() -> None:
+    called = {"n": 0}
+
+    async def handler(**_kwargs):
+        called["n"] += 1
+        return {"status": "remembered"}
+
+    executor = ToolExecutor(
+        [
+            ToolSpec(
+                name="search_sources",
+                description="x",
+                parameters={"type": "object"},
+                handler=handler,
+                requires_approval=False,
+            ),
+            ToolSpec(
+                name="remember",
+                description="x",
+                parameters={"type": "object"},
+                handler=handler,
+                requires_approval=False,
+            ),
+        ]
+    )
+    state = _minimal_state(saw_external=False)
+    await executor.run(
+        tool_name="search_sources",
+        tool_call_id="s1",
+        arguments={"query": "x"},
+        state=state,
+    )
+    assert state.saw_external is True
+    blocked = await executor.run(
+        tool_name="remember",
+        tool_call_id="m1",
+        arguments={"text": "poison"},
+        state=state,
+    )
+    assert blocked["status"] == "approval_required"
+    assert called["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_subagent_write_is_rejected_instead_of_approval() -> None:
+    from app.tools.delegate_context import bump_delegate_depth, reset_delegate_depth
+
+    called = {"n": 0}
+
+    async def handler(**_kwargs):
+        called["n"] += 1
+        return {"ok": True}
+
+    executor = ToolExecutor(
+        [
+            ToolSpec(
+                name="write_file",
+                description="x",
+                parameters={"type": "object"},
+                handler=handler,
+                requires_approval=True,
+            )
+        ]
+    )
+    token = bump_delegate_depth()
+    try:
+        result = await executor.run(
+            tool_name="write_file",
+            tool_call_id="c1",
+            arguments={"path": "a.txt", "content": "x"},
+            state=_minimal_state(),
+        )
+    finally:
+        reset_delegate_depth(token)
+    assert result["error"] == "需要父代理执行"
+    assert called["n"] == 0
 
 
 def _minimal_state(**extra: object) -> object:

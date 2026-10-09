@@ -36,11 +36,11 @@ def test_search_hits_tagged_retrieved_but_excerpt_not_blocked() -> None:
         turn_id=uuid4(),
     )
     assert out["hits"][0]["trust"] == "retrieved"
-    assert remember_text_blocked(trust="user") is None
-    assert remember_text_blocked(trust="retrieved")
+    assert remember_text_blocked(window_external=False) is None
+    assert remember_text_blocked(window_external=True)
 
 
-def test_remember_blocks_only_explicit_retrieved_trust() -> None:
-    assert remember_text_blocked(trust="user") is None
-    err = remember_text_blocked(trust="retrieved")
-    assert err and "retrieved" in err
+def test_remember_blocks_when_the_turn_saw_external_content() -> None:
+    assert remember_text_blocked(window_external=False) is None
+    err = remember_text_blocked(window_external=True)
+    assert err and "external" in err

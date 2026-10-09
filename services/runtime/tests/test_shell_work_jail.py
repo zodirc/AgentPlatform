@@ -78,6 +78,7 @@ async def test_run_shell_rejects_workspace_escape(
     from app.tools.core import shell as shell_mod
 
     monkeypatch.setenv("TOOL_SANDBOX", "off")
+    monkeypatch.setenv("ALLOW_UNSANDBOXED_EXEC", "true")
     work = tmp_path / "ops" / "coding" / "inst"
     work.mkdir(parents=True)
     spawn = AsyncMock()

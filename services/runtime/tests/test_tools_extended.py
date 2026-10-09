@@ -1161,7 +1161,7 @@ async def test_run_command_shell_mode(workspace: Path, monkeypatch: pytest.Monke
         "app.tools.core.shell.run_shell_command",
         AsyncMock(return_value={"status": "executed", "stdout": "ok", "exit_code": 0, "summary": "done"}),
     ):
-        result = await core.run_command("echo ok")
+        result = await core.run_command("echo ok && true")
     assert result["stdout"] == "ok"
 
 
