@@ -3,7 +3,7 @@
           <h2>编码 Turn：从读题到交卷</h2>
           <p class="lede">模型已会调用 <code>search_codebase</code>、<code>edit_file</code>、<code>run_tests</code>。平台不另发明导航工具，而是在返回值中写入模型无法忽视的事实。仍在同一 AgentEngine while（编排容器）；live 模型经 model-gateway，shell/tests 经 sandbox 平面 HTTP。官方是否判通过看 Docker 内隐藏测（<code>resolve_rate</code>），不是看这些探针是否为绿。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把探针绿当官方分、把 grep 词面当定义、或为「再验一轮」加第六个图节点</li>
+            <li><span class="pt">◆ 要点</span> 官方通过与否看 Docker 内的隐藏测试。定义以符号表加 LSP 的确认结果为准。</li>
           </ul>
 
           <h3>主链（仍是 Engine while，虚线汇入 tool_use）</h3>
@@ -44,7 +44,7 @@
      不是新图节点；菜单不可见
      ◆ 要点  探针全绿仍可能 harness unresolved（14365：issue 无小写 NO，隐藏 roundtrip 仍红）。</pre>
           <p>超时与文件帽是配置，不是能力开关。Capability 在 Profile.tool_names。structural_prewarm 不挡 TTFB。</p>
-          <p class="figure-lead">下图上半是「找 / 波及 / 验」写入既有工具；下半仍是 Engine while，虚线汇入 <code>tool_use</code>。</p>
+          <p class="figure-lead">下图上半三条虚线分组是读题、Locate（符号表加 LSP）、改完再验；下半仍是 Engine while，虚线汇入 <code>tool_use</code>。欠验证才注入 <code>verify_receipt</code> 并 continue。主链没有「制定计划」或「分步 commit」。</p>
           <div class="src"><code>structural/workspace_index/locate.py</code> · <code>structural/related_tests.py</code> · <code>structural/issue_repro.py</code> · <code>engine/verify_receipt.py</code></div>
         </div>
         <figure class="figure">

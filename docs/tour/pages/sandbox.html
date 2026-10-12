@@ -3,7 +3,7 @@
           <h2>exec 沙箱与评测解题改道</h2>
           <p class="lede">审批门通过之后，仍须决定进程可触达的范围。威胁模型是保护<strong>宿主机与 agent 服务</strong>：子进程文件系统只对当前 Work 根 RW。默认经 <code>SANDBOX_PLANE_URL</code> 调 sandbox 平面 <code>POST /internal/sandbox/exec</code>（HTTP 热路径，不上 Redis 总线）；平面内再选 Landlock / bwrap / off。日常出站网络默认可用（已审批的 <code>curl https://…</code> 不应被沙箱误杀）；产品层「禁 curl」是另一条规则，不要焊进内核隔离。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把工作区绿当官方分、或缺 bwrap 时把「断网」降级成宿主机外连</li>
+            <li><span class="pt">◆ 要点</span> 评测要求断网时必须使用 bwrap。工作区里的测试通过不算官方分数。</li>
           </ul>
 
           <h3>日常沙箱（平面内首次探测后 sticky）</h3>

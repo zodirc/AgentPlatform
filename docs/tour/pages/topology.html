@@ -3,7 +3,7 @@
           <h2>部署拓扑</h2>
           <p class="lede">浏览器只访问产品面 <code>http://localhost/</code>。Caddy 把 <code>/</code> 交给 web，把 <code>/api/*</code> 与 <code>/health/*</code> 交给 api :8000。runtime 不对浏览器开 SSE。默认 <code>TURN_DISPATCH=pull</code>。执行侧拆成编排 runtime 与平面容器（compose <code>planes.yml</code>：redis / sources-retrieval / model-gateway / sandbox）。并发数字与双池见上一页「时序 · 并发 · 负载」。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会用错模型</li>
+            <li><span class="pt">◆ 要点</span> 浏览器只经过 Caddy。编排不对浏览器开流，向量权重只在 sources-retrieval。</li>
           </ul>
 
           <h3>谁在链上</h3>

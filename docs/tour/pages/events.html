@@ -3,7 +3,7 @@
           <h2>事件拉取：耐久 PG + 活流 Redis → SSE / view</h2>
           <p class="lede">Turn <strong>耐久</strong>事实源是 append-only 的 <code>turn_events</code>（编排写入）。高频 delta 默认走 Redis <code>turn.live.*</code>（可丢）；重连靠 <code>turn_views</code> + 耐久 sequence，不保证逐 token 续播。NOTIFY / Pub/Sub 都是门铃：payload 只有 UUID，叫醒后 <code>SELECT</code> 或 drain live。Postgres 是 Turn 真源与 claim；平面热路径是 HTTP；异步索引是 Redis Streams。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 NOTIFY/Pub/Sub 当队列、用 Streams claim、或把活流当成可恢复真源</li>
+            <li><span class="pt">◆ 要点</span> 重连依据耐久 sequence。turn.live 上的增量可以丢失。</li>
           </ul>
 
           <h3>三条桥（不要画成一条）</h3>

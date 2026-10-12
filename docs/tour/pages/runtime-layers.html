@@ -3,7 +3,7 @@
           <h2>TurnController 与 AgentEngine</h2>
           <p class="lede">一次 Turn 的写主权在 Controller；反复「组窗 → 问模型 → 跑工具」的 while 在 Engine——二者都在编排 runtime 容器。Guard（取消、分层超时、Stall Watchdog、租约心跳）旁挂全程。live 模型 / embed / exec 是编排的 HTTP 依赖（model-gateway · sources-retrieval · sandbox），不是 while 里新菱形。Engine 返回三种东西：终稿字符串、<code>"waiting_approval"</code>、或 <code>None</code>（取消/预算由 Controller 根据 <code>state</code> 收尾）。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把审批当成终态、把 stall 当成租约、或把 Profile 名字送进 Engine</li>
+            <li><span class="pt">◆ 要点</span> 终态由 Controller 写入。waiting_approval 不是终态，仍然占用 inflight。</li>
           </ul>
 
           <h3>写主权</h3>

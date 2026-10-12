@@ -8,7 +8,7 @@
           <h2>RAG 深描：主链 + 打开函数</h2>
           <p class="lede">本页两层、同一套编号。上层 ASCII 与全书相同：闸、数字、误用模型。下层按编号打开函数（<code>code-py</code>），不是第二套主链。索引面 sync/embed 跑在 <code>sources-retrieval</code>（唯一权重池）；Turn 内 query embed 经编排 remote HTTP。车道超时 / RRF / doc_boost 见上一页「hybrid 召回」。查询热路径不 <code>sync</code>、不建图。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会在查询路径上 sync、把 HNSW 当成 Python 建图 API、或用 raw 分相加代替 RRF</li>
+            <li><span class="pt">◆ 要点</span> 查询路径上不执行 sync，也不在当时建索引。</li>
           </ul>
 
           <h3>主链（与图 1–15 同一编号）</h3>

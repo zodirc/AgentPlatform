@@ -3,7 +3,7 @@
           <h2>索引面：Turn 外建库</h2>
           <p class="lede">目录文件是真相；向量库是投影。建库可慢：<code>sources-retrieval</code> 启动延迟同步、目录变更、上传、工作台「同步资料库」、内部同步命令、写作 <code>post_turn_jobs: sources.index_sync</code>（经 Redis 总线异步）。编排 runtime 默认 <code>EMBEDDING_BACKEND=remote</code>，不在本进程常驻 ST。提问热路径禁止当场建库或整库重嵌（R1/R3）。无资料目录则 <code>retrieval=none</code>，不当成空库去 sync。private 禁止空 work_id。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会在查询路径上 embed 整库、把进度条当成检索就绪、或让长 sync 饿死 query embed</li>
+            <li><span class="pt">◆ 要点</span> 提问热路径不建库。索引进度不表示检索已经可用。</li>
           </ul>
 
           <h3>触发与 stamp</h3>

@@ -1,9 +1,9 @@
 <section class="page" data-id="domain" data-group="领域" data-title="对象与状态机">
         <div class="card">
           <h2>领域对象与 Turn 状态机</h2>
-          <p class="lede">用户心智是一份稿或一个仓库。工程上拆成四层，使稿件世界与单次对话解耦：Principal → default Work → Session* → Turn ↔ Run（1:1）。</p>
+          <p class="lede">对象分四层：Principal → 默认 Work → Session → Turn，Turn 与 Run 一一对应。稿件或仓库挂在 Work 上，与单次会话分开。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会用错模型</li>
+            <li><span class="pt">◆ 要点</span> 稿和仓库挂在 Work 上。批准后续跑必须沿用同一个 run_id。</li>
           </ul>
 
           <h3>四层</h3>

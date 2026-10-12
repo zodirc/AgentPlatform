@@ -3,7 +3,7 @@
           <h2>TurnState：审批挂起后必须仍能验证</h2>
           <p class="lede"><code>TurnState</code> 是单次 Turn 的可变 dataclass，经 <code>checkpoint_store</code> 序列化。审批中断后再续跑，不得丢失「还欠测试 / 还欠 issue 例子」；否则行为门在恢复后失效。旧 checkpoint 可能缺 <code>turn_user_text</code>——写作工具解析 quota/TOC 时要能降级。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会只记「曾经跑过测试」，改完再挂起就会漏验</li>
+            <li><span class="pt">◆ 要点</span> 未完成的测试和 issue 例子写入 checkpoint，并绑定最近一次编辑。</li>
           </ul>
 
           <h3>必须能从 checkpoint 恢复的字段</h3>

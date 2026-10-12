@@ -1,9 +1,9 @@
 <section class="page" data-id="engine-loop" data-group="Runtime" data-title="Engine 单循环">
         <div class="card">
           <h2>AgentEngine 单循环</h2>
-          <p class="lede">循环条件是 <code>while step_count &lt; max_steps</code>，不是无界 <code>while True</code>。<code>max_steps</code> 来自 ScenarioProfile（编码 150、写作/情报 40、协作 50；未写则 40）。Engine 跑在编排 runtime：不读 scenario 名字；工具表与系统提示由 Controller 注入。live 推理经 <code>MODEL_GATEWAY_URL</code> HTTP NDJSON；query embed / shell 经 retrieval / sandbox 平面。加能力 = 增强工具或结果契约，不改 while 形状。</p>
+          <p class="lede">循环条件是 <code>while step_count &lt; max_steps</code>。<code>max_steps</code> 来自 ScenarioProfile：编码 150，写作和情报 40，协作 50，未写则 40。Engine 在编排 runtime 中运行，不读取场景名；工具表和系统提示由 Controller 注入。live 推理经 <code>MODEL_GATEWAY_URL</code> 以 HTTP NDJSON 调用；query embed 与 shell 分别经过 retrieval 和 sandbox。新增能力时扩展工具或结果契约，while 的形状保持不变。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会用错超时层、把旁路当成新图节点、或把并行 gather 当成共享可变状态</li>
+            <li><span class="pt">◆ 要点</span> 超时按层分开。连续只读工具并行时，各自使用一份 state 副本。</li>
           </ul>
 
           <h3>循环外：Intake 决定要不要进 while</h3>

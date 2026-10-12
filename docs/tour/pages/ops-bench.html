@@ -1,9 +1,9 @@
 <section class="page" data-id="ops-bench" data-group="Ops 效果" data-title="Ops L1 原理">
         <div class="card">
           <h2>Ops L1：走产品同一条 Turn 路径</h2>
-          <p class="lede">效果温度计，不进 StartTurn 热路径，也<strong>不是</strong> merge gate。契约要求 <code>eval_path=agent</code>：真实 Session / Turn / 工具事件。金标永不进模型窗。L0 组件对照（直接 embed / 直接 completion）可以存在，不得进效果主栏。下一页约定官方题面；再后才是第4轮 smoke + 第6轮编码的数字。</p>
+          <p class="lede">这里记录效果，不进入 StartTurn 热路径，也不是 merge gate。契约要求 <code>eval_path=agent</code>，使用真实的 Session、Turn 和工具事件。金标不进入模型窗。直接 embed 或直接 completion 的 L0 对照可以保留，不写入效果主栏。下一页是官方题面，其后是第4轮 smoke 与第6轮编码的数字。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 harness 失败写成模型 0 分、把探针绿当官方通过、或把 smoke 升 SCORECARD</li>
+            <li><span class="pt">◆ 要点</span> 官方 Bench 不作为合入条件。harness 自身失败不记入 resolve_rate。</li>
           </ul>
 
           <h3>主链（L1 agent-path）</h3>

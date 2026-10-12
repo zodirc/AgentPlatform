@@ -3,7 +3,7 @@
           <h2>契约位置与组件地图</h2>
           <p class="lede">公开字段与版本以 <code>packages/contracts</code> 为准。改 REST 字段、事件 JSON Schema 或 DDL 须先改契约包，再改 api/web 派生类型与实现。导览里的数字以代码为准；图上的字过期时改说明，不改皮肤。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会在服务里先发明字段、让 YAML 冒号炸掉 OpenAPI、或把只读 GET 当成开工</li>
+            <li><span class="pt">◆ 要点</span> 对外字段先改 packages/contracts，再改 api 与 web 的实现。</li>
           </ul>
 
           <h3>机器源</h3>

@@ -1,9 +1,9 @@
 <section class="page" data-id="ops-eval-why" data-group="Ops 效果" data-title="评测原理">
         <div class="card">
           <h2>评测在测什么（审阅用）</h2>
-          <p class="lede">先把尺子讲清楚，再看后面的跑次回放。一句话：<strong>产品同一条 Turn 路径，面对官方题集，能不能交出官方指标。</strong>金标永不进模型窗。不是旁路脚本直接 embed / 直接 completion / 空补丁通管道。编码主指标是 Docker 内 <code>resolve_rate</code>，不是 <code>patch_rate</code>。</p>
+          <p class="lede">后面的回放使用同一套口径：产品 Turn 面对官方题集，提交官方指标。金标不进入模型窗。直接 embed、直接 completion 和空补丁不进入效果主栏。编码主指标是 Docker 内的 <code>resolve_rate</code>；<code>patch_rate</code> 只说明是否交出了补丁。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把泄漏当产品分、把探针当官方尺子、或把 n5 外推 Lite</li>
+            <li><span class="pt">◆ 要点</span> 金标不进入模型窗口。编码的主指标是 resolve_rate。</li>
           </ul>
           <table>
             <thead><tr><th></th><th>检索</th><th>上下文</th><th>编码</th></tr></thead>

@@ -3,7 +3,7 @@
           <h2>能力即工具；捷径在 handler 改道</h2>
           <p class="lede">检索、改稿、exec、委派以及编码时的定义/波及/验证，都是工具或写入既有 <code>tool_result</code>。编排 runtime 调度工具；<code>search_sources</code> 的 query embed 经 HTTP 打 <code>sources-retrieval</code>；<code>run_command</code> / <code>run_tests</code> 默认经 HTTP 打 <code>sandbox</code> 平面（未配置平面 URL 时回退本进程）。RAG 禁止每轮预注入向量包；多 agent 只经 <code>delegate</code>（子循环上限 12 步）。高频捷径在 handler 改道：工具名不变，审计与 prefix cache 才稳。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会绕开已读登记、在错解释器上跑绿、或打掉 tools[] 字节缓存</li>
+            <li><span class="pt">◆ 要点</span> 捷径在 handler 内改道，对外工具名不变，以免打掉前缀缓存。</li>
           </ul>
 
           <h3>进请求的形状</h3>

@@ -3,7 +3,7 @@
           <h2>StartTurn 命令链</h2>
           <p class="lede">api 尽快只做鉴权、admission、落库与门铃，不把任务 HTTP 推到编排 runtime。默认 <code>TURN_DISPATCH=pull</code>：编排有空位才 CAS claim。取消、审批、补丁走 <code>run_commands</code> + NOTIFY，由<strong>当前持有租约</strong>的副本消费。资料索引<strong>不走</strong>这条命令通道：HTTP 打 sources-retrieval 或 enqueue Redis <code>agent.jobs</code>。HTTP <code>/internal/commands/start-turn</code> 仅为 push 兼容回退。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把分发做成同步 RPC、把索引同步塞进 run_commands、或把命令广播给未持约副本</li>
+            <li><span class="pt">◆ 要点</span> 默认按领取制分发。资料索引不进入 run_commands。</li>
           </ul>
 
           <h3>主链（默认 pull）</h3>
@@ -67,7 +67,7 @@ runtime  仅 runner_id 匹配且 lease 仍有效的副本消费
   writes_preapproved / exec_preapproved 随 checkpoint 存活，approve 续跑仍免审
   编码评测可在开题前等待符号表 ready（仅评测套件）
     <span class="pt">◆ 要点  产品对话仍先受理，不等索引。把评测的「等 ready」抄到产品路径，R1（首 token）就破了。</span></pre>
-          <p class="figure-lead">下图菱形「是否领取制」对应主链 pull/push；左辅控制命令与索引通道分列。</p>
+          <p class="figure-lead">下图菱形在落库之后、领取之前：pull 走 SUBSCRIBE 与 CAS；push 成功是 runtime <code>/internal/commands/start-turn</code> 返回 202。502 只是这次调用失败时 api 回给浏览器的状态。</p>
           <div class="src"><code>services/api/app/services/command/admission.py</code> · <code>turn_dispatch.py</code> · <code>jobs/bus.py</code> · <code>sources_retrieval_client.py</code></div>
         </div>
         <figure class="figure">

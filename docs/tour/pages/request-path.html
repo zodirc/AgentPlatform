@@ -3,7 +3,7 @@
           <h2>请求主路径（端到端）</h2>
           <p class="lede">客户端提交 Turn 之后，业务首事件不是 HTTP 202，而是编排 runtime claim 后发出的 <code>turn.accepted</code>。Turn <strong>claim 仍在 Postgres</strong>；分发门铃默认 Redis <code>turn.dispatch</code>。进 Engine 后 live 模型 / query embed / shell exec 分别 HTTP 打到独立容器；高频 delta 默认走 <code>turn.live.*</code>（不写 PG）。闸与容量见「时序 · 并发 · 负载」；本页只串端到端。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会用 HTTP 202 当 TTFB、把编排当胖 runtime、用 Streams claim、或把活流当成可恢复真源</li>
+            <li><span class="pt">◆ 要点</span> HTTP 202 表示已入队。业务上的第一件事是 claim 之后的 turn.accepted。</li>
           </ul>
 
           <h3>逐步经过</h3>

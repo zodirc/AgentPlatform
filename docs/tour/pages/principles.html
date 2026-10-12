@@ -1,9 +1,9 @@
 <section class="page" data-id="principles" data-group="总览" data-title="原则与红线">
         <div class="card">
           <h2>原则与速率红线</h2>
-          <p class="lede">扩展能力时写入既有工具的结果契约，或放到 Turn 热路径之外的旁路。禁止改 AgentEngine 的 while 形状，禁止让模型再学习一套导航工具名。R1–R5 是用户提问热路径的验收，不是口号编号。每条都能对照到现行超时、旁路进程与合入脚本。</p>
+          <p class="lede">扩展能力时写入既有工具的结果契约，或放到 Turn 热路径之外的旁路。不改 AgentEngine 的 while 形状，也不新增一套供模型学习的导航工具名。R1–R5 是提问热路径的验收项，分别对应现行超时、旁路进程和合入脚本。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会用错模型</li>
+            <li><span class="pt">◆ 要点</span> 新能力写入既有工具的返回值，或放到 Turn 热路径之外。while 的形状保持不变。</li>
           </ul>
 
           <h3>加能力时走哪条</h3>
@@ -42,7 +42,7 @@ R4  重活异步
 
 R5  可测才合并
     挡合并的是 scripts/ci_proof.sh（runtime cov≥80 + smoke + stub golden）
-    官方 Bench 是效果温度计，eval_path=agent，不进 StartTurn，也不是 merge gate
+    官方 Bench 记录效果，eval_path=agent，不进 StartTurn，也不是 merge gate
     冒烟分数不升 SCORECARD 主栏；harness 失败不得标成 resolve_rate=0
     <span class="pt">◆ 要点  把 Ops 4/5 当成合入门，会把效果分和「主路径没炸」混成一件事。</span></pre>
 

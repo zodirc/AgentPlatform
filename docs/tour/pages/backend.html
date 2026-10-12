@@ -1,9 +1,9 @@
 <section class="page" data-id="backend" data-group="总览" data-title="时序 · 并发 · 负载">
         <div class="card">
           <h2>后端：进程、表与负载</h2>
-          <p class="lede">先看宏观：哪些<strong>容器进程</strong>在跑、各自碰哪些<strong>表</strong>、谁写耐久 <code>turn_events</code>。浏览器不直连编排。Turn <strong>真源与 claim</strong>在 Postgres；分发门铃与活流默认走 Redis Pub/Sub（<code>TURN_DISPATCH_WAKE=redis</code> · <code>EVENT_DURABILITY=checkpoint</code>）；live 模型 / embed / exec 是编排对平面的 HTTP；异步索引走 Redis Streams。默认 <code>TURN_DISPATCH=pull</code>。下面微观时序与容量信封是同一真相的展开；页底 PNG 若与 ASCII 冲突，以 ASCII / 代码为准。</p>
+          <p class="lede">先看宏观：哪些<strong>容器进程</strong>在跑、各自碰哪些<strong>表</strong>、谁写耐久 <code>turn_events</code>。浏览器不直连编排。Turn <strong>真源与 claim</strong>在 Postgres；分发门铃与活流默认走 Redis Pub/Sub（<code>TURN_DISPATCH_WAKE=redis</code> · <code>EVENT_DURABILITY=checkpoint</code>）；live 模型 / embed / exec 是编排对平面的 HTTP；异步索引走 Redis Streams。默认 <code>TURN_DISPATCH=pull</code>。下文按同一次 Turn 写时序和容量。页底 PNG 与 ASCII 不一致时，以 ASCII 和代码为准。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把编排当胖 runtime、把 NOTIFY/Pub/Sub 当队列、用 Streams claim、或把平面 HTTP / 活流当成事件真源</li>
+            <li><span class="pt">◆ 要点</span> Turn 的领取在 Postgres。Redis 负责门铃和活流，不负责领取。</li>
           </ul>
 
           <h3>宏观：进程谁在</h3>

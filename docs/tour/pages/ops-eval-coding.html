@@ -3,7 +3,7 @@
           <h2>编码：官方题面、可见范围与 harness 命中</h2>
           <p class="lede">主指标回答的是：官方隐藏测是否通过。<strong>裁判为 <code>swebench.harness</code></strong>（F2P 全过且 P2P 全过），不是平台探针，也不是工作区 pytest。题集：HuggingFace <code>princeton-nlp/SWE-bench_Lite</code> test。smoke n5 = 该 split 顺序前 5 个 ID，全部为 astropy。现行编码冒烟：RESULTS 第6轮（<code>gpt-5.6-luna</code>）<strong>4/5</strong>，未过仍为 14365；不作效果结论，不升 SCORECARD。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 patch_rate / fuse_ok / issue 例子绿当成通过，或把 harness 崩溃写成 resolve_rate=0</li>
+            <li><span class="pt">◆ 要点</span> 通过条件是 harness 中 F2P 与 P2P 全部通过。探针变绿不算通过。</li>
           </ul>
           <h3>官方字段</h3>
           <p>每题官方字段：<code>repo</code>、<code>base_commit</code>、GitHub issue（<code>problem_statement</code>）、隐藏测 <code>FAIL_TO_PASS</code> / <code>PASS_TO_PASS</code>、金标 <code>patch</code>。后三项<strong>不写入 Work</strong>（<code>hints_text</code> 与 issue 评论同样不进）。</p>

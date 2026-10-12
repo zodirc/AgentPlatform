@@ -3,7 +3,7 @@
           <h2>审批门、取消与同 run_id 续跑</h2>
           <p class="lede">审批门决定是否允许执行；沙箱门决定进程可写范围（默认经 <code>SANDBOX_PLANE_URL</code> HTTP 到 sandbox 容器，平面内再 Landlock/bwrap）；评测 Docker 改道与这两门正交。Engine 在 <code>approval_required</code> 时返回哨兵 <code>"waiting_approval"</code>，Controller 落 checkpoint 后返回——<strong>不写终态</strong>。这颗 Turn 仍计入 <code>RUNTIME_MAX_INFLIGHT_TURNS=16</code>，lease 继续心跳。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会另起 Run 丢义务、把取消写成 failed、或把 update_plan 当成开工批准</li>
+            <li><span class="pt">◆ 要点</span> 批准后在同一个 run_id 上继续。用户取消记为 cancelled。</li>
           </ul>
 
           <h3>审批</h3>

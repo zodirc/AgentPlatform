@@ -3,7 +3,7 @@
           <h2>组窗阶梯：卫生与填充率加压</h2>
           <p class="lede">送给模型的不是 Session 全文，也不是磁盘稿。每步 <code>assemble_async</code> 产出<strong>这一次</strong>请求的窗。通道分离：系统提示求稳定（利于 prefix cache）；<code>tools[]</code> 单独一份且默认不改字节；作品规矩 / 焦点 / 计划走 <code>volatile_context</code>（易变垫底，不焊进 system）；真正被压缩的是对话历史。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 128k 当常驻 RAM、在首 token 前再付一次摘要模型、或改 tools[] 字节打掉缓存</li>
+            <li><span class="pt">◆ 要点</span> 压缩只作用于这一步送进模型的窗口。tools[] 的字节默认不改。</li>
           </ul>
 
           <h3>预算怎么算</h3>
@@ -40,11 +40,15 @@ turn_token_budget 默认 0（不限制累计）；超了 Engine 在步前/步后
     <span class="pt">◆ 要点  0.95 若同步调主模型做摘要，R2 破了：用户看见的首 token 前又付一次供应商，且 step 墙钟被摘要吃掉。</span>
     │
     ▼
+Turn 结束后（不挡收尾，也不挡下一 Turn 首 token）
+    approx_fill ≥ context_fill_soft_precompact（默认 0.78）才异步刷 sessions.context_summary
+    0.78 是旁路软阈值，不是组窗三档 0.80 / 0.90 / 0.95
+
 送给模型
     长文被截断时附标题大纲（Markdown/纯文本抽标题，Python AST），使模型跳段而非从第一行盲翻
     编码场景仍不以 search_sources 导航长代码；Locate 是符号表+LSP，不是这一层
     tools[] 晚期禁用不改 schema 字节（见工具面）</pre>
-          <p class="figure-lead">下图中主链：卫生 → 填充率判定 → 三档加压 → 送给模型。</p>
+          <p class="figure-lead">下图中主链：卫生 → 填充率判定 → 三档加压 → 送给模型。旁路软预压缩阈值是 0.78。</p>
           <div class="src"><code>context/engine.py</code> · <code>context/policy.py</code> · <code>model/generation.py</code> · <code>structural/outline.py</code></div>
         </div>
         <figure class="figure">

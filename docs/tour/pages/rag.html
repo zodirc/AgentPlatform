@@ -1,9 +1,9 @@
 <section class="page" data-id="rag" data-group="RAG / 写作" data-title="hybrid 召回">
         <div class="card">
           <h2>交互面：hybrid <code>search_sources</code></h2>
-          <p class="lede">模型调用 <code>search_sources</code> 才会检索。禁止每轮预注入向量包，禁止查询路径上当场建库或整库重嵌。编码场景无此工具。冲突裁决：速率/交互 → 检索质量 → 成熟形态。query <code>embed(query)</code> 经编排 remote HTTP 打到 <code>sources-retrieval</code>（唯一权重）；ANN/FTS 用 psycopg 自建连，不占编排 runtime 热池 5×5s。</p>
+          <p class="lede">模型调用 <code>search_sources</code> 才会检索。禁止每轮预注入向量包，禁止查询路径上当场建库或整库重嵌。编码场景没有这个工具。取舍顺序是先保证交互时延，再看检索质量。query <code>embed(query)</code> 经编排 remote HTTP 打到 <code>sources-retrieval</code>（唯一权重）；ANN/FTS 用 psycopg 自建连，不占编排 runtime 热池 5×5s。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 Doc/Chunk 画成三套系统、用 raw 分相加代替 RRF、或把空窗当成「没有资料」去 sync</li>
+            <li><span class="pt">◆ 要点</span> 只有模型调用 search_sources 时才检索。融合使用 RRF，按位次而不是原始分相加。</li>
           </ul>
 
           <h3>门闩</h3>

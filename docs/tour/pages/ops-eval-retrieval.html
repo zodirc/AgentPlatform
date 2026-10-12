@@ -3,7 +3,7 @@
           <h2>检索：官方题面、可见范围与命中</h2>
           <p class="lede">主指标回答的是：融合排序中的 <code>doc_id</code> 是否落入该 query 的 qrels（<code>rel&gt;0</code>）。终答是否正确、cite 是否写对，均不进入该分。无 Docker harness。裁判为 BEIR 式 nDCG / Recall / MAP。第一验收位：BEIR <strong>R@100</strong>。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 cite 写对当成命中、用 nDCG@10 掩盖未入池、或把 n=20 外推全库</li>
+            <li><span class="pt">◆ 要点</span> 命中指 doc_id 落入该 query 的 qrels。BEIR 的第一验收位是 R@100。</li>
           </ul>
           <h3>官方字段</h3>
           <p>题集为 BEIR（SciFact / NFCorpus / FiQA）与 C-MTEB（Covid / Medical / Ecom）。BEIR 落盘形态：</p>
