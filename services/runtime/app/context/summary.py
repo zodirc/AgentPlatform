@@ -25,6 +25,7 @@ class StructuredSummary:
     narrative: str = ""
     # HM8: optional nested layers (default empty = off)
     layers: list[dict[str, Any]] = field(default_factory=list)
+    workset: str = ""
 
     def to_message_text(self) -> str:
         parts = [f"[session context: {self.narrative or self.task or 'prior work'}"]
@@ -48,6 +49,9 @@ class StructuredSummary:
         }
         if self.layers:
             payload["layers"] = self.layers[-3:]
+        workset = str(getattr(self, "workset", "") or "")
+        if workset:
+            payload["workset"] = workset[:600]
         return f"[autocompact: {json.dumps(payload, ensure_ascii=False)}]"
 
 

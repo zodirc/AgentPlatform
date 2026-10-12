@@ -35,8 +35,11 @@ from app.context.policy import CompactionPolicy
 from app.engine.read_registry import (
     consume_evicted_reread,
     deny_redundant_read,
+    disk_content_hash,
     is_mutating_file_tool_failure,
+    mark_registry_stale,
     note_edit_failure_allows_reread,
+    note_written_hash,
     path_from_tool_arguments,
     record_successful_read,
     user_facing_policy_summary,
@@ -473,6 +476,67 @@ def _tool_batch_outcome(summary: str) -> str:
     return text
 
 
+def _snapshot_touched_files(state: Any) -> None:
+    """命令改写文件之前，把还没记过的工作区文件和已读路径打进影子 git。"""
+    try:
+        from app.policy.shadow_git import snapshot_preimage, snapshot_unrecorded
+        from app.tenant_context import current_work_root_path
+
+        root = current_work_root_path()
+        turn_id = str(getattr(state, "turn_id", "") or "turn")
+        snapshot_unrecorded(root, turn_id=turn_id)
+        for path in list(getattr(state, "read_registry", {}) or {}):
+            snapshot_preimage(root, str(path), turn_id=turn_id)
+    except Exception:
+        return
+
+
+def _note_command_created(state: Any) -> None:
+    """命令结束后把新建文件记成可删除，这样撤销能消掉命令产物。"""
+    try:
+        from app.policy.shadow_git import note_created_files
+        from app.tenant_context import current_work_root_path
+
+        note_created_files(
+            current_work_root_path(),
+            turn_id=str(getattr(state, "turn_id", "") or "turn"),
+        )
+    except Exception:
+        return
+
+
+def _remember_edit(state: Any, path: str, result: dict) -> None:
+    rel = str(path or "").replace("\\", "/").lstrip("./")
+    if not rel:
+        return
+    added = int(result.get("lines_added") or 0)
+    removed = int(result.get("lines_removed") or 0)
+    if not added and not removed:
+        old = str(result.get("old_text") or "")
+        new = str(result.get("new_text") or "")
+        removed = old.count("\n") + (1 if old else 0)
+        added = new.count("\n") + (1 if new else 0)
+    rows = list(getattr(state, "edited_files", None) or [])
+    rows = [row for row in rows if str(row.get("path")) != rel]
+    rows.append({"path": rel, "added": added, "removed": removed})
+    state.edited_files = rows[-40:]
+
+
+def _span_diff(path: str, old: str, new: str) -> str:
+    import difflib
+
+    if not old and not new:
+        return ""
+    lines = difflib.unified_diff(
+        old.splitlines(),
+        new.splitlines(),
+        fromfile=path or "a",
+        tofile=path or "b",
+        lineterm="",
+    )
+    return "\n".join(list(lines)[:120])
+
+
 class AgentEngine:
     """单 Turn 推理循环执行器（不写库 claim，只通过 ``write_event`` 吐事件）。
 
@@ -648,6 +712,53 @@ class AgentEngine:
         final_summary: str | None = None
         self._search_sources_calls = 0
         self._evidence_citation_ids = set()
+        if not getattr(state, "shadow_snapshot_id", ""):
+            try:
+                from app.policy.shadow_git import ensure_turn_baseline
+                from app.tenant_context import current_work_root_path
+
+                rev = ensure_turn_baseline(
+                    current_work_root_path(),
+                    turn_id=str(getattr(state, "turn_id", "") or "turn"),
+                )
+                if rev:
+                    state.shadow_snapshot_id = rev
+            except Exception:
+                pass
+        if (
+            str(getattr(state, "scenario_id", "") or "") == "agent"
+            and not getattr(state, "ops_eval", False)
+            and not getattr(state, "plan_items", None)
+        ):
+            from app.engine.product_finish import acceptance_plan_items
+
+            seeded = acceptance_plan_items(str(getattr(state, "turn_user_text", "") or ""))
+            if seeded:
+                from app.tools.core.writing_tools import update_plan
+
+                planned = await update_plan(seeded, summary="验收例子")
+                state.plan_items = list(planned.get("items") or [])
+                state.acceptance_commands = [
+                    str(item.get("acceptance") or "").strip()
+                    for item in seeded
+                    if str(item.get("acceptance") or "").strip()
+                ]
+                await self._write_event(
+                    event_type="turn.plan",
+                    payload={
+                        "plan_id": str(planned.get("plan_id") or "plan-accept"),
+                        "summary": "验收例子",
+                        "items": [
+                            {
+                                "id": str(item.get("id") or index + 1),
+                                "title": str(item.get("title") or "验收")[:512],
+                                "status": "pending",
+                            }
+                            for index, item in enumerate(state.plan_items)
+                        ],
+                    },
+                    step_index=0,
+                )
 
         while state.step_count < state.max_steps:
             if self._budget_exceeded(state):
@@ -662,6 +773,10 @@ class AgentEngine:
 
             state.step_count += 1
             step_index = state.step_count - 1
+            from app.engine.steer_inbox import drain_steers
+
+            for steered in drain_steers(state.run_id):
+                state.messages.append(user_message(steered))
             step_started_at = time.monotonic()
             step_outcome = "completed"
             await self._write_event(
@@ -984,6 +1099,80 @@ class AgentEngine:
                 if response_text:
                     state.messages.append(assistant_text(response_text))
                     final_summary = response_text
+                from app.engine.product_finish import (
+                    acceptance_gap,
+                    product_mode,
+                    run_product_verify_hook,
+                    work_diff_stat,
+                )
+                from app.engine.verify_receipt import note_tool_result_for_verify as _note_verify
+
+                hooked = None
+                try:
+                    hooked = await run_product_verify_hook(state)
+                except Exception:
+                    hooked = None
+                if hooked is not None:
+                    _note_verify(state, tool_name="run_tests", result=hooked, arguments={"command": hooked.get("command")})
+                    state.messages.append(
+                        user_message(
+                            "product_verify_hook: "
+                            + json.dumps(
+                                {
+                                    "command": hooked.get("command"),
+                                    "status": hooked.get("status"),
+                                    "summary": str(hooked.get("summary") or "")[:800],
+                                    "delta": hooked.get("delta"),
+                                },
+                                ensure_ascii=False,
+                            )
+                        )
+                    )
+                    continue
+                if product_mode(state) and not getattr(state, "diff_stat_sent", False):
+                    try:
+                        stat = work_diff_stat(state)
+                        gap = acceptance_gap(state)
+                    except Exception:
+                        stat, gap = "", ""
+                    if stat or gap:
+                        state.diff_stat_sent = True
+                        body = "\n".join(part for part in (gap, stat) if part)
+                        state.messages.append(user_message("最终 diff：\n" + body[:4000]))
+                        if (
+                            stat
+                            and len(stat) >= 400
+                            and not getattr(state, "review_sent", False)
+                        ):
+                            state.review_sent = True
+                            from app.tools.delegate_runner import run_delegate
+
+                            reviewed = await run_delegate(
+                                task=(
+                                    "只读审阅下面的 diff：遗留调试代码、未处理的错误路径、"
+                                    "与问题描述不符、无关改动。工作区外的副作用无法回退。"
+                                ),
+                                agent_type="review",
+                                context=body[:2000],
+                                turn_id=getattr(state, "turn_id", None),
+                                run_id=getattr(state, "run_id", None),
+                            )
+                            summary_text = ""
+                            if (
+                                isinstance(reviewed, dict)
+                                and str(reviewed.get("status") or "") == "completed"
+                                and not reviewed.get("error")
+                            ):
+                                summary_text = str(reviewed.get("summary") or "")
+                            if summary_text:
+                                state.messages.append(user_message("审阅：" + summary_text[:2000]))
+                                continue
+                        review = (
+                            "请按四项看上面的 diff 一次：遗留调试代码、未处理的错误路径、"
+                            "与问题描述不符、无关改动。工作区外的副作用无法回退。"
+                        )
+                        state.messages.append(user_message(review))
+                        continue
                 # Wave 4 W9: one-shot verify receipt (veto 13 — single, final-edge, tool facts).
                 if should_inject_verify_receipt(
                     state,
@@ -1285,19 +1474,21 @@ class AgentEngine:
                 )
             except (TypeError, ValueError):
                 return
+            read_path = str(
+                result.get("path")
+                or path_from_tool_arguments(
+                    call.get("input") if isinstance(call.get("input"), dict) else {}
+                )
+            )
             record_successful_read(
                 state.read_registry,
-                path=str(
-                    result.get("path")
-                    or path_from_tool_arguments(
-                        call.get("input") if isinstance(call.get("input"), dict) else {}
-                    )
-                ),
+                path=read_path,
                 offset=offset,
                 end_line=end_line,
                 truncated=bool(result.get("truncated")),
                 next_offset=next_offset,
                 whole_file_complete=bool(result.get("whole_file_complete")),
+                content_hash=disk_content_hash(read_path) or "",
             )
             return
 
@@ -1370,14 +1561,23 @@ class AgentEngine:
             if read_offset < 1:
                 read_offset = 1
             read_path = path_from_tool_arguments(args)
+            disk_hash = disk_content_hash(read_path)
             deny = deny_redundant_read(
                 state.read_registry,
                 path=read_path,
                 offset=read_offset,
                 evicted_paths=state.evicted_paths,
                 evicted_reread_used=state.evicted_reread_used,
+                disk_hash=disk_hash,
             )
             if deny:
+                try:
+                    from app.observability.metrics import metrics
+
+                    metrics.inc("coding_stale_read_deny")
+                    metrics.inc("stale_read_blocked", result="deny")
+                except Exception:
+                    pass
                 kind = (
                     "read_after_complete"
                     if deny.startswith("read_after_complete")
@@ -1536,12 +1736,37 @@ class AgentEngine:
         if not skip_read_cache:
             result = self._lookup_tool_cache(tool_name, arguments)
         if result is None:
-            result = await self._executor.run(
-                tool_name=tool_name,
-                tool_call_id=tool_call_id,
-                arguments=arguments,
-                state=state,
-            )
+            output_token = None
+            if tool_name in {"run_command", "run_tests"}:
+                from app.tools.core.shell import bind_command_output_sink
+
+                async def _stream_tail(text: str) -> None:
+                    await self._write_event(
+                        event_type="tool.delta",
+                        payload={
+                            "tool_call_id": tool_call_id,
+                            "tool_name": tool_name,
+                            "delta": text[-4000:],
+                        },
+                        step_index=step_index,
+                    )
+
+                output_token = bind_command_output_sink(_stream_tail)
+                _snapshot_touched_files(state)
+            try:
+                result = await self._executor.run(
+                    tool_name=tool_name,
+                    tool_call_id=tool_call_id,
+                    arguments=arguments,
+                    state=state,
+                )
+            finally:
+                if tool_name in {"run_command", "run_tests"}:
+                    _note_command_created(state)
+                if output_token is not None:
+                    from app.tools.core.shell import reset_command_output_sink
+
+                    reset_command_output_sink(output_token)
             if isinstance(result, dict):
                 from app.policy.inject import inject_tool_result
 
@@ -1580,14 +1805,34 @@ class AgentEngine:
                 next_off_i = int(next_off) if next_off is not None else None
             except (TypeError, ValueError):
                 next_off_i = None
+            read_path = str(result.get("path") or path_from_tool_arguments(arguments))
+            from app.engine.read_registry import normalize_read_path
+
+            prior = state.read_registry.get(normalize_read_path(read_path))
+            prior_hash = prior.content_hash if prior is not None else ""
+            disk_hash = disk_content_hash(read_path) or ""
+            if prior_hash and disk_hash and prior_hash != disk_hash:
+                result["changed_since_last_read"] = True
+                try:
+                    from app.observability.metrics import metrics
+
+                    metrics.inc("coding_stale_read_allow")
+                    metrics.inc("stale_read_blocked", result="allow")
+                except Exception:
+                    pass
+            if result.get("whole_file_complete") and isinstance(result.get("content"), str):
+                from app.engine.read_registry import remember_read_body
+
+                remember_read_body(read_path, str(result.get("content") or ""))
             record_successful_read(
                 state.read_registry,
-                path=str(result.get("path") or path_from_tool_arguments(arguments)),
+                path=read_path,
                 offset=off,
                 end_line=end_line,
                 truncated=bool(result.get("truncated")),
                 next_offset=next_off_i,
                 whole_file_complete=bool(result.get("whole_file_complete")),
+                content_hash=disk_hash,
             )
             consume_evicted_reread(
                 path=str(result.get("path") or path_from_tool_arguments(arguments)),
@@ -1608,6 +1853,42 @@ class AgentEngine:
                 result=result,
                 arguments=arguments if isinstance(arguments, dict) else None,
             )
+            touched = path_from_tool_arguments(arguments if isinstance(arguments, dict) else {})
+            if tool_name in {"edit_file", "write_file"} and result.get("status") in {"edited", "written"}:
+                note_written_hash(
+                    state.read_registry,
+                    path=str(result.get("path") or touched),
+                    content_hash=disk_content_hash(str(result.get("path") or touched)) or "",
+                )
+                _remember_edit(state, str(result.get("path") or touched), result)
+            if tool_name in {"run_command", "run_tests"} and not result.get("error"):
+                mark_registry_stale(state.read_registry)
+                state.last_test_command = str(result.get("command") or (arguments or {}).get("command") or "")
+                if isinstance(result.get("delta"), dict):
+                    state.last_test_delta = dict(result["delta"])
+                exit_code = result.get("exit_code", result.get("returncode"))
+                if exit_code in (0, "0") and state.last_test_command and not state.command_offer:
+                    from app.policy.gate import _workspace_build_command
+
+                    if tool_name == "run_tests" or _workspace_build_command(state.last_test_command):
+                        state.command_offer = (
+                            "测试或构建命令已通过，写入 AGENTS.md 需用户确认："
+                            + state.last_test_command[:120]
+                        )
+            if tool_name == "update_plan":
+                commands = [
+                    str(item.get("acceptance") or "").strip()
+                    for item in (result.get("items") or [])
+                    if isinstance(item, dict) and str(item.get("acceptance") or "").strip()
+                ]
+                if commands:
+                    state.acceptance_commands = commands
+                if isinstance(result.get("items"), list):
+                    state.plan_items = [item for item in result["items"] if isinstance(item, dict)]
+            if touched and tool_name in {"read_file", "edit_file", "write_file"}:
+                from app.context.project import append_path_rules
+
+                append_path_rules(state, touched)
         if settings.citation_verify_enabled:
             self._annotate_unverified_citations(tool_name, arguments, result)
 
@@ -1681,6 +1962,21 @@ class AgentEngine:
                 approval_payload["path"] = str(card_args.get("path", ""))
                 approval_payload["old_text"] = str(arguments.get("old_text", ""))
                 approval_payload["new_text"] = str(arguments.get("new_text", ""))
+                diff_text = _span_diff(
+                    approval_payload["path"],
+                    approval_payload["old_text"],
+                    approval_payload["new_text"],
+                )
+                if diff_text:
+                    await self._write_event(
+                        event_type="tool.delta",
+                        payload={
+                            "tool_call_id": tool_call_id,
+                            "tool_name": tool_name,
+                            "delta": diff_text[:8000],
+                        },
+                        step_index=step_index,
+                    )
             import uuid
 
             from app.policy.approval import POLICY_VERSION, canonical_args_hash

@@ -1210,6 +1210,9 @@ async def update_plan(
                 "status": status,
             }
         )
+        acceptance = str(item.get("acceptance") or "").strip()
+        if acceptance:
+            normalized[-1]["acceptance"] = acceptance[:300]
     # Soft discipline: at most one in_progress (keep first; demote extras to pending).
     if in_progress_count > 1 and not force_pending:
         seen = False

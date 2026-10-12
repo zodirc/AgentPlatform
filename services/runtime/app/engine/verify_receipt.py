@@ -108,10 +108,7 @@ def note_tool_result_for_verify(
     if name == "edit_file" and result.get("status") == "edited":
         impact = result.get("impact") if isinstance(result.get("impact"), dict) else {}
         checks = result.get("checks") if isinstance(result.get("checks"), dict) else {}
-        # Non-code paths skip impact/checks — do not arm verify.
-        if impact.get("reason") == "non_code_path" or (
-            checks.get("status") == "skipped" and impact.get("status") == "skipped"
-        ):
+        if impact.get("reason") == "non_code_path" or checks.get("reason") == "non_code_path":
             return
         state.code_edits_since_verify = int(getattr(state, "code_edits_since_verify", 0) or 0) + 1
         state.verify_pending = True
@@ -479,6 +476,36 @@ def _build_lore_receipt_text() -> str:
     return _scene_rebuild_receipt_text()
 
 
+def verification_outcome(state: Any) -> str:
+    """Turn 终态：代码改动有没有被一次测试命令覆盖。"""
+    pending = bool(getattr(state, "verify_pending", False))
+    edits = int(getattr(state, "code_edits_since_verify", 0) or 0)
+    failure = str(getattr(state, "last_test_first_failure", "") or "").strip()
+    if edits <= 0 and not pending and not failure:
+        return "not_applicable"
+    if pending:
+        return "unverified"
+    if failure:
+        return "failed"
+    return "verified"
+
+
+def _one_related_command(related: list[Any]) -> tuple[str, int]:
+    """选路径最长的一条命令，其余只报数量。"""
+    chosen: list[tuple[int, str]] = []
+    for item in related:
+        if isinstance(item, dict):
+            command = str(item.get("command") or "").strip()
+            if command:
+                chosen.append((len(str(item.get("path") or "")), command))
+        elif isinstance(item, str) and item.strip():
+            chosen.append((0, item.strip()))
+    if not chosen:
+        return "", 0
+    chosen.sort(key=lambda item: item[0], reverse=True)
+    return chosen[0][1], max(0, len(chosen) - 1)
+
+
 def _build_classic_receipt_text(state: Any) -> str:
     """经典 coding verify：未跑测试的编辑计数、related_tests、末次 repro/失败摘要。"""
     n = int(getattr(state, "code_edits_since_verify", 0) or 0)
@@ -486,18 +513,11 @@ def _build_classic_receipt_text(state: Any) -> str:
         f"verify_receipt: 本 Turn 改动 {n} 个代码文件，最后一次编辑后未运行任何测试",
     ]
     related = list(getattr(state, "related_tests_union", None) or [])
-    if related:
-        lines.append("  related_tests:")
-        for item in related[:_RELATED_CAP]:
-            if isinstance(item, dict):
-                path = str(item.get("path") or "")
-                cmd = str(item.get("command") or "")
-                if path and cmd:
-                    lines.append(f"    - {path} | {cmd}")
-                elif path:
-                    lines.append(f"    - {path}")
-            elif isinstance(item, str) and item.strip():
-                lines.append(f"    - {item.strip()}")
+    command, extra = _one_related_command(related)
+    if command:
+        lines.append(f"  建议命令: {command}")
+        if extra:
+            lines.append(f"  另有 {extra} 条相关测试，先跑上面这一条")
     repro = str(getattr(state, "last_repro_command", "") or "").strip()
     if repro:
         lines.append(f"  repro: {repro}")
@@ -506,6 +526,23 @@ def _build_classic_receipt_text(state: Any) -> str:
         lines.append("  last_failure:")
         for fline in fail.splitlines():
             lines.append(f"    {fline}")
+    last_cmd = str(getattr(state, "last_test_command", "") or "").strip()
+    delta = getattr(state, "last_test_delta", None)
+    if last_cmd:
+        lines.append(f"  最近命令: {last_cmd}")
+    if isinstance(delta, dict) and delta:
+        lines.append(
+            "  delta: "
+            + " ".join(
+                f"{key}={len(delta.get(key) or [])}"
+                for key in ("newly_failing", "newly_passing", "still_failing")
+            )
+        )
+    from app.engine.product_finish import acceptance_gap
+
+    gap = acceptance_gap(state)
+    if gap:
+        lines.append(f"  {gap}")
     lines.append(
         "  要求: 运行上述任一验证后再交卷；若有 last_failure 须针对该条修复并重跑同一测；"
         "确实无法运行则说明原因后交卷"

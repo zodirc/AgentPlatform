@@ -23,6 +23,7 @@ READONLY_DELEGATE_TYPES = frozenset(
         "researcher",
         "fact_checker",
         "planner",
+        "review",
     }
 )
 

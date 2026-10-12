@@ -305,12 +305,16 @@ read serr 1 2
 
 
 def test_issue_repro_casefold_without_claim_phrase() -> None:
+    from app.settings import settings
     from app.structural.issue_repro import (
         extract_issue_repro_hints,
         obligations_met_for_command,
     )
 
-    problem = """
+    previous = settings.issue_repro_domain_plugins
+    settings.issue_repro_domain_plugins = True
+    try:
+        problem = """
 QDP reader fails on:
 ```
 read serr 1 2
@@ -318,51 +322,59 @@ read serr 1 2
 ```
 >>> Table.read('test.qdp', format='ascii.qdp')
 """
-    hints = extract_issue_repro_hints(problem)
-    assert hints["need_casefold"] is True
-    assert "no" not in hints["required_tokens"]
-    repro = (
-        'python -c "from astropy.table import Table; '
-        "open('t.qdp','w').write('read serr 1 2\\n1 0.5 1 0.5\\n'); "
-        'Table.read(\'t.qdp\', format=\'ascii.qdp\')"'
-    )
-    assert obligations_met_for_command(repro, hints) is False
-    repro_cf = (
-        'python -c "from astropy.table import Table; '
-        "body='read serr 1 2\\n1 0.5 1 0.5\\n'; "
-        "open('t.qdp','w').write(body.lower()); "
-        'Table.read(\'t.qdp\', format=\'ascii.qdp\')"'
-    )
-    assert obligations_met_for_command(repro_cf, hints) is True
+        hints = extract_issue_repro_hints(problem)
+        assert hints["need_casefold"] is True
+        assert "no" not in hints["required_tokens"]
+        repro = (
+            'python -c "from astropy.table import Table; '
+            "open('t.qdp','w').write('read serr 1 2\\n1 0.5 1 0.5\\n'); "
+            'Table.read(\'t.qdp\', format=\'ascii.qdp\')"'
+        )
+        assert obligations_met_for_command(repro, hints) is False
+        repro_cf = (
+            'python -c "from astropy.table import Table; '
+            "body='read serr 1 2\\n1 0.5 1 0.5\\n'; "
+            "open('t.qdp','w').write(body.lower()); "
+            'Table.read(\'t.qdp\', format=\'ascii.qdp\')"'
+        )
+        assert obligations_met_for_command(repro_cf, hints) is True
+    finally:
+        settings.issue_repro_domain_plugins = previous
 
 
 def test_issue_repro_roundtrip_required_for_write_header_rows() -> None:
+    from app.settings import settings
     from app.structural.issue_repro import (
         extract_issue_repro_hints,
         obligations_met_for_command,
     )
 
-    problem = """
+    previous = settings.issue_repro_domain_plugins
+    settings.issue_repro_domain_plugins = True
+    try:
+        problem = """
 Please support header rows in RestructuredText output
 >>> tbl.write(sys.stdout, format="ascii.rst", header_rows=["name", "unit"])
 TypeError: RST.__init__() got an unexpected keyword argument 'header_rows'
 """
-    hints = extract_issue_repro_hints(problem)
-    assert hints["need_roundtrip"] is True
-    assert "header_rows" in hints["roundtrip_kwargs"]
-    assert any("ascii.rst" in f for f in hints["roundtrip_formats"])
-    write_only = (
-        'python -c "t.write(\'o.txt\', format=\'ascii.rst\', '
-        'header_rows=[\'name\',\'unit\'])"'
-    )
-    assert obligations_met_for_command(write_only, hints) is False
-    roundtrip = (
-        'python -c "from astropy.table import Table, QTable; import astropy.units as u; '
-        "t=QTable({'wave':[350,950]*u.nm}); "
-        "t.write('o.txt', format='ascii.rst', header_rows=['name','unit']); "
-        "Table.read('o.txt', format='ascii.rst', header_rows=['name','unit'])\""
-    )
-    assert obligations_met_for_command(roundtrip, hints) is True
+        hints = extract_issue_repro_hints(problem)
+        assert hints["need_roundtrip"] is True
+        assert "header_rows" in hints["roundtrip_kwargs"]
+        assert any("ascii.rst" in f for f in hints["roundtrip_formats"])
+        write_only = (
+            'python -c "t.write(\'o.txt\', format=\'ascii.rst\', '
+            'header_rows=[\'name\',\'unit\'])"'
+        )
+        assert obligations_met_for_command(write_only, hints) is False
+        roundtrip = (
+            'python -c "from astropy.table import Table, QTable; import astropy.units as u; '
+            "t=QTable({'wave':[350,950]*u.nm}); "
+            "t.write('o.txt', format='ascii.rst', header_rows=['name','unit']); "
+            "Table.read('o.txt', format='ascii.rst', header_rows=['name','unit'])\""
+        )
+        assert obligations_met_for_command(roundtrip, hints) is True
+    finally:
+        settings.issue_repro_domain_plugins = previous
 
 
 def test_issue_repro_fail_signal_blocks_clearing() -> None:

@@ -83,6 +83,19 @@ class TurnState:
     # Version pinned when the turn started. Loosening waits for the next turn.
     pinned_policy_version: str = ""
     s1_snapshots: dict[str, Any] = field(default_factory=dict)
+    shadow_snapshot_id: str = ""
+    permission_mode: str = "ask"
+    edited_files: list[dict[str, Any]] = field(default_factory=list)
+    last_test_command: str = ""
+    last_test_delta: dict[str, Any] = field(default_factory=dict)
+    product_hook_ran: bool = False
+    diff_stat_sent: bool = False
+    acceptance_commands: list[str] = field(default_factory=list)
+    s1_granted_this_turn: bool = False
+    s2_granted_this_turn: bool = False
+    plan_items: list[dict[str, Any]] = field(default_factory=list)
+    review_sent: bool = False
+    command_offer: str = ""
     # docs/34 RC1 — Turn 级 read_file 覆盖（read-after-complete 硬门）。
     read_registry: dict[str, PathReadState] = field(default_factory=dict)
     # C1：完整 read 正文已离开可见 assemble 窗口（fold/collapse/snip）的路径。

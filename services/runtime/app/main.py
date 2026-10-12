@@ -185,6 +185,7 @@ async def start_turn_command(
         model_override=override_dict,
         ops_eval=bool(body.ops_eval),
         clear_context=bool(body.clear_context),
+        permission_mode=str(getattr(body, "permission_mode", None) or "ask"),
     )
     return {"accepted": True, "turn_id": str(body.turn_id)}
 
@@ -729,6 +730,102 @@ async def workspace_sources_index_status(
 
     with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
         return sources_index_status(path=path)
+
+
+@workspace_router.post("/rollback/turn")
+async def workspace_rollback_turn(
+    turn_id: str,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    """按影子 git 恢复本 Turn 记过的路径。工作区外的副作用无法撤销。"""
+    from app.policy.shadow_git import restore_turn
+    from app.services.workspace_scope import workspace_tenant_scope
+    from app.tenant_context import current_work_root_path
+
+    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
+        restored = restore_turn(current_work_root_path(), turn_id=turn_id)
+    return {
+        "restored": restored,
+        "note": "工作区外的副作用无法撤销",
+    }
+
+
+@workspace_router.post("/rollback/file")
+async def workspace_rollback_file(
+    turn_id: str,
+    path: str,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    """恢复单个路径，并记下用户撤销了该文件。"""
+    from app.policy.shadow_git import note_user_revert, restore_file
+    from app.services.workspace_scope import workspace_tenant_scope
+    from app.tenant_context import current_work_root_path
+
+    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
+        outcome = restore_file(current_work_root_path(), path, turn_id=turn_id)
+    if outcome is None:
+        raise HTTPException(status_code=404, detail="no shadow snapshot for path")
+    note_user_revert(path)
+    return {"path": path, "outcome": outcome, "note": "工作区外的副作用无法撤销"}
+
+
+@workspace_router.get("/rollback/diff")
+async def workspace_rollback_diff(
+    turn_id: str,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
+    from_rev: str | None = None,
+    to_rev: str | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    from app.policy.shadow_git import changed_paths, diff_between, diff_since
+    from app.services.workspace_scope import workspace_tenant_scope
+    from app.tenant_context import current_work_root_path
+
+    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
+        root = current_work_root_path()
+        if from_rev and to_rev:
+            stat = diff_between(root, from_rev, to_rev)
+        else:
+            stat = diff_since(root, turn_id=turn_id)
+        files = changed_paths(root, turn_id=turn_id)
+    return {
+        "stat": stat,
+        "files": [row["path"] for row in files],
+        "changes": files,
+        "note": "工作区外的副作用无法撤销",
+    }
+
+
+@workspace_router.post("/agents-md")
+async def workspace_append_agents_command(
+    command: str,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    """经用户确认后，把一条命令写入 AGENTS.md。"""
+    from app.context.project import append_agents_command
+    from app.services.workspace_scope import workspace_tenant_scope
+    from app.tenant_context import current_work_root_path
+
+    try:
+        with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
+            return append_agents_command(current_work_root_path(), command)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @workspace_router.get("/ast-index/status")

@@ -80,6 +80,23 @@ async def authorize(
             ),
             depth=current_delegate_depth(),
         )
+    from app.tools.core.paths import write_path_block
+
+    for key in ("path", "new_path"):
+        blocked_path = write_path_block(str(arguments.get(key) or ""))
+        if blocked_path is not None:
+            return _child_or(
+                _blocked(
+                    status="deny",
+                    tool_name=tool_name,
+                    tool_call_id=tool_call_id,
+                    reason="refusing to write .git/**",
+                    sink_class="S5",
+                    window_taint=window,
+                    state=state,
+                ),
+                depth=current_delegate_depth(),
+            )
 
     from app.policy.matrix import tool_emergency_denied
 
@@ -215,8 +232,71 @@ async def authorize(
             decision = tightened
             reason = "detector tightened"
 
+    mode = str(getattr(state, "permission_mode", "ask") or "ask")
+    shadow_ok = bool(getattr(state, "shadow_snapshot_id", ""))
+    forced = _force_approval(tool_name, arguments)
+    command = str(arguments.get("command") or "")
+    if mode == "ask" and getattr(state, "s1_granted_this_turn", False) and shadow_ok and sink == "S1" and decision == "require_approval" and not forced:
+        decision, reason = "allow", "ask sticky write"
+    elif mode == "auto_edit" and shadow_ok and sink == "S1" and decision == "require_approval" and not forced:
+        decision, reason = "allow", "auto_edit with rollback"
+    elif mode == "full_auto" and sink == "S1" and shadow_ok and decision == "require_approval" and not forced:
+        decision, reason = "allow", "full_auto with rollback"
+    elif (
+        sink == "S2"
+        and decision == "require_approval"
+        and not forced
+        and _workspace_build_command(command)
+        and not _network_needs_approval(command)
+    ):
+        from app.policy.plane import sandbox_is_ready
+        from app.tenant_context import current_ops_eval
+
+        if sandbox_is_ready() and not current_ops_eval() and not getattr(state, "ops_eval", False):
+            decision, reason = "allow", "workspace build or test"
+    elif (
+        mode == "ask"
+        and getattr(state, "s2_granted_this_turn", False)
+        and sink == "S2"
+        and decision == "require_approval"
+        and not forced
+        and not _network_needs_approval(command)
+    ):
+        decision, reason = "allow", "ask sticky command"
+    elif (
+        mode == "full_auto"
+        and sink == "S2"
+        and decision == "require_approval"
+        and not forced
+        and not _network_needs_approval(command)
+    ):
+        decision, reason = "allow", "full_auto workspace command"
+    elif _readonly_command(command) and decision == "require_approval" and sink == "S2":
+        decision, reason = "allow", "readonly command"
+    egress_hosts = _egress_hosts(arguments)
+    if egress_hosts and not granted:
+        decision, reason = "require_approval", "egress host"
+    if arguments.get("sandbox_relax") and not granted and decision == "allow":
+        decision, reason = "require_approval", "sandbox relax"
     if decision == "allow" or (decision == "require_approval" and granted):
-        return None
+        if forced and not granted:
+            decision, reason = "require_approval", forced
+        else:
+            if granted and egress_hosts:
+                from app.policy.egress_proxy import grant_hosts
+
+                grant_hosts(egress_hosts)
+            if granted and mode == "ask":
+                if sink == "S1":
+                    state.s1_granted_this_turn = True
+                if (
+                    sink == "S2"
+                    and not forced
+                    and not egress_hosts
+                    and not _network_needs_approval(command)
+                ):
+                    state.s2_granted_this_turn = True
+            return None
     blocked = _blocked(
         status="deny" if decision == "deny" else "approval_required",
         tool_name=tool_name,
@@ -283,3 +363,79 @@ async def _legacy(
         window_taint=window,
         state=state,
     )
+
+
+def _force_approval(tool_name: str, arguments: dict[str, Any]) -> str:
+    """执行配置与破坏性命令即使矩阵放行，也要本次审批。"""
+    from app.tools.core.paths import is_exec_config_path
+
+    for key in ("path", "new_path"):
+        raw = str(arguments.get(key) or "")
+        if raw and is_exec_config_path(raw):
+            return "executable config"
+    if tool_name in {"run_command", "run_tests"} and _destructive_command(
+        str(arguments.get("command") or "")
+    ):
+        return "destructive command"
+    return ""
+
+
+def _egress_hosts(arguments: dict[str, Any]) -> list[str]:
+    raw = arguments.get("egress_hosts")
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return []
+    hosts: list[str] = []
+    for item in raw:
+        name = str(item or "").strip().lower().rstrip(".")
+        if name and name not in hosts:
+            hosts.append(name)
+    return hosts[:8]
+
+
+def _destructive_command(command: str) -> bool:
+    lowered = " ".join(command.lower().split())
+    if "git reset --hard" in lowered or "git push" in lowered:
+        return True
+    if "git clean" in lowered and "-f" in lowered:
+        return True
+    if "rm -rf" in lowered or "rm -fr" in lowered:
+        return True
+    return False
+
+
+def _workspace_build_command(command: str) -> bool:
+    import re
+
+    text = " ".join(command.strip().split())
+    return bool(
+        re.match(
+            r"^(pytest\b|python3? -m pytest\b|go test\b|cargo (test|build|check|fmt)\b|"
+            r"(npm|pnpm|yarn) (test|run build)\b|npx (vitest|jest|eslint|prettier)\b|"
+            r"ruff (check|format)\b|black\b|gofmt\b|go fmt\b|uv run pytest\b)",
+            text,
+        )
+    )
+
+
+def _readonly_command(command: str) -> bool:
+    import re
+
+    text = " ".join(command.strip().split())
+    return bool(
+        re.match(
+            r"^(git(\s+-C\s+\S+)?\s+(status|diff|log|show)\b|ls\b|pwd\b|(python|python3|node|go)\s+--version\b)",
+            text,
+        )
+    )
+
+
+def _network_needs_approval(command: str) -> bool:
+    """自定义镜像源或非包注册表的安装命令仍要审批。"""
+    import re
+
+    text = command.strip()
+    if re.search(r"(--index-url|--extra-index-url|--registry\s+\S+|-i\s+\S+)", text):
+        return True
+    return False

@@ -179,7 +179,10 @@ class PlanSuggestWeights:
     soft_min_len: int = 24
 
     def threshold_for(self, scenario_id: str | None) -> int:
-        """按场景取阈值；Profile.plan_suggest.threshold 优先于本 dataclass。
+        """按场景取阈值。分数达到该值才建议做计划。
+
+        三个以上文件路径，或多处验收例子，会单独加分，从而跨过这个阈值。
+        Profile.plan_suggest.threshold 优先于本 dataclass。
 
         参数:
             scenario_id: 场景键；空则按 writing。
@@ -353,8 +356,9 @@ def evaluate_plan_suggest(
 ) -> PlanSuggestDecision:
     """对用户消息做复杂度打分，决定是否弹出 Plan 软建议。
 
-    冷却中、过短、已带 Plan/执行前缀、纯「继续」等直接否决；
-    多目标/显式规划/多路径/高风险词加分，续写与微改减分。
+    多目标、显式规划、至少三个文件路径、两条以上验收或围栏、高风险词加分。
+    ``threshold`` 默认 4：一条强信号（多个编号目标或显式规划）即可建议，
+    弱信号要叠到 4 分。冷却中、过短、已带 Plan/执行前缀、纯「继续」直接否决。
 
     参数:
         message: 用户原文。
@@ -411,8 +415,12 @@ def evaluate_plan_suggest(
 
     at_paths = len(_PATH_AT.findall(text))
     chapters = len(_CHAPTER_REF.findall(text))
-    if at_paths >= 2 or chapters >= 2:
+    fileish = set(re.findall(r"[\w./-]+\.(?:py|ts|tsx|js|jsx|go|rs|java|md)\b", text))
+    if at_paths >= 2 or chapters >= 2 or len(fileish) >= 3:
         push("multi_path", w.multi_path)
+    fences = text.count("```")
+    if (fences >= 4 or text.count("验收") >= 2) and "explicit_plan" not in signals:
+        push("explicit_plan", w.explicit_plan)
 
     lower = text.lower()
     # ASCII token 用 lower 匹配；中文 token 保留原文匹配。

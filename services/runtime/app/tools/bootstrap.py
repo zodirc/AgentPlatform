@@ -375,6 +375,7 @@ def build_registry() -> ToolRegistry:
                                         "cancelled",
                                     ],
                                 },
+                                "acceptance": {"type": "string"},
                             },
                         },
                     },
@@ -902,6 +903,19 @@ def build_registry() -> ToolRegistry:
                     "path": {"type": "string"},
                     "old_text": {"type": "string"},
                     "new_text": {"type": "string"},
+                    "replace_all": {"type": "boolean", "default": False},
+                    "edits": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "old_text": {"type": "string"},
+                                "new_text": {"type": "string"},
+                                "replace_all": {"type": "boolean"},
+                            },
+                            "required": ["old_text", "new_text"],
+                        },
+                    },
                 },
                 "required": ["path", "old_text", "new_text"],
             },
@@ -921,7 +935,11 @@ def build_registry() -> ToolRegistry:
             ),
             parameters={
                 "type": "object",
-                "properties": {"command": {"type": "string", "default": "pytest -q"}},
+                "properties": {
+                    "command": {"type": "string", "default": "pytest -q"},
+                    "timeout_s": {"type": "number"},
+                    "cwd": {"type": "string"},
+                },
             },
             handler=core.run_tests,
             requires_approval=True,
@@ -1129,9 +1147,10 @@ def build_registry() -> ToolRegistry:
             description=(
                 "Execute a shell command in the workspace (requires approval). Use for "
                 "builds, installs, or non-standard checks whose stdout is needed. "
-                "Sandbox limits writable FS to the work root; outbound network stays on. "
-                "exit_code!=0 means the command ran and failed — inspect stderr; do not "
-                "blame the OS sandbox for 'no network'. Child env is allowlisted (no API keys "
+                "Sandbox keeps the network off. Registry and GitHub reads go through the "
+                "egress proxy. Other hosts fail until you pass egress_hosts and the user "
+                "approves. exit_code!=0 means the command ran and failed — inspect stderr. "
+                "Child env is allowlisted (no API keys "
                 "unless the platform injects them). Never put secrets in the command string. "
                 "FORBIDDEN as a substitute for read_file / grep / goto_definition: do not run "
                 "cat, head, tail, sed -n, awk, less, wc, find, rg, or grep just to page or "
@@ -1142,7 +1161,15 @@ def build_registry() -> ToolRegistry:
             ),
             parameters={
                 "type": "object",
-                "properties": {"command": {"type": "string"}},
+                "properties": {
+                    "command": {"type": "string"},
+                    "timeout_s": {"type": "number"},
+                    "background": {"type": "boolean"},
+                    "job_id": {"type": "string"},
+                    "kill": {"type": "boolean"},
+                    "sandbox_relax": {"type": "boolean"},
+                    "egress_hosts": {"type": "array", "items": {"type": "string"}},
+                },
                 "required": ["command"],
             },
             handler=core.run_command,

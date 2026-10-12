@@ -317,7 +317,7 @@ class Settings(BaseSettings):
     compact_model_name: str = ""
     compact_model_provider: str = ""
     # AH3: project context + @path prereread budgets.
-    project_context_max_chars: int = 2_000
+    project_context_max_chars: int = 8_192
     path_preread_max_chars: int = 1_200
     path_preread_timeout_seconds: float = 0.4
     path_preread_max_files: int = 3
@@ -335,6 +335,11 @@ class Settings(BaseSettings):
     structural_checks_timeout_s: float = 30.0
     # Wave 2 W3: span miss / non-unique candidate echo budget.
     structural_span_candidates: int = 5
+    structural_match_trailing_ws: bool = True
+    structural_match_reindent: bool = False
+    product_post_edit_hook: bool = True
+    # 领域 issue 复现规则（astropy Table 等）默认关闭，只在对照实验里打开。
+    issue_repro_domain_plugins: bool = False
     # Soft prewarm when an agent Work starts (does not block TTFB / R1).
     structural_prewarm: bool = True
     # Wave 4 W9: omit verify_receipt when remaining steps < this reserve.

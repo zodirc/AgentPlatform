@@ -467,6 +467,7 @@ async def start_turn(
     model_override: dict | None = None,
     ops_eval: bool = False,
     clear_context: bool = False,
+    permission_mode: str = "ask",
     already_claimed: bool = False,
     reject_when_full: bool = True,
 ) -> None:
@@ -581,6 +582,7 @@ async def start_turn(
             plan_phase=plan_phase,
             ops_eval=bool(ops_eval),
             clear_context=bool(clear_context),
+            permission_mode=permission_mode or "ask",
         )
     except Exception as exc:
         logger.exception("start_turn failed turn_id=%s", turn_id)
@@ -1282,6 +1284,33 @@ async def _finalize_turn(
             if state.delivery is not None:
                 completed_payload.update(state.delivery)
             completed_payload.update(_post_turn_jobs_payload(state.scenario_id))
+            from app.engine.verify_receipt import verification_outcome
+
+            completed_payload["verification"] = verification_outcome(state)
+            if getattr(state, "last_test_command", ""):
+                completed_payload["last_test_command"] = str(state.last_test_command)[:1024]
+            offer = str(getattr(state, "command_offer", "") or "").strip()
+            if offer:
+                completed_payload["command_offer"] = offer[:300]
+            if getattr(state, "last_test_delta", None):
+                completed_payload["test_delta"] = dict(state.last_test_delta)
+            if completed_payload["verification"] == "verified":
+                try:
+                    from app.observability.metrics import metrics
+
+                    metrics.inc("coding_verified_finish")
+                    if getattr(state, "verify_receipt_sent", False):
+                        metrics.inc("receipt_followthrough")
+                except Exception:
+                    pass
+            if completed_payload["verification"] == "unverified":
+                try:
+                    from app.observability.metrics import metrics
+
+                    metrics.inc("coding_unverified_finish")
+                    metrics.inc("unverified_finish")
+                except Exception:
+                    pass
             await append_event(
                 conn,
                 turn_id=turn_id,
@@ -1454,6 +1483,7 @@ async def _run_turn(
     plan_phase: str | None = None,
     ops_eval: bool = False,
     clear_context: bool = False,
+    permission_mode: str = "ask",
 ) -> None:
     """单次 Turn 主路径：Intake → ``turn.accepted`` →（本地短接 | Engine）→ 终态。
 
@@ -1706,10 +1736,16 @@ async def _run_turn(
         ops_eval=bool(ops_eval),
         writes_preapproved=False,
         exec_preapproved=False,
+        permission_mode=permission_mode if permission_mode in {"ask", "auto_edit", "full_auto"} else "ask",
         pinned_policy_version=POLICY_VERSION,
         turn_user_text=message or "",
         turn_token_budget=int((profile.generation or {}).get("turn_token_budget") or 0),
     )
+    if scenario_id == "agent" and not ops_eval and (message or "").count("```") >= 2:
+        note = "验收例子在用户消息的代码块里；计划项用 acceptance 记下要跑的命令。"
+        hint = str(state.plan_hint or "")
+        if note not in hint:
+            state.plan_hint = (f"{hint}\n{note}".strip())[:500]
 
     registry = build_registry()
     # Structural lane: soft prewarm when Profile declares it — never await on StartTurn / first token.

@@ -82,7 +82,24 @@ def serialize_state(state: TurnState) -> dict[str, Any]:
         "window_taint": str(getattr(state, "window_taint", "user") or "user"),
         "last_external_tool": str(getattr(state, "last_external_tool", "") or ""),
         "pinned_policy_version": str(getattr(state, "pinned_policy_version", "") or ""),
-        "s1_snapshots": _snapshot_payload(getattr(state, "s1_snapshots", None)),
+        "shadow_snapshot_id": str(getattr(state, "shadow_snapshot_id", "") or ""),
+        "permission_mode": str(getattr(state, "permission_mode", "ask") or "ask"),
+        "edited_files": list(getattr(state, "edited_files", None) or []),
+        "last_test_command": str(getattr(state, "last_test_command", "") or ""),
+        "last_test_delta": dict(getattr(state, "last_test_delta", None) or {}),
+        "product_hook_ran": bool(getattr(state, "product_hook_ran", False)),
+        "diff_stat_sent": bool(getattr(state, "diff_stat_sent", False)),
+        "acceptance_commands": list(getattr(state, "acceptance_commands", None) or []),
+        "s1_granted_this_turn": bool(getattr(state, "s1_granted_this_turn", False)),
+        "s2_granted_this_turn": bool(getattr(state, "s2_granted_this_turn", False)),
+        "plan_items": [item for item in (getattr(state, "plan_items", None) or []) if isinstance(item, dict)],
+        "review_sent": bool(getattr(state, "review_sent", False)),
+        "command_offer": str(getattr(state, "command_offer", "") or ""),
+        "s1_snapshots": (
+            {}
+            if getattr(state, "shadow_snapshot_id", "")
+            else _snapshot_payload(getattr(state, "s1_snapshots", None))
+        ),
         "read_registry": serialize_read_registry(state.read_registry),
         # C1: survive approve/deny checkpoint resume.
         "evicted_paths": sorted(state.evicted_paths),
@@ -187,6 +204,19 @@ def deserialize_state(data: dict[str, Any]) -> TurnState:
         last_external_tool=str(data.get("last_external_tool") or ""),
         pinned_policy_version=str(data.get("pinned_policy_version") or ""),
         s1_snapshots=_snapshot_load(data.get("s1_snapshots")),
+        shadow_snapshot_id=str(data.get("shadow_snapshot_id") or ""),
+        permission_mode=str(data.get("permission_mode") or "ask"),
+        edited_files=[item for item in (data.get("edited_files") or []) if isinstance(item, dict)],
+        last_test_command=str(data.get("last_test_command") or ""),
+        last_test_delta=dict(data["last_test_delta"]) if isinstance(data.get("last_test_delta"), dict) else {},
+        product_hook_ran=bool(data.get("product_hook_ran", False)),
+        diff_stat_sent=bool(data.get("diff_stat_sent", False)),
+        acceptance_commands=[str(item) for item in (data.get("acceptance_commands") or []) if str(item).strip()],
+        s1_granted_this_turn=bool(data.get("s1_granted_this_turn", False)),
+        s2_granted_this_turn=bool(data.get("s2_granted_this_turn", False)),
+        plan_items=[item for item in (data.get("plan_items") or []) if isinstance(item, dict)],
+        review_sent=bool(data.get("review_sent", False)),
+        command_offer=str(data.get("command_offer") or ""),
         read_registry=deserialize_read_registry(data.get("read_registry")),
         evicted_paths={
             str(p) for p in (data.get("evicted_paths") or []) if str(p).strip()

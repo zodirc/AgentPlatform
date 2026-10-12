@@ -30,6 +30,44 @@ MAX_DELEGATE_DEPTH = 2
 # Nested engines share the parent Turn budget; 8 was too tight for edit+smoke.
 DEFAULT_SUBAGENT_MAX_STEPS = 12
 
+
+def _bind_edit_worktree(subagent_id: str):
+    """编辑子代理用 Work 外的 git worktree。失败则返回 None，调用方限制只写补丁目录。"""
+    import subprocess
+
+    from app.tenant_context import (
+        bind_tenant_context,
+        current_ops_eval,
+        current_owner_user_id,
+        current_work_id,
+        current_work_root_path,
+    )
+
+    root = current_work_root_path()
+    if not (root / ".git").is_dir():
+        return None
+    dest = root.parent / ".agent-worktrees" / subagent_id
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        proc = subprocess.run(
+            ["git", "worktree", "add", "--detach", str(dest), "HEAD"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0 or not dest.is_dir():
+        return None
+    return bind_tenant_context(
+        work_root=str(dest),
+        work_id=current_work_id(),
+        owner_user_id=current_owner_user_id(),
+        ops_eval=current_ops_eval(),
+    )
+
 _ARTIFACT_REFS_LINE = re.compile(r"(?im)^\s*ARTIFACT_REFS\s*:\s*(.+)$")
 
 SUBAGENT_TOOL_NAMES: dict[str, list[str]] = {
@@ -74,6 +112,7 @@ SUBAGENT_TOOL_NAMES: dict[str, list[str]] = {
         "read_lints",
     ],
     "planner": ["read_file", "list_dir", "update_plan", "grep"],
+    "review": ["read_file", "grep", "read_lints"],
     "shell": ["read_file", "grep", "run_command"],
 }
 
@@ -279,9 +318,20 @@ async def run_delegate(
         )
 
     depth_token = bump_delegate_depth()
+    worktree_tokens = None
     try:
+        if agent_type == "edit":
+            worktree_tokens = _bind_edit_worktree(subagent_id)
         suffix = (ctx.parent_profile.subagent_prompt_suffix or "").strip()
         collab_board = f" {suffix}" if suffix else ""
+        patch_only = ""
+        if agent_type == "edit" and worktree_tokens is None:
+            patch_only = " 无法建立独立 worktree 时，只把补丁写到 .agent/patches。"
+        if agent_type == "review":
+            patch_only = (
+                " 只读审阅：遗留调试代码、未处理的错误路径、与问题描述不符、无关改动。"
+                " 工作区外的副作用无法回退。"
+            )
         engine = AgentEngine(
             gateway=ctx.gateway,
             tools=sub_tools,
@@ -289,13 +339,17 @@ async def run_delegate(
                 f"You are a focused {agent_type} sub-agent. "
                 "Complete the delegated task using tools; return a concise factual summary. "
                 "Prefer read_file on [context_refs] / [hot_files] paths instead of inventing paths "
-                f"or pasting large file bodies yourself.{collab_board}"
+                f"or pasting large file bodies yourself.{collab_board}{patch_only}"
             ),
             write_event=sub_write_event,
             check_cancel=ctx.check_cancel,
         )
         summary = await engine.run(sub_state)
     finally:
+        if worktree_tokens is not None:
+            from app.tenant_context import reset_tenant_context
+
+            reset_tenant_context(worktree_tokens)
         reset_delegate_depth(depth_token)
 
     if summary == "waiting_approval":

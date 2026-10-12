@@ -98,6 +98,10 @@ async def _dispatch_command(row: dict) -> None:
         )
     elif cmd_type == "cancel":
         await request_cancel(turn_id, force=bool(payload.get("force")))
+    elif cmd_type == "steer":
+        from app.engine.steer_inbox import push_steer
+
+        push_steer(run_id, str(payload.get("text") or payload.get("message") or ""))
     else:
         logger.warning("unknown run command type=%s id=%s", cmd_type, row["id"])
 

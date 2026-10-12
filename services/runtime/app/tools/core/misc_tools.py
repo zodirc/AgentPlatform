@@ -11,6 +11,59 @@ from typing import Any
 from app.settings import settings
 from app.tools.core.paths import _resolve_path, _workspace_root
 
+def _command_timeout(kwargs: dict[str, Any]) -> float:
+    """模型可调超时：默认至少 120 秒，上限 600。"""
+    raw = kwargs.get("timeout_s")
+    floor = max(120.0, float(settings.tool_default_timeout_seconds))
+    try:
+        chosen = float(raw) if raw is not None else floor
+    except (TypeError, ValueError):
+        chosen = floor
+    return max(1.0, min(600.0, chosen))
+
+
+def _finish_command_result(result: dict[str, Any], *, command: str) -> dict[str, Any]:
+    """打码输出、标出 sandbox 拒绝，并给超时一个可操作的提示。"""
+    import re
+
+    from app.privacy.redact import redact_text
+    from app.privacy.secret_scan import redact_secrets
+    from app.structural.test_summary import is_testish_command, note_test_delta
+
+    out = dict(result)
+    for key in ("stdout", "stderr"):
+        text = out.get(key)
+        if isinstance(text, str) and text:
+            cleaned = redact_secrets(redact_text(text))
+            if out.get("status") == "timeout" and len(cleaned) > 2048:
+                cleaned = cleaned[-2048:]
+            out[key] = cleaned
+    blob = f"{out.get('stdout') or ''}\n{out.get('stderr') or ''}"
+    if any(token in blob for token in ("EPERM", "EACCES", "Operation not permitted")):
+        match = re.search(r"((?:/|\./)[^\s:'\"]+)", blob)
+        denied = match.group(1) if match else ""
+        out["sandbox_denied"] = True
+        if denied:
+            out["denied_path"] = denied
+        hint = " sandbox_denied"
+        if denied:
+            hint += f": {denied}"
+        hint += "。可带 sandbox_relax 再请求一次，该次需要审批。"
+        out["summary"] = (str(out.get("summary") or "").rstrip() + hint).strip()
+    if out.get("status") == "timeout":
+        out["summary"] = (
+            str(out.get("summary") or "").rstrip()
+            + " 建议加大 timeout_s（上限 600）或缩小到单个测试文件。"
+        ).strip()
+    noted = note_test_delta(out, command=command)
+    passed = noted.get("exit_code") == 0 and noted.get("status") in {"executed", "passed"}
+    if passed and is_testish_command(command):
+        noted["agents_md_suggestion"] = (
+            f"这条命令已通过：{command}。若要记入项目约定，请确认后写入 AGENTS.md，不要自动改该文件。"
+        )
+    return noted
+
+
 async def stub_echo(message: str, **_kwargs: Any) -> dict[str, Any]:
     """测试桩：回显 message 前 120 字符摘要。"""
     preview = message[:120]
@@ -75,6 +128,19 @@ async def run_command(command: str, turn_id=None, **_kwargs: Any) -> dict[str, A
 
     # SWE ops_eval: pytest / env probes → local sweb.eval; block pip in Work.
     root = _workspace_root()
+    if not bool(current_ops_eval()) and (_kwargs.get("job_id") or _kwargs.get("background")):
+        from app.tools.core.background_jobs import background_command
+
+        return await background_command(
+            command=command,
+            job_id=str(_kwargs.get("job_id") or ""),
+            background=bool(_kwargs.get("background")),
+            kill=bool(_kwargs.get("kill")),
+            cwd=root,
+            timeout_s=_command_timeout(_kwargs),
+            turn_id=turn_id,
+        )
+    command_timeout = _command_timeout(_kwargs)
     if bool(current_ops_eval()) and load_swe_instance_marker(root) is not None:
         if is_swe_env_install_command(command):
             probe = None
@@ -105,7 +171,7 @@ async def run_command(command: str, turn_id=None, **_kwargs: Any) -> dict[str, A
                 work_root=root,
                 argv=env_argv,
                 display_command=command,
-                timeout_s=float(settings.tool_default_timeout_seconds),
+                timeout_s=command_timeout,
                 ops_eval=True,
                 skip_sync=True,
             )
@@ -125,7 +191,10 @@ async def run_command(command: str, turn_id=None, **_kwargs: Any) -> dict[str, A
             "exit_code": 0,
             "summary": f"Simulated: {command[:80]}",
         }
-        return attach_test_summary_for_run_command(out, command=command)
+        return _finish_command_result(
+            attach_test_summary_for_run_command(out, command=command),
+            command=command,
+        )
 
     check_cancel = _make_cancel_checker(turn_id) if turn_id is not None else None
 
@@ -136,16 +205,18 @@ async def run_command(command: str, turn_id=None, **_kwargs: Any) -> dict[str, A
         result = await run_argv_command(
             argv=argv,
             cwd=root,
-            timeout_s=settings.tool_default_timeout_seconds,
+            timeout_s=command_timeout,
             display_command=command,
             check_cancel=check_cancel,
+            sandbox_relax=bool(_kwargs.get("sandbox_relax")),
         )
     else:
         result = await run_shell_command(
             command=command,
             cwd=root,
-            timeout_s=settings.tool_default_timeout_seconds,
+            timeout_s=command_timeout,
             check_cancel=check_cancel,
+            sandbox_relax=bool(_kwargs.get("sandbox_relax")),
         )
     # Channel ②: after successful command, budgeted mtime+size light scan (§3.2).
     try:
@@ -164,7 +235,10 @@ async def run_command(command: str, turn_id=None, **_kwargs: Any) -> dict[str, A
                 result = {**result, "ast_scan": "scan_pending"}
     except Exception:
         pass
-    return attach_test_summary_for_run_command(result, command=command)
+    return _finish_command_result(
+        attach_test_summary_for_run_command(result, command=command),
+        command=command,
+    )
 async def check_citation(citation_id: str, source_path: str, **_kwargs: Any) -> dict[str, Any]:
     """校验引用 id 是否出现在指定源文件路径或正文内。"""
     target = _resolve_path(source_path)

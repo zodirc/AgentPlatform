@@ -30,7 +30,7 @@ from functools import lru_cache
 from typing import Any
 
 from app.context.policy import CompactionPolicy
-from app.context.project import build_runtime_context, load_project_context
+from app.context.project import build_runtime_context, load_project_context, workset_block
 from app.context.summary import structured_summary_from_messages
 from app.engine.state import TurnState
 from app.tools.registry import ToolSpec
@@ -179,9 +179,19 @@ class ToolExecutor:
         )
 
         timeout_s = spec.timeout_s
+        if tool_name in {"run_command", "run_tests"}:
+            requested = call_args.get("timeout_s")
+            try:
+                if requested is not None:
+                    timeout_s = min(600.0, max(float(timeout_s), float(requested) + 5.0))
+            except (TypeError, ValueError):
+                pass
         window = effective_window(state)
         external_token = bind_window_external(window == "external")
         taint_token = bind_window_taint(window)
+        from app.engine.read_registry import bind_read_registry, reset_read_registry
+
+        registry_token = bind_read_registry(getattr(state, "read_registry", None))
         try:
             result = await asyncio.wait_for(
                 spec.handler(
@@ -217,6 +227,7 @@ class ToolExecutor:
         except Exception as exc:
             return {"error": str(exc)}
         finally:
+            reset_read_registry(registry_token)
             reset_window_taint(taint_token)
             reset_window_external(external_token)
 
@@ -551,7 +562,10 @@ class ContextEngine:
         policy = self._policy
         messages = [dict(m) for m in state.messages]
         trace: list[dict[str, str]] = []
-        project_context = load_project_context(session_id=state.session_id)
+        project_context = load_project_context(
+            session_id=state.session_id,
+            scenario_id=str(getattr(state, "scenario_id", "") or ""),
+        )
         runtime_context = build_runtime_context(
             scenario_id=state.scenario_id,
             step_count=state.step_count,
@@ -559,8 +573,19 @@ class ContextEngine:
             model_name=model_name,
             plan_hint=state.plan_hint,
         )
+        from app.context.project import fold_loaded_rules, workset_block
+
+        stored = fold_loaded_rules(str(getattr(state, "volatile_context", "") or ""))
+        if stored != str(getattr(state, "volatile_context", "") or ""):
+            try:
+                state.volatile_context = stored
+            except Exception:
+                pass
+        volatile = (stored or volatile_context or "").strip()
         included_tools = [str(t.get("name", "")) for t in (tools or []) if t.get("name")]
-        volatile = (volatile_context or "").strip()
+        workset = workset_block(state)
+        if workset:
+            volatile = f"{volatile}\n{workset}".strip() if volatile else workset
 
         _, window_before = _window_fill(
             messages=messages,
@@ -672,7 +697,7 @@ class ContextEngine:
             if defer_autocompact:
                 trace.append({"strategy": "compact", "detail": "autocompact_pending"})
             else:
-                messages = [_summarize_messages(messages)]
+                messages = [_summarize_messages(messages, workset=workset)]
                 trace.append({"strategy": "compact", "detail": "autocompact_summary"})
 
         fill_ratio, window_after = _window_fill(
@@ -1573,7 +1598,7 @@ def _collapse_tool_history(
     return [*head, pointer, *tail]
 
 
-def _summarize_messages(messages: list[dict[str, Any]]) -> dict[str, Any]:
+def _summarize_messages(messages: list[dict[str, Any]], *, workset: str = "") -> dict[str, Any]:
     """确定性 autocompact：结构化摘要合并为单条 user 消息（HM3 增量 merge）。
 
     参数:
@@ -1600,6 +1625,8 @@ def _summarize_messages(messages: list[dict[str, Any]]) -> dict[str, Any]:
         summary.narrative = summary.narrative[:400]
     if not summary.narrative:
         summary.narrative = f"{len(messages)} earlier messages compacted"
+    if workset:
+        summary.workset = workset[:600]
     from app.policy.taint import stamp_inherited
 
     return stamp_inherited(
