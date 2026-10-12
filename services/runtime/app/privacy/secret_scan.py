@@ -76,6 +76,21 @@ def scan_text_for_secrets(text: str, *, timeout_ms: float) -> SecretScanResult:
     )
 
 
+def redact_secrets(text: str) -> str:
+    """把高置信密钥替换掉。扫描超时则整段换成占位，避免原文落事件。"""
+    if not text:
+        return text
+    result = scan_text_for_secrets(text, timeout_ms=50.0)
+    if result.timed_out:
+        return "[redacted: secret scan timed out]"
+    if not result.findings:
+        return text
+    cleaned = text
+    for _, pattern in _COMPILED:
+        cleaned = pattern.sub("[redacted]", cleaned)
+    return cleaned
+
+
 def _async_rescan(text: str, *, path: str) -> None:
     result = scan_text_for_secrets(text, timeout_ms=5_000.0)
     if result.findings:

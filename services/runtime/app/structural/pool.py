@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 from app.structural.client import LspSession
-from app.structural.providers import ProviderSpec, discover_python_provider
+from app.structural.providers import ProviderSpec, discover_provider, discover_python_provider
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +23,11 @@ _IDLE_TTL_S = 600.0
 _UNHEALTHY_BACKOFF_S = 60.0
 
 
-def _key(workspace_root: Path) -> str:
-    return str(workspace_root.resolve())
+def _key(workspace_root: Path, language: str = "python") -> str:
+    base = str(workspace_root.resolve())
+    if language == "python":
+        return base
+    return f"{base}::{language}"
 
 
 def _lock_for(key: str) -> asyncio.Lock:
@@ -40,9 +43,10 @@ async def get_session(
     *,
     timeout_s: float,
     provider: ProviderSpec | None = None,
+    language: str = "python",
 ) -> tuple[LspSession | None, bool, str | None]:
-    """作用：获取或创建 workspace 的 LspSession。"""
-    key = _key(workspace_root)
+    """作用：获取或创建 workspace 的 LspSession。不同语言分开复用。"""
+    key = _key(workspace_root, language)
     now = time.monotonic()
     until = _UNHEALTHY_UNTIL.get(key, 0.0)
     if until > now:
@@ -57,7 +61,9 @@ async def get_session(
             await existing.shutdown()
             _POOL.pop(key, None)
 
-        spec = provider or discover_python_provider()
+        spec = provider or discover_provider(language) or (
+            discover_python_provider() if language == "python" else None
+        )
         if spec is None:
             return None, False, "no_provider"
         session = LspSession(workspace_root=workspace_root, provider=spec)
@@ -74,13 +80,17 @@ async def get_session(
 
 
 async def mark_unhealthy(workspace_root: Path) -> None:
-    """作用：标记 session 需重建。"""
-    key = _key(workspace_root)
-    async with _lock_for(key):
-        session = _POOL.pop(key, None)
-        if session is not None:
-            await session.shutdown()
-        _UNHEALTHY_UNTIL[key] = time.monotonic() + _UNHEALTHY_BACKOFF_S
+    """作用：标记该工作区各语言 session 需重建。"""
+    prefix = str(workspace_root.resolve())
+    keys = [key for key in list(_POOL) if key == prefix or key.startswith(prefix + "::")]
+    if prefix not in keys:
+        keys.append(prefix)
+    for key in keys:
+        async with _lock_for(key):
+            session = _POOL.pop(key, None)
+            if session is not None:
+                await session.shutdown()
+            _UNHEALTHY_UNTIL[key] = time.monotonic() + _UNHEALTHY_BACKOFF_S
 
 
 async def drop_session(workspace_root: Path) -> None:

@@ -50,6 +50,10 @@ _TESTISH_CMD_RE = re.compile(
     r"\b(pytest|py\.test|unittest|nosetests|tox)\b|"
     r"\bpython\s+-m\s+pytest\b|"
     r"\bpython\s+-m\s+unittest\b|"
+    r"\bgo\s+test\b|"
+    r"\bcargo\s+test\b|"
+    r"\b(?:npm|pnpm|yarn)\s+test\b|"
+    r"\bnpx\s+(?:vitest|jest)\b|"
     r"\brun_tests\b",
     re.IGNORECASE,
 )
@@ -65,7 +69,18 @@ def is_testish_command(command: str | None) -> bool:
 
 参数：
     ``command``"""
-    return bool(command) and _TESTISH_CMD_RE.search(command or "") is not None
+    return bool(command) and (
+        _TESTISH_CMD_RE.search(command or "") is not None or _declared(command)
+    )
+
+
+def _declared(command: str) -> bool:
+    try:
+        from app.structural.languages import declared_test_commands
+    except Exception:
+        return False
+    text = " ".join((command or "").split())
+    return text in declared_test_commands()
 
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -309,3 +324,32 @@ def _parse_unittest(text: str, *, max_failures: int) -> dict[str, Any] | None:
         "first_failures": first,
         "provider": "unittest",
     }
+
+
+_TEST_BASELINES: dict[str, set[str]] = {}
+
+
+def note_test_delta(result: dict[str, Any], *, command: str) -> dict[str, Any]:
+    """同一命令第一次的失败集合是基线，之后附 newly_failing / newly_passing。"""
+    summary = result.get("test_summary")
+    if not isinstance(summary, dict):
+        return result
+    names: set[str] = set()
+    for item in summary.get("first_failures") or []:
+        if isinstance(item, dict):
+            name = str(item.get("nodeid") or item.get("name") or "").strip()
+            if name:
+                names.add(name)
+    key = " ".join((command or "").split())
+    if not key:
+        return result
+    previous = _TEST_BASELINES.get(key)
+    if previous is None:
+        _TEST_BASELINES[key] = set(names)
+        return result
+    result["delta"] = {
+        "newly_failing": sorted(names - previous),
+        "newly_passing": sorted(previous - names),
+        "still_failing": sorted(names & previous),
+    }
+    return result

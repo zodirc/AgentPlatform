@@ -490,7 +490,12 @@ def related_tests_for_path(
 参数：
     ``path``"""
     if language_for_path(path) is None:
-        return []
+        from app.structural.languages import is_code_path, test_command_for_path
+
+        command = test_command_for_path(path) if is_code_path(path) else ""
+        if not command:
+            return []
+        return [{"path": path.replace("\\", "/"), "command": command}]
     from app.tools.core.paths import _workspace_root
 
     root = workspace or _workspace_root()

@@ -102,9 +102,27 @@ def gate_run_tests_command(command: str) -> TestCommandGateResult:
             "for other commands use run_command (requires approval)",
         )
 
+    if head == "cargo":
+        if len(parts) >= 2 and parts[1] == "test":
+            return TestCommandGateResult(tuple(parts), None)
+        return TestCommandGateResult(
+            None,
+            "cargo via run_tests only allows: cargo test …; "
+            "for other commands use run_command (requires approval)",
+        )
+
+    joined = " ".join(parts)
+    try:
+        from app.structural.languages import declared_test_commands
+
+        if joined in declared_test_commands():
+            return TestCommandGateResult(tuple(parts), None)
+    except Exception:
+        pass
+
     return TestCommandGateResult(
         None,
         f"test command not allowed: {head!r}; "
-        "use pytest / python -m pytest / npm test / npx vitest|jest / go test, "
+        "use pytest / python -m pytest / npm test / npx vitest|jest / go test / cargo test, "
         "or run_command (requires approval)",
     )

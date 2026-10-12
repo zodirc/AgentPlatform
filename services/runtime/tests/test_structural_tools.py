@@ -220,9 +220,9 @@ async def test_edit_file_attaches_impact_on_code(
     )
     assert result["status"] == "edited"
     impact = result["impact"]
-    assert impact["status"] == "ok"
+    assert impact["status"] == "skipped"
+    assert impact["reason"] == "signature_unchanged"
     assert impact["symbol"] == "alpha"
-    assert impact["references"]
     checks = result["checks"]
     assert checks["status"] == "ok"
     assert checks["syntax"] == "ok"

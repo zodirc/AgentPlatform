@@ -82,4 +82,7 @@ def test_aggregate_refs_by_file() -> None:
 
 def test_language_for_path() -> None:
     assert language_for_path("x.py") == "python"
-    assert language_for_path(Path("x.ts")) is None
+    assert language_for_path(Path("x.ts")) == "typescript"
+    assert language_for_path(Path("x.go")) == "go"
+    assert language_for_path(Path("x.rs")) == "rust"
+    assert language_for_path(Path("x.md")) is None

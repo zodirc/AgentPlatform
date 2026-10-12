@@ -310,6 +310,30 @@ def _slice_file_by_lines(
     return payload
 
 
+def _schedule_diag_prefetch(path: str) -> None:
+    """读代码文件后后台拉一次诊断，不阻塞这次 read_file。"""
+    from app.structural.languages import is_code_path
+
+    if not is_code_path(path):
+        return
+
+    async def _run() -> None:
+        try:
+            from app.tools.core.edit_tools import _file_diagnostics_issues
+
+            await asyncio.wait_for(
+                _file_diagnostics_issues(path, turn_id=None, timeout_s=2),
+                timeout=3,
+            )
+        except Exception:
+            return
+
+    try:
+        asyncio.get_running_loop().create_task(_run())
+    except RuntimeError:
+        return
+
+
 async def read_file(path: str, **_kwargs: Any) -> dict[str, Any]:
     """读取工作区文件；写作手稿支持分章/索引；普通文件支持 offset/limit 分页。
 
@@ -454,6 +478,7 @@ async def read_file(path: str, **_kwargs: Any) -> dict[str, Any]:
         from app.structural.outline import attach_outline_if_truncated
 
         attach_outline_if_truncated(out, text=content, path=path)
+    _schedule_diag_prefetch(path)
     return out
 
 
@@ -528,6 +553,28 @@ async def grep(pattern: str, path: str = ".", limit: int = 50, **_kwargs: Any) -
         out = dict(out)
         out["redirected_from"] = "grep"
         out["pattern"] = pattern
+        lexical_root = _resolve_path(path)
+        lexical_hits: list[Any] = []
+        if lexical_root.exists():
+            scanned = await asyncio.to_thread(
+                _lexical_scan_sync,
+                root=lexical_root,
+                workspace=_workspace_root(),
+                pattern=pattern,
+                escape=True,
+                limit=min(int(limit or 50), 50),
+            )
+            lexical_hits = list(scanned.get("matches") or [])
+        marked: list[Any] = []
+        for hit in lexical_hits:
+            if isinstance(hit, dict):
+                row = dict(hit)
+                row["lexical"] = True
+                marked.append(row)
+            else:
+                marked.append(hit)
+        out["lexical_hits"] = marked
+        out["hits"] = marked
         if "matches" not in out:
             out["matches"] = list(out.get("hits") or [])
         out["match_count"] = int(out.get("match_count") or len(out["matches"]))

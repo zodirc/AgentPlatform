@@ -7,6 +7,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from app.settings import settings
+
 _PROBLEM_NAMES = ("problem.md", "PROBLEM.md", "issue.md")
 _FENCE_RE = re.compile(r"```(?:\w+)?\s*\n(.*?)```", re.DOTALL)
 _QUOTED_CMD_RE = re.compile(
@@ -144,16 +146,15 @@ def extract_issue_repro_hints(problem_text: str) -> dict[str, Any]:
         _add_unique(markers, fmt.lower())
 
     roundtrip_kwargs: list[str] = []
-    if _HEADER_ROWS_RE.search(text):
+    if settings.issue_repro_domain_plugins and _HEADER_ROWS_RE.search(text):
         _add_unique(roundtrip_kwargs, "header_rows")
         _add_unique(markers, "header_rows")
         _add_unique(required, "header_rows")
 
     need_roundtrip = _should_require_roundtrip(text, write_formats, read_formats, roundtrip_kwargs)
     need_casefold = bool(_CASEFOLD_CLAIM_RE.search(text))
-    # Round-trip / ascii table samples must still prove casefold even when the
-    # issue never says "case insensitive" (hidden F2P may use NO vs no).
-    if not need_casefold:
+    # 领域插件：ascii 样例即使没写 case insensitive 也要求大小写折叠。默认关闭。
+    if settings.issue_repro_domain_plugins and not need_casefold:
         ascii_ish = any(
             "ascii." in f.lower() or f.lower().endswith(".qdp")
             for f in [*formats, *read_formats, *write_formats]

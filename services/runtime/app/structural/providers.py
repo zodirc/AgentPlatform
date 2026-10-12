@@ -20,10 +20,29 @@ _PYTHON_EXTS = frozenset({".py", ".pyi"})
 
 
 def language_for_path(path: Path | str) -> str | None:
-    """作用：扩展名 → language id。"""
-    suffix = Path(path).suffix.lower()
-    if suffix in _PYTHON_EXTS:
-        return "python"
+    """扩展名 → language id。没有对应语言服务器时仍返回 id，诊断侧再标 unavailable。"""
+    from app.structural.languages import language_spec_for_path
+
+    spec = language_spec_for_path(path)
+    if spec is None:
+        return None
+    return spec.language_id
+
+
+def discover_provider(language: str) -> ProviderSpec | None:
+    """按语言找已安装的语言服务器。Python 仍走原有发现顺序。"""
+    if language == "python":
+        return discover_python_provider()
+    from app.structural.languages import lsp_binaries_for
+
+    for binary in lsp_binaries_for(language):
+        found = shutil.which(binary)
+        if found:
+            return ProviderSpec(
+                name=binary,
+                argv=[found, "--stdio"],
+                languages=frozenset({language}),
+            )
     return None
 
 

@@ -77,6 +77,17 @@ async def search_codebase(query: str, path: str = ".", limit: int = 20, **_kwarg
     if not is_symbol_query(q):
         lexical = await _lexical_codebase_hits(q, path=path, limit=limit, **_kwargs)
         hits = list(lexical.get("hits") or [])
+        extra: dict = {}
+        if not hits and any(ch.isspace() for ch in q):
+            from app.structural.bm25_locate import bm25_file_hits, repo_map
+
+            workspace = _workspace_root().resolve()
+            hits = await asyncio.to_thread(
+                bm25_file_hits, workspace, q, limit=max(1, int(limit or 8))
+            )
+            extra["rank"] = "bm25"
+            if not hits:
+                extra["repo_map"] = await asyncio.to_thread(repo_map, workspace)
         return {
             "query": q,
             "mode": "lexical",
@@ -90,6 +101,7 @@ async def search_codebase(query: str, path: str = ".", limit: int = 20, **_kwarg
             or lexical.get("summary")
             or f"search_codebase (lexical): {len(hits)} hit(s) for {q!r}",
             **({"error": lexical["error"]} if lexical.get("error") else {}),
+            **extra,
         }
 
     from app.structural.adapters import goto_definition as _goto

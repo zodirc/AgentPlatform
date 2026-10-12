@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -24,6 +25,9 @@ from app.tools.core.rename_tools import rename_file
 
 logger = logging.getLogger(__name__)
 
+# (resolved path, content hash) → 诊断基线。连续编辑复用上一次写后结果。
+_DIAG_BASELINE: dict[str, tuple[str, list[Any]]] = {}
+
 
 async def write_file(path: str, content: str, **_kwargs: Any) -> dict[str, Any]:
     """整文件写入或覆盖；可选对 ``.patch``/``.diff`` 做 git apply 预检。
@@ -39,22 +43,51 @@ async def write_file(path: str, content: str, **_kwargs: Any) -> dict[str, Any]:
         seed corpus 只读；秘密扫描 ``gate_write_content`` 失败时直接返回 blocked 载荷。
     """
     from app.privacy.secret_scan import gate_write_content
+    from app.engine.read_registry import write_conflicts_with_read
+    from app.tools.core.paths import write_path_block
+    from app.tools.core.text_fidelity import encode_preserving, load_text_bytes
 
     _assert_not_seed_corpus(path)
+    blocked_meta = write_path_block(path)
+    if blocked_meta is not None:
+        return blocked_meta
     blocked = gate_write_content(content, path=path)
     if blocked is not None:
         return blocked
+    conflict = write_conflicts_with_read(path)
+    if conflict is not None:
+        return conflict
     target = _resolve_path(path)
     old_text = ""
     if target.is_file():
         try:
-            old_text = target.read_text(encoding="utf-8", errors="replace")
-            if len(old_text) > 32_000:
-                old_text = old_text[:32_000] + "\n...[truncated]"
-        except OSError:
-            old_text = ""
+            raw = target.read_bytes()
+        except OSError as exc:
+            return {"status": "error", "error": f"Cannot read {path}: {exc}", "path": path}
+        loaded = load_text_bytes(raw)
+        if isinstance(loaded, dict):
+            return {
+                **loaded,
+                "path": path,
+                "status": "rejected",
+                "summary": f"unsupported encoding for {path}",
+            }
+        old_text = loaded.text
+        if len(old_text) > 32_000:
+            old_text = old_text[:32_000] + "\n...[truncated]"
+        try:
+            payload = encode_preserving(loaded, content)
+        except UnicodeError:
+            return {
+                "error": "unsupported_encoding",
+                "path": path,
+                "status": "rejected",
+                "summary": f"cannot encode {path} with {loaded.encoding}",
+            }
+    else:
+        payload = content.encode("utf-8")
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    target.write_bytes(payload)
     try:
         from app.structural.workspace_index.dirty import notify_path_changed
         from app.tenant_context import current_owner_user_id, current_work_id
@@ -72,7 +105,7 @@ async def write_file(path: str, content: str, **_kwargs: Any) -> dict[str, Any]:
         "path": path,
         "old_text": old_text,
         "new_text": content,
-        "bytes_written": len(content.encode()),
+        "bytes_written": len(payload),
         "summary": f"Wrote {path}",
         "status": "written",
     }
@@ -86,6 +119,57 @@ async def write_file(path: str, content: str, **_kwargs: Any) -> dict[str, Any]:
                 err = check.get("apply_check_error") or "git apply --check failed"
                 out["summary"] = f"Wrote {path} but patch does not apply: {err}"
     return out
+
+
+def _signature_lines(text: str) -> set[str]:
+    import re
+
+    found: set[str] = set()
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if re.match(r"(?:async\s+def|def|func|function|fn)\s+\w+", stripped):
+            found.add(stripped)
+    return found
+
+
+def _same_signatures(old_text: str, new_text: str) -> bool:
+    old = _signature_lines(old_text)
+    return bool(old) and old == _signature_lines(new_text)
+
+
+async def _cross_file_diagnostics(
+    locations: list[Any],
+    *,
+    old_text: str,
+    new_text: str,
+    turn_id: object | None,
+) -> list[dict[str, Any]]:
+    if _same_signatures(old_text, new_text):
+        return []
+    paths: list[str] = []
+    for loc in locations:
+        raw = loc.to_dict() if hasattr(loc, "to_dict") else loc
+        if not isinstance(raw, dict):
+            continue
+        path = str(raw.get("path") or "")
+        if path and path not in paths:
+            paths.append(path)
+        if len(paths) >= 5:
+            break
+    if not paths:
+        return []
+
+    async def _one(path: str) -> dict[str, Any]:
+        try:
+            issues, _meta = await _file_diagnostics_issues(path, turn_id=turn_id, timeout_s=2)
+            return {"path": path, "issues": list(issues)[:5]}
+        except Exception:
+            return {"path": path, "suggestion": "read_lints"}
+
+    try:
+        return list(await asyncio.wait_for(asyncio.gather(*(_one(path) for path in paths)), 10))
+    except Exception:
+        return [{"suggestion": "read_lints", "paths": paths}]
 
 
 async def _impact_for_edit(
@@ -107,16 +191,33 @@ async def _impact_for_edit(
         ``status`` 为 ``ok``/``skipped``/``failed``，含 ``symbol``/``references``/``lines`` 等。
         非代码路径或 LSP 基础设施故障时 skipped/failed，不抛异常。
     """
+    from app.structural.languages import is_code_path
     from app.structural.providers import language_for_path
     from app.structural.symbols import extract_symbols_from_edit
 
-    if language_for_path(path) is None:
+    if not is_code_path(path):
         return {
             "status": "skipped",
             "reason": "non_code_path",
             "symbol": None,
             "references": [],
             "lines": [],
+        }
+    if language_for_path(path) is None:
+        try:
+            from app.observability.metrics import metrics
+
+            metrics.inc("lsp_unavailable", language=language_for_path(path) or "unknown")
+            metrics.inc("coding_lsp_unavailable")
+        except Exception:
+            pass
+        return {
+            "status": "skipped",
+            "reason": "unavailable",
+            "symbol": None,
+            "references": [],
+            "lines": [],
+            "summary": "impact unavailable: no language server for this file",
         }
 
     symbols = extract_symbols_from_edit(old_text, new_text, limit=1)
@@ -130,6 +231,15 @@ async def _impact_for_edit(
         }
 
     symbol = symbols[0]
+    if _same_signatures(old_text, new_text):
+        return {
+            "status": "skipped",
+            "reason": "signature_unchanged",
+            "symbol": symbol,
+            "references": [],
+            "lines": [],
+            "summary": "impact skipped: signature unchanged",
+        }
     from app.structural.adapters import find_references as _refs
     from app.structural.format import format_locations_lines
 
@@ -149,6 +259,8 @@ async def _impact_for_edit(
     meta = dict(out.get("meta") or {})
     reason = str(meta.get("degraded_reason") or "")
     refs = [loc.to_dict() if hasattr(loc, "to_dict") else loc for loc in locations]
+    shown = refs[:5]
+    cross = await _cross_file_diagnostics(locations, old_text=old_text, new_text=new_text, turn_id=turn_id)
     if _lsp_infra_failed(reason):
         return {
             "status": "failed",
@@ -163,13 +275,21 @@ async def _impact_for_edit(
             ),
             **meta,
         }
+    try:
+        from app.observability.metrics import metrics
+        from app.structural.providers import language_for_path as _lang
+
+        metrics.inc("lsp_available", language=_lang(path) or "unknown")
+    except Exception:
+        pass
     return {
         "status": "ok",
         "symbol": symbol,
-        "references": refs,
+        "references": shown,
         "reference_count": len(refs),
         "lines": lines,
         "pointers": pointers,
+        "cross_file": cross,
         "summary": (
             f"impact: {len(refs)} reference(s) for {symbol!r}"
             if refs
@@ -177,6 +297,41 @@ async def _impact_for_edit(
         ),
         **meta,
     }
+
+
+async def _timed_stage(stage: str, awaitable):
+    import time
+
+    started = time.monotonic()
+    try:
+        return await awaitable
+    finally:
+        try:
+            from app.observability.metrics import metrics
+
+            metrics.observe("edit_latency_seconds", time.monotonic() - started, stage=stage)
+        except Exception:
+            pass
+
+
+def _generic_lint_line(line: str, *, default_path: str):
+    import re
+
+    from app.structural.types import Issue
+
+    match = re.match(r"^(.*?):(\d+):(\d+):\s*(.+)$", line.strip())
+    if not match:
+        return None
+    return Issue(
+        path=match.group(1) or default_path,
+        line=int(match.group(2)),
+        col=int(match.group(3)),
+        message=match.group(4)[:240],
+        severity="warning",
+        provider="linter",
+        code="",
+        sources=("linter",),
+    )
 
 
 async def _file_diagnostics_issues(
@@ -199,8 +354,11 @@ async def _file_diagnostics_issues(
     import shlex
 
     from app.structural.format import merge_issues, parse_ruff_concise_line
+    from app.structural.languages import linter_argv_for
+    from app.structural.providers import language_for_path
+    from app.structural.ruff_resident import ruff_concise
     from app.structural.types import Issue
-    from app.tools.core.shell import run_shell_command
+    from app.tools.core.shell import run_argv_command
 
     workspace = _workspace_root().resolve()
     root = _resolve_path(path)
@@ -213,35 +371,49 @@ async def _file_diagnostics_issues(
         if timeout_s is not None
         else getattr(settings, "structural_checks_timeout_s", settings.structural_diag_timeout_s)
     )
+    language = language_for_path(path) or ""
     meta: dict[str, Any] = {
-        "provider": "ruff",
+        "provider": "ruff" if language == "python" else (language or "linter"),
         "degraded_reason": None,
         "cold_start": False,
+        "language": language,
     }
     ruff_issues: list[Issue] = []
     try:
-        result = await asyncio.wait_for(
-            run_shell_command(
-                command=f"python -m ruff check {shlex.quote(rel)} --output-format concise",
-                cwd=workspace,
-                timeout_s=min(budget, 120.0),
-            ),
-            timeout=budget + 1.0,
-        )
-        combined = "\n".join(
-            part
-            for part in (str(result.get("stdout") or ""), str(result.get("stderr") or ""))
-            if part
-        ).strip()
+        if language == "python":
+            combined = await ruff_concise([rel], cwd=workspace, timeout_s=min(budget, 30.0))
+        else:
+            argv = linter_argv_for(language, rel)
+            if not argv:
+                combined = ""
+                meta["degraded_reason"] = "linter_unavailable"
+            else:
+                result = await asyncio.wait_for(
+                    run_argv_command(
+                        argv=argv,
+                        cwd=workspace,
+                        timeout_s=min(budget, 30.0),
+                        display_command=" ".join(argv),
+                    ),
+                    timeout=budget + 1.0,
+                )
+                combined = "\n".join(
+                    part
+                    for part in (str(result.get("stdout") or ""), str(result.get("stderr") or ""))
+                    if part
+                ).strip()
         for line in combined.splitlines():
-            parsed = parse_ruff_concise_line(line, default_path=rel)
+            if language == "python":
+                parsed = parse_ruff_concise_line(line, default_path=rel)
+            else:
+                parsed = _generic_lint_line(line, default_path=rel)
             if parsed is not None:
                 ruff_issues.append(parsed)
     except asyncio.TimeoutError:
-        meta["degraded_reason"] = "timeout_or_error:ruff"
+        meta["degraded_reason"] = "timeout_or_error:linter"
         return [], meta
     except Exception as exc:  # noqa: BLE001
-        meta["degraded_reason"] = f"ruff_error:{type(exc).__name__}"
+        meta["degraded_reason"] = f"linter_error:{type(exc).__name__}"
 
     lsp_issues: list[Issue] = []
     try:
@@ -297,9 +469,10 @@ async def _checks_for_edit(
     返回:
         内部结构含 ``_baseline``/``_baseline_keys`` 等；非代码路径返回 ``status=skipped``。
     """
+    from app.structural.languages import is_code_path
     from app.structural.providers import language_for_path
 
-    if language_for_path(path) is None:
+    if not is_code_path(path):
         return {
             "status": "skipped",
             "syntax": "skipped",
@@ -308,14 +481,30 @@ async def _checks_for_edit(
             "lines": [],
             "reason": "non_code_path",
         }
+    if language_for_path(path) is None:
+        return {
+            "status": "skipped",
+            "syntax": "skipped",
+            "new_issues": [],
+            "baseline_count": 0,
+            "lines": [],
+            "reason": "unavailable",
+        }
 
     max_issues = int(getattr(settings, "structural_checks_max_issues", 20))
     timeout_s = float(
         getattr(settings, "structural_checks_timeout_s", settings.structural_diag_timeout_s)
     )
-    baseline, _base_meta = await _file_diagnostics_issues(
-        path, turn_id=turn_id, timeout_s=timeout_s
-    )
+    from app.engine.read_registry import disk_content_hash
+
+    digest = disk_content_hash(path) or ""
+    cached = _DIAG_BASELINE.get(path)
+    if cached is not None and digest and cached[0] == digest:
+        baseline = list(cached[1])
+    else:
+        baseline, _base_meta = await _file_diagnostics_issues(
+            path, turn_id=turn_id, timeout_s=timeout_s
+        )
     return {
         "_baseline": baseline,
         "_baseline_keys": {_issue_key(i) for i in baseline},
@@ -367,6 +556,11 @@ async def _finalize_checks_after_write(
         status = "ok"
 
     lines = format_diagnostics_lines(new_issues, limit=max_issues)
+    from app.engine.read_registry import disk_content_hash
+
+    digest = disk_content_hash(path) or ""
+    if digest:
+        _DIAG_BASELINE[path] = (digest, list(after))
     summary_bits = [f"checks.syntax={syntax_status}"]
     if new_issues:
         summary_bits.append(f"{len(new_issues)} new issue(s)")
@@ -388,6 +582,61 @@ async def _finalize_checks_after_write(
     }
 
 
+def _edit_match_failure(
+    *,
+    path: str,
+    text: str,
+    old_text: str,
+    failure: dict[str, Any],
+    changed: bool,
+    nearest_span_candidates: Any,
+    occurrence_locations: Any,
+    format_candidate_lines: Any,
+) -> dict[str, Any]:
+    """匹配失败时附候选行；磁盘相对上次读取已变化时写明。"""
+    error = str(failure.get("error") or "old_text not found")
+    if error == "overlapping edits":
+        return {
+            "error": error,
+            "path": path,
+            "applies": False,
+            "spans": failure.get("spans") or [],
+            "summary": f"overlapping edits in {path}; nothing was written",
+        }
+    cand_limit = int(getattr(settings, "structural_span_candidates", 5))
+    note = " File changed since last read." if changed else ""
+    if "not found" in error:
+        candidates = nearest_span_candidates(text, old_text, path=path, limit=cand_limit)
+        lines = format_candidate_lines(candidates)
+        summary = (
+            f"old_text not found in {path}; {len(candidates)} near candidate(s) — adjust span"
+            if candidates
+            else f"old_text not found in {path}"
+        )
+        return {
+            "error": "old_text not found",
+            "path": path,
+            "applies": False,
+            "candidates": candidates,
+            "lines": lines,
+            "spans": failure.get("spans") or [],
+            "summary": summary + note,
+        }
+    count = int(failure.get("match_count") or 0)
+    candidates = occurrence_locations(text, old_text, path=path, limit=max(cand_limit, 20))
+    lines = format_candidate_lines(candidates)
+    return {
+        "error": error,
+        "path": path,
+        "applies": False,
+        "match_count": count,
+        "candidates": candidates,
+        "lines": lines,
+        "spans": failure.get("spans") or [],
+        "summary": f"old_text matches {count} times in {path}; pick one occurrence{note}",
+    }
+
+
 async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> dict[str, Any]:
     """按唯一 span 做 surgical 替换，含语法门控、诊断 diff 与 symbol impact。
 
@@ -396,66 +645,86 @@ async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> 
         old_text: 必须在文件中唯一出现的待替换片段。
         new_text: 替换后片段。
         **_kwargs: 可选 ``turn_id``。
-
-    返回:
-        成功：``status=edited``/``applies=True`` 及 ``impact``/``checks``；
-        失败：``old_text not found``/多匹配/``syntax_error`` 等，含候选行提示。
-
-    说明:
-        ``old_text`` 不唯一或缺失时返回 ``candidates`` 引导模型加长 span；引入语法错误则拒绝写入。
     """
+    import time
+
+    started = time.monotonic()
+    import asyncio
+
+    from app.engine.read_registry import file_changed_since_read
+    from app.privacy.secret_scan import gate_write_content
+    from app.structural.providers import language_for_path
+    from app.structural.related_tests import related_tests_for_path
     from app.structural.span_match import (
         format_candidate_lines,
         nearest_span_candidates,
         occurrence_locations,
     )
     from app.structural.syntax import check_syntax_gate
+    from app.tools.core.paths import write_path_block
+    from app.tools.core.text_fidelity import (
+        apply_spans,
+        dump_text,
+        line_of_offset,
+        load_text_bytes,
+        plan_spans,
+        post_edit_excerpt,
+    )
 
     _assert_not_seed_corpus(path)
+    blocked_meta = write_path_block(path)
+    if blocked_meta is not None:
+        return blocked_meta
+    raw_edits = _kwargs.get("edits")
+    if isinstance(raw_edits, list) and raw_edits:
+        spans = [item for item in raw_edits if isinstance(item, dict)]
+    else:
+        spans = [
+            {
+                "old_text": old_text,
+                "new_text": new_text,
+                "replace_all": bool(_kwargs.get("replace_all")),
+            }
+        ]
+    for span in spans:
+        blocked = gate_write_content(str(span.get("new_text") or ""), path=path)
+        if blocked is not None:
+            return blocked
+
     target = _resolve_path(path)
     if not target.exists():
         return {"error": f"File not found: {path}"}
-    text = target.read_text(encoding="utf-8", errors="replace")
-    cand_limit = int(getattr(settings, "structural_span_candidates", 5))
-    count = text.count(old_text)
-    if count == 0:
-        candidates = nearest_span_candidates(
-            text, old_text, path=path, limit=cand_limit
-        )
-        lines = format_candidate_lines(candidates)
+    try:
+        raw = target.read_bytes()
+    except OSError as exc:
+        return {"status": "error", "error": f"Cannot read {path}: {exc}", "path": path}
+    loaded = load_text_bytes(raw)
+    if isinstance(loaded, dict):
         return {
-            "error": "old_text not found",
+            **loaded,
             "path": path,
+            "status": "rejected",
             "applies": False,
-            "candidates": candidates,
-            "lines": lines,
-            "summary": (
-                f"old_text not found in {path}; "
-                f"{len(candidates)} near candidate(s) — adjust span"
-                if candidates
-                else f"old_text not found in {path}"
-            ),
+            "summary": f"unsupported encoding for {path}",
         }
-    if count > 1:
-        candidates = occurrence_locations(
-            text, old_text, path=path, limit=max(cand_limit, 20)
+    text = loaded.text
+    trailing = bool(getattr(settings, "structural_match_trailing_ws", True))
+    reindent = bool(getattr(settings, "structural_match_reindent", False))
+    planned, failure = plan_spans(text, spans, trailing_ws=trailing, reindent=reindent)
+    if failure is not None:
+        return _edit_match_failure(
+            path=path,
+            text=text,
+            old_text=str(failure.get("old_text") or old_text),
+            failure=failure,
+            changed=file_changed_since_read(path),
+            nearest_span_candidates=nearest_span_candidates,
+            occurrence_locations=occurrence_locations,
+            format_candidate_lines=format_candidate_lines,
         )
-        lines = format_candidate_lines(candidates)
-        return {
-            "error": f"old_text matches {count} times; use a longer unique span",
-            "path": path,
-            "applies": False,
-            "match_count": count,
-            "candidates": candidates,
-            "lines": lines,
-            "summary": f"old_text matches {count} times in {path}; pick one occurrence",
-        }
 
-    updated = text.replace(old_text, new_text, 1)
+    updated = apply_spans(text, planned)
     turn_id = _kwargs.get("turn_id")
-
-    # W1 syntax gate (pre-write): reject introduced parse errors; escape hatch if
-    # the file was already broken.
     gate = check_syntax_gate(path, text, updated)
     if gate.blocked:
         line = gate.line or 1
@@ -483,10 +752,18 @@ async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> 
             "summary": f"Rejected edit of {path}: introduced syntax error at line {line}",
         }
 
-    # Baseline diagnostics on disk *before* write (incremental new_issues).
     pre_checks = await _checks_for_edit(path=path, turn_id=turn_id)
-
-    target.write_text(updated, encoding="utf-8")
+    try:
+        payload = dump_text(loaded, updated)
+    except UnicodeError:
+        return {
+            "error": "unsupported_encoding",
+            "path": path,
+            "status": "rejected",
+            "applies": False,
+            "summary": f"cannot encode {path} with {loaded.encoding}",
+        }
+    target.write_bytes(payload)
     try:
         from app.structural.workspace_index.dirty import notify_path_changed
         from app.tenant_context import current_owner_user_id, current_work_id
@@ -500,31 +777,34 @@ async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> 
         )
     except Exception:
         logger.warning("workspace_ast dirty notify failed path=%s", path, exc_info=True)
-    impact = await _impact_for_edit(
-        path=path,
-        old_text=old_text,
-        new_text=new_text,
-        turn_id=turn_id,
+
+    async def _related() -> list[dict[str, str]]:
+        try:
+            if language_for_path(path) is None:
+                return []
+            return await asyncio.to_thread(related_tests_for_path, path, limit=5)
+        except Exception:
+            return []
+
+    impact_old = str(spans[0].get("old_text") or old_text)
+    impact_new = str(spans[0].get("new_text") if spans[0].get("new_text") is not None else new_text)
+    impact, checks, related_tests = await asyncio.gather(
+        _timed_stage(
+            "impact",
+            _impact_for_edit(path=path, old_text=impact_old, new_text=impact_new, turn_id=turn_id),
+        ),
+        _timed_stage(
+            "checks",
+            _finalize_checks_after_write(path=path, pre=pre_checks, gate=gate, turn_id=turn_id),
+        ),
+        _timed_stage("related_tests", _related()),
     )
-    checks = await _finalize_checks_after_write(
-        path=path, pre=pre_checks, gate=gate, turn_id=turn_id
-    )
-
-    related_tests: list[dict[str, str]] = []
-    try:
-        import asyncio
-
-        from app.structural.providers import language_for_path
-        from app.structural.related_tests import related_tests_for_path
-
-        if language_for_path(path) is not None:
-            # Off event loop: even bounded scans must not starve cancel/health.
-            related_tests = await asyncio.to_thread(
-                related_tests_for_path, path, limit=5
-            )
-    except Exception:
+    if not isinstance(related_tests, list):
         related_tests = []
 
+    anchor = line_of_offset(text, planned[0].start) if planned else 1
+    modes = sorted({item.mode for item in planned})
+    match_mode = modes[0] if len(modes) == 1 else "mixed"
     summary = f"Edited {path}"
     if impact.get("status") == "ok":
         summary = f"{summary}; {impact.get('summary') or 'impact attached'}"
@@ -540,22 +820,56 @@ async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> 
         summary = f"{summary}; checks: preexisting syntax warning"
     if related_tests:
         summary = f"{summary}; related_tests: {len(related_tests)} path(s)"
+    try:
+        from app.observability.metrics import metrics
+
+        metrics.inc("edit_match_mode", mode=match_mode or "exact")
+        metrics.inc("coding_edit", match_mode=match_mode or "exact")
+        metrics.observe("coding_edit_seconds", time.monotonic() - started)
+        metrics.observe("edit_latency_seconds", time.monotonic() - started, stage="edit")
+        if match_mode == "exact":
+            metrics.inc("edit_first_try")
+            metrics.inc("coding_edit_first_try")
+        else:
+            metrics.inc("edit_attempts")
+    except Exception:
+        pass
 
     out: dict[str, Any] = {
         "path": path,
-        "old_text": old_text,
-        "new_text": new_text,
-        "bytes_written": len(updated.encode("utf-8")),
+        "old_text": impact_old,
+        "new_text": impact_new,
+        "bytes_written": len(payload),
         "summary": summary,
         "status": "edited",
         "applies": True,
+        "match_mode": match_mode,
+        "post_edit_excerpt": post_edit_excerpt(updated, anchor),
         "impact": impact,
         "checks": checks,
     }
+    if len(spans) > 1:
+        out["edit_count"] = len(spans)
     if related_tests:
         out["related_tests"] = related_tests
         out["related_tests_count"] = len(related_tests)
     return out
+
+
+def _test_cwd(root, requested: object):
+    from pathlib import Path
+
+    text = str(requested or "").strip()
+    if not text or text == ".":
+        return root
+    candidate = (Path(root) / text).resolve()
+    try:
+        candidate.relative_to(Path(root).resolve())
+    except ValueError:
+        return root
+    if candidate.is_dir():
+        return candidate
+    return root
 
 
 async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) -> dict[str, Any]:
@@ -592,6 +906,9 @@ async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) ->
         }
 
     assert gated.argv is not None
+    from app.tools.core.misc_tools import _command_timeout, _finish_command_result
+
+    command_timeout = _command_timeout(_kwargs)
     if settings.run_command_mode == "simulate":
         out = {
             "command": command,
@@ -600,7 +917,7 @@ async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) ->
             "exit_code": 0,
             "summary": f"Simulated tests: {command}",
         }
-        return attach_test_summary_for_run_tests(out)
+        return _finish_command_result(attach_test_summary_for_run_tests(out), command=command)
 
     check_cancel = _make_cancel_checker(turn_id) if turn_id is not None else None
 
@@ -609,16 +926,16 @@ async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) ->
         work_root=root,
         argv=list(gated.argv),
         display_command=command,
-        timeout_s=float(settings.tool_default_timeout_seconds),
+        timeout_s=command_timeout,
         ops_eval=bool(current_ops_eval()),
     )
     if swe_out is not None:
-        return attach_test_summary_for_run_tests(swe_out)
+        return _finish_command_result(attach_test_summary_for_run_tests(swe_out), command=command)
 
     result = await run_argv_command(
         argv=gated.argv,
-        cwd=root,
-        timeout_s=settings.tool_default_timeout_seconds,
+        cwd=_test_cwd(root, _kwargs.get("cwd")),
+        timeout_s=command_timeout,
         display_command=command,
         check_cancel=check_cancel,
     )
@@ -633,4 +950,4 @@ async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) ->
         "summary": result.get("summary", f"Tests: {command}"),
         "sandbox": result.get("sandbox"),
     }
-    return attach_test_summary_for_run_tests(out)
+    return _finish_command_result(attach_test_summary_for_run_tests(out), command=command)

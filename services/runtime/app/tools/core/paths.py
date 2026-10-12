@@ -52,6 +52,27 @@ def _workspace_root() -> Path:
     return current_work_root_path()
 
 
+def write_path_block(rel_path: str) -> dict[str, str] | None:
+    """拒绝写入 ``.git/**``。执行配置路径不在这里拒绝，由审批门强制确认。"""
+    normalized = _normalized_workspace_rel(rel_path)
+    if normalized == ".git" or normalized.startswith(".git/"):
+        return {
+            "status": "rejected",
+            "error": "metadata_path",
+            "path": rel_path,
+            "summary": "refusing to write .git/**",
+        }
+    return None
+
+
+def is_exec_config_path(rel_path: str) -> bool:
+    """会被其它系统执行的路径：即便本 Turn 已预授权写盘，仍要单独审批。"""
+    normalized = _normalized_workspace_rel(rel_path)
+    if normalized == ".vscode/tasks.json" or normalized == "package.json":
+        return True
+    return normalized.startswith(".github/workflows/") or normalized.startswith(".husky/")
+
+
 def _assert_not_seed_corpus(rel_path: str) -> None:
     """写工具前置检查：seed 语料只读，试图写入时抛 ``PermissionError``。"""
     if is_seed_corpus_path(rel_path):

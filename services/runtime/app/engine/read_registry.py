@@ -2,7 +2,7 @@
 
 English: Per-turn read_file coverage registry (docs/34 RC1/RC3/C1).
 
-确定性、纯内存、无 I/O。在工具层与 assemble 层配合实现硬门：
+读覆盖仍是内存门；是否允许重读另比一次磁盘内容哈希。
 - RC1：整文件读完后禁止同 Turn 换 offset 重读（read-after-complete）
 - RC3：本 Turn 已覆盖行区间上的重叠分页拒绝（mode B 短拒）
 - C1：正文被 fold/collapse/snip 移出可见窗口时，每路径允许一次豁免重读
@@ -13,6 +13,8 @@ English: Per-turn read_file coverage registry (docs/34 RC1/RC3/C1).
 
 from __future__ import annotations
 
+import hashlib
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -55,6 +57,7 @@ class PathReadState:
     whole_file_complete: bool = False
     next_offset: int | None = None
     allow_reread_once: bool = False
+    content_hash: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """序列化为 checkpoint 友好的 plain dict。
@@ -67,6 +70,7 @@ class PathReadState:
             "whole_file_complete": self.whole_file_complete,
             "next_offset": self.next_offset,
             "allow_reread_once": self.allow_reread_once,
+            "content_hash": self.content_hash,
         }
 
     @classmethod
@@ -91,6 +95,7 @@ class PathReadState:
             whole_file_complete=bool(data.get("whole_file_complete")),
             next_offset=int(next_off) if next_off is not None else None,
             allow_reread_once=bool(data.get("allow_reread_once")),
+            content_hash=str(data.get("content_hash") or ""),
         )
 
 
@@ -126,6 +131,45 @@ def deserialize_read_registry(raw: Any) -> dict[str, PathReadState]:
     return out
 
 
+_BOUND_REGISTRY: ContextVar[dict[str, PathReadState] | None] = ContextVar(
+    "read_registry",
+    default=None,
+)
+
+
+def bind_read_registry(registry: dict[str, PathReadState] | None) -> Token:
+    """工具执行期间让写工具读到本 Turn 的 registry。"""
+    return _BOUND_REGISTRY.set(registry)
+
+
+def reset_read_registry(token: Token) -> None:
+    _BOUND_REGISTRY.reset(token)
+
+
+def current_read_registry() -> dict[str, PathReadState] | None:
+    return _BOUND_REGISTRY.get()
+
+
+def disk_content_hash(path: str) -> str | None:
+    """当前磁盘内容的 sha256。路径不可读时返回 None。"""
+    from app.tools.core.paths import _resolve_path
+
+    try:
+        target = _resolve_path(path)
+    except (OSError, PermissionError, ValueError):
+        return None
+    if not target.is_file():
+        return None
+    digest = hashlib.sha256()
+    try:
+        with target.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(65536), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
 def deny_redundant_read(
     registry: dict[str, PathReadState],
     *,
@@ -133,6 +177,7 @@ def deny_redundant_read(
     offset: int = 1,
     evicted_paths: set[str] | None = None,
     evicted_reread_used: set[str] | None = None,
+    disk_hash: str | None = None,
 ) -> str | None:
     """RC1 + RC3：拒绝整文件重复读与重叠 offset 窗口。
 
@@ -167,6 +212,11 @@ def deny_redundant_read(
     ):
         return None
     if st.whole_file_complete:
+        stored = st.content_hash or ""
+        if stored == "stale":
+            return None
+        if stored and disk_hash and stored != disk_hash:
+            return None
         return (
             f"read_after_complete: `{key}` was already read in full this Turn "
             f"(truncated=false / whole_file_complete). Do not re-call read_file with a "
@@ -222,6 +272,80 @@ def note_edit_failure_allows_reread(
     st.allow_reread_once = True
 
 
+def note_written_hash(
+    registry: dict[str, PathReadState],
+    *,
+    path: str,
+    content_hash: str,
+) -> None:
+    """自己的写盘成功后更新哈希，避免因此放开重读。"""
+    key = normalize_read_path(path)
+    if not key or not content_hash:
+        return
+    st = registry.get(key)
+    if st is None:
+        return
+    st.content_hash = content_hash
+    st.allow_reread_once = False
+
+
+def mark_registry_stale(registry: dict[str, PathReadState]) -> None:
+    """命令结束后，磁盘哈希与读时哈希不同的路径允许重读。"""
+    for key, st in list(registry.items()):
+        stored = st.content_hash or ""
+        if not stored or stored == "stale":
+            continue
+        disk = disk_content_hash(key)
+        if disk and disk != stored:
+            st.content_hash = "stale"
+
+
+def write_conflicts_with_read(path: str) -> dict[str, str] | None:
+    """覆盖写时，registry 哈希与磁盘不一致则要求先重读。"""
+    registry = current_read_registry()
+    if not registry:
+        return None
+    key = normalize_read_path(path)
+    st = registry.get(key)
+    if st is None:
+        return None
+    stored = st.content_hash or ""
+    if not stored:
+        return None
+    disk = disk_content_hash(path)
+    if disk is None:
+        return None
+    if stored != disk:
+        summary = f"{path} changed since it was read; read_file it again before write_file"
+        diff = diff_since_read(path)
+        if diff:
+            summary = f"{summary}\n{diff}"
+        return {
+            "status": "error",
+            "error": "file_changed_since_read",
+            "path": path,
+            "summary": summary[:2000],
+            "diff_summary": diff[:1600],
+        }
+    return None
+
+
+def file_changed_since_read(path: str) -> bool:
+    """编辑匹配失败时，提示磁盘已相对上次完整读取发生变化。"""
+    registry = current_read_registry()
+    if not registry:
+        return False
+    key = normalize_read_path(path)
+    st = registry.get(key)
+    if st is None:
+        return False
+    stored = st.content_hash or ""
+    if not stored or stored == "stale":
+        return stored == "stale"
+    disk = disk_content_hash(path)
+    return bool(disk and disk != stored)
+
+
 def consume_evicted_reread(
     *,
     path: str,
@@ -252,6 +376,7 @@ def record_successful_read(
     truncated: bool,
     next_offset: int | None,
     whole_file_complete: bool,
+    content_hash: str = "",
 ) -> None:
     """在 read_file 成功返回后更新覆盖区间与分页指针。
 
@@ -278,6 +403,8 @@ def record_successful_read(
     if whole_file_complete:
         st.whole_file_complete = True
         st.next_offset = None
+        if content_hash:
+            st.content_hash = content_hash
     elif truncated and next_offset is not None:
         st.next_offset = int(next_offset)
     else:
@@ -384,3 +511,46 @@ def omit_read_file_content_payload(data: dict[str, Any]) -> dict[str, Any]:
     if data.get("hint"):
         out["hint"] = data.get("hint")
     return out
+
+
+_READ_BODIES: dict[str, str] = {}
+
+
+def cached_read_body(path: str) -> str:
+    return _READ_BODIES.get(normalize_read_path(path), "")
+
+
+def remember_read_body(path: str, text: str) -> None:
+    """记下本进程内完整读到的正文，供覆盖写冲突时给出 diff。不进 checkpoint。"""
+    key = normalize_read_path(path)
+    if not key:
+        return
+    body = text if len(text) <= 48_000 else text[:48_000]
+    _READ_BODIES[key] = body
+    while len(_READ_BODIES) > 40:
+        _READ_BODIES.pop(next(iter(_READ_BODIES)))
+
+
+def diff_since_read(path: str) -> str:
+    import difflib
+
+    key = normalize_read_path(path)
+    old = _READ_BODIES.get(key)
+    if old is None:
+        return ""
+    try:
+        from app.tools.core.paths import _resolve_path
+
+        current = _resolve_path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    lines = list(
+        difflib.unified_diff(
+            old.splitlines(),
+            current.splitlines(),
+            fromfile=key,
+            tofile=key,
+            lineterm="",
+        )
+    )
+    return "\n".join(lines[:40])

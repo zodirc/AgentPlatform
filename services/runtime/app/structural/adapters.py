@@ -176,7 +176,11 @@ async def get_diagnostics(
         meta["degraded_reason"] = "cancelled"
         return {"issues": [], "meta": meta, "lines": [], "status": "cancelled"}
 
-    session, cold, reason = await get_session(workspace_root, timeout_s=min(timeout, 30.0))
+    session, cold, reason = await get_session(
+        workspace_root,
+        timeout_s=min(timeout, 30.0),
+        language=language_for_path(files[0]) or "python",
+    )
     meta["cold_start"] = cold
     if session is None:
         meta["degraded_reason"] = reason or "lsp_unavailable"
@@ -322,7 +326,11 @@ async def goto_definition(
             "summary": "goto_definition cancelled",
         }
 
-    session, cold, reason = await get_session(workspace_root, timeout_s=min(timeout, 20.0))
+    session, cold, reason = await get_session(
+        workspace_root,
+        timeout_s=min(timeout, 20.0),
+        language=language_for_path(path or "") or "python",
+    )
     meta["cold_start"] = cold
     if session is None:
         meta["degraded_reason"] = reason or "lsp_unavailable"
@@ -439,7 +447,11 @@ async def find_references(
             "status": "cancelled",
             "summary": "find_references cancelled",
         }
-    session, cold, reason = await get_session(workspace_root, timeout_s=min(timeout, 20.0))
+    session, cold, reason = await get_session(
+        workspace_root,
+        timeout_s=min(timeout, 20.0),
+        language=language_for_path(path or "") or "python",
+    )
     meta["cold_start"] = cold
     if session is None:
         meta["degraded_reason"] = reason or "lsp_unavailable"

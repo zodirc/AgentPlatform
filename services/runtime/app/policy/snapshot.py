@@ -122,5 +122,14 @@ def take_snapshot(state: Any, arguments: dict[str, Any] | None) -> bool:
         except Exception:
             return True
     else:
-        snaps[str(resolved)] = stored
+        snaps.setdefault(str(resolved), stored)
+    try:
+        rel = str(resolved.relative_to(root))
+        from app.policy.shadow_git import snapshot_preimage
+
+        rev = snapshot_preimage(root, rel, turn_id=str(getattr(state, "turn_id", "") or "turn"))
+        if rev:
+            state.shadow_snapshot_id = rev
+    except Exception:
+        pass
     return True

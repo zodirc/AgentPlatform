@@ -209,6 +209,58 @@ def _bounded_walk(root: Path, *, max_dirs: int = 200):
             return
 
 
+def _rank_symbol_hits(hits: list[SymbolHit], symbol: str) -> list[SymbolHit]:
+    """同名候选：离本轮已读文件近的靠前，点分前缀优先，测试文件靠后。"""
+    parts = [part.lower() for part in symbol.split(".") if part]
+    known: set[str] = set()
+    try:
+        from app.engine.read_registry import current_read_registry
+
+        registry = current_read_registry() or {}
+        known = {str(path).replace("\\", "/").lower() for path in registry}
+    except Exception:
+        known = set()
+
+    def sort_key(item: tuple[int, SymbolHit]) -> tuple[int, int, int, int, int]:
+        index, hit = item
+        path = hit.path.replace("\\", "/").lower()
+        name = path.rsplit("/", 1)[-1]
+        testish = 1 if name.startswith("test_") or "/test" in f"/{path}" else 0
+        prefix = -1 if len(parts) > 1 and parts[0] in path else 0
+        near = 0
+        imported = 0
+        stem = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        for other in known:
+            shared = 0
+            for left, right in zip(path, other):
+                if left != right:
+                    break
+                shared += 1
+            near = min(near, -shared)
+            if stem and stem in _imports_of(other):
+                imported = -1
+        return (imported, near, prefix, testish, index)
+
+    ranked = [hit for _, hit in sorted(enumerate(hits), key=sort_key)]
+    if len(parts) > 1:
+        narrowed = [hit for hit in ranked if parts[0] in hit.path.replace("\\", "/").lower()]
+        if narrowed:
+            return narrowed
+    return ranked
+
+
+def _imports_of(rel: str) -> str:
+    try:
+        from app.engine.read_registry import cached_read_body
+
+        text = cached_read_body(rel)
+    except Exception:
+        return ""
+    return "\n".join(
+        line for line in text.splitlines()[:80] if line.lstrip().startswith(("import ", "from "))
+    )
+
+
 async def locate_via_ast_index(
     *,
     workspace: Path,
@@ -232,7 +284,7 @@ async def locate_via_ast_index(
         work_id,
         symbol,
         owner_user_id=owner_user_id,
-        limit=top_k,
+        limit=max(top_k, 20),
         work_root=workspace,
     )
     if meta is None:
@@ -255,6 +307,8 @@ async def locate_via_ast_index(
         hits = [h for h in hits if h.path == prefix or h.path.startswith(prefix.rstrip("/") + "/")]
         if not hits:
             return None
+
+    hits = _rank_symbol_hits(hits, symbol)[:top_k]
 
     definitions: list[Any] = []
     used_hits: list[SymbolHit] = []
