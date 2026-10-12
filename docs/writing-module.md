@@ -24,7 +24,7 @@
 |----|------|
 | 场景壳 | `scenarios/profiles/writing.yaml` · `scenarios/writing/system.md` · `scenarios/hooks.py` |
 | 稿树 | `writing/book.py` · `writing/occupy.py` · `writing/manuscript.py` |
-| 罗盘 | `writing/book_scope.py` · `writing/work_mode.py` · `writing/focus.py` · `writing/writing_pack.py` · `writing/outline_phase.py` |
+| 规格 | `writing/book_scope.py` · `writing/work_mode.py` · `writing/focus.py` · `writing/writing_pack.py` · `writing/outline_phase.py` |
 | 成稿工具 | `tools/core/writing_tools.py` |
 | 过程门 | `writing/text_metrics.py` · `writing/delivery_gate.py` · `writing/patch_budget.py` · `writing/patch_hygiene.py` · `writing/commitment.py` |
 | L1 评分 | `writing/signals/`（`scorer.py` · `repair.py` · `surface.py`） |

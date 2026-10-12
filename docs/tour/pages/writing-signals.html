@@ -1,9 +1,9 @@
 <section class="page" data-id="writing-signals" data-group="RAG / 写作" data-title="写作评分环">
         <div class="card">
           <h2>评分焊在工具返回值，不改 Engine while</h2>
-          <p class="lede">L0 是过程门（设置页没有滑条可关）。L1 是到类原型 <code>sig.v1</code> 的距离：维度加权 <code>composite</code> 加上惩罚得到 <code>net_signal</code>；奖励只观测。权重按 <code>work_mode</code> 钉在工具里，<strong>不在设置页</strong>。literary 金标是鲁迅 / 郁达夫 / 老舍公版节选；web_serial 换 <code>exemplars_web_serial</code> 节奏库（mixed 不含孔乙己）。学拍不搬核。Ops <code>/ops/&lt;密钥&gt;/writing</code> 只打分并展示表面层，不进产品 Turn。L1 本身不改稿；同轮修补只对过程 L0 或 <code>length_short</code>。账户偏好表无产品入口，见 <a href="#writing-module">写作模块解剖</a>。</p>
+          <p class="lede">L0 是过程门。长篇默认作者档，不注入 L0 receipt；短篇/单篇永远严格档。L1 是到类原型 <code>sig.v1</code> 的距离：维度加权 <code>composite</code> 加上惩罚得到 <code>net_signal</code>；奖励只观测。权重按 <code>work_mode</code> 钉在工具里。literary 的参照文本是鲁迅、郁达夫、老舍的公版节选；web_serial 使用 <code>exemplars_web_serial</code> 节奏库（mixed 不含孔乙己）。参照只用于节奏，不搬用情节。Ops <code>/ops/&lt;密钥&gt;/writing</code> 只打分并展示表面层，不进产品 Turn。L1 本身不改稿；同轮修补只对过程 L0 或 <code>length_short</code>。账户表 <code>writing_account_prefs</code> 仍无调用方；作品面板钉的是 Work 上的档位。见 <a href="#writing-module">写作模块解剖</a>。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 L0 做成可关开关、把弱分再开一条 while、或把对白改成旁白当「修好了」</li>
+            <li><span class="pt">◆ 要点</span> L0 不能在设置中关闭。同轮修补只处理过程 L0 或 length_short。</li>
           </ul>
 
           <h3>切窗</h3>
@@ -21,9 +21,12 @@ mismatch 只在：申报≠mixed ∧ 申报≠检出 ∧ 对齐申报 &lt; 0.60�
 hinge_dense        看见…立马…却/回头（非章节债）
 lore_dump          开篇章「N年前」+失踪/尸体 dump
 opening_institution 开篇章在可站立场景前写宗/派专名
-length_short       长篇可见字 &lt;3000，或用户点名 N 字不足 85%
+length_short       无名额章稿可见字 &lt;3000，或用户点名 N 字不足 85%（短篇目标 1500 不是这道地板）
 
-L0 对 writing_delivery_hold：短篇/单篇过程门未清不得宣称已完成；长篇只挡本章几乎没写（<800 字），不挡配额未满或碎拍；配额未满不要默认 append 第二场
+交付门只看篇幅：短篇/单篇 length_short 不得宣称已完成；长篇只挡本章 &lt;800 字
+过程 L0 不进交付门。append：短篇/单篇过程 L0 未清拒 mode=append；长篇 L0 不挡加厚
+配额未满不要默认 append 第二场
+作者档不注入 L0 receipt；严格档才注入
 compact 只记稿面与 focus，不把门禁说明书当成下一章的作品状态
 写作 L0 receipt 与编码 verify 共享注入函数，但 hinge_reserve = min(10, 3)
 本 Turn 四类 writing receipt 互斥只发一张
@@ -42,7 +45,7 @@ compact 只记稿面与 focus，不把门禁说明书当成下一章的作品状
   hygiene：拒绝对白改旁白；小岛尽才 rewrite_window，禁止拿开篇整窗升级
   表面层六指标 post_turn 写 sidecar，Ops 页展示，不进同轮 tool_result
     <span class="pt">◆ 要点  同岛不停，模型会在同一 12 字里打转直到撞 max_steps。预算尽了必须停修，不要把开篇再 rewrite 一遍。</span></pre>
-          <p class="figure-lead">下图中主链：切窗 → L0 / L1 观测 → 仅 L0 开同轮修补（对岛 · 无差不计 · 尽则停）。左右是入口与禁止项，不是第二套主链。</p>
+          <p class="figure-lead">下图中主链：切窗 → L0 / L1 观测 → 仅过程 L0 或 length_short 开同轮修补。交付门只看篇幅，length_short 地板是 3000。左右是入口与禁止项，不是第二套主链。</p>
           <div class="src"><code>writing/signals/scorer.py</code> · <code>writing/signals/repair.py</code> · <code>writing/patch_budget.py</code> · <code>agent_contracts/writing_prefs.py</code></div>
         </div>
                                         <figure class="figure">
