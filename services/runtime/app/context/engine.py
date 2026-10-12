@@ -192,6 +192,9 @@ class ToolExecutor:
         from app.engine.read_registry import bind_read_registry, reset_read_registry
 
         registry_token = bind_read_registry(getattr(state, "read_registry", None))
+        from app.tools.core.http_fetch import bind_fetch_authorized, reset_fetch_authorized
+
+        fetch_token = bind_fetch_authorized(True)
         try:
             result = await asyncio.wait_for(
                 spec.handler(
@@ -227,6 +230,7 @@ class ToolExecutor:
         except Exception as exc:
             return {"error": str(exc)}
         finally:
+            reset_fetch_authorized(fetch_token)
             reset_read_registry(registry_token)
             reset_window_taint(taint_token)
             reset_window_external(external_token)

@@ -527,19 +527,22 @@ RAW = r'''
               "title": {
                 "type": "string"
               },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "pending",
-                  "in_progress",
-                  "done",
-                  "completed",
-                  "cancelled"
-                ]
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "in_progress",
+                    "done",
+                    "completed",
+                    "cancelled"
+                  ]
+                },
+                "acceptance": {
+                  "type": "string"
+                }
               }
             }
-          }
-        },
+          },
         "summary": {
           "type": "string"
         }

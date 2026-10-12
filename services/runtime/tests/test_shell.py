@@ -8,6 +8,23 @@ import pytest
 from app.tools.core.shell import run_shell_command
 
 
+class _BytesStream:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    async def read(self, _n: int) -> bytes:
+        data, self._data = self._data, b""
+        return data
+
+
+class _HangStream:
+    def __init__(self) -> None:
+        self._fut: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
+
+    async def read(self, _n: int) -> bytes:
+        return await self._fut
+
+
 @pytest.fixture(autouse=True)
 def _sandbox_off(monkeypatch: pytest.MonkeyPatch) -> None:
     # Unit tests mock subprocess_shell. Bare exec is the explicit dev break-glass.
@@ -20,7 +37,8 @@ async def test_run_shell_command_returns_stdout(tmp_path) -> None:
     proc = MagicMock()
     proc.pid = 99999
     proc.returncode = 0
-    proc.communicate = AsyncMock(return_value=(b"hello\n", b""))
+    proc.stdout = _BytesStream(b"hello\n")
+    proc.stderr = _BytesStream(b"")
     proc.wait = AsyncMock(return_value=0)
 
     with patch("app.tools.core.shell.asyncio.create_subprocess_shell", AsyncMock(return_value=proc)):
@@ -40,12 +58,8 @@ async def test_run_shell_command_honours_cancel(tmp_path) -> None:
     proc = MagicMock()
     proc.pid = 99999
     proc.returncode = None
-
-    async def slow_communicate() -> tuple[bytes, bytes]:
-        await asyncio.sleep(3600)
-        return b"", b""
-
-    proc.communicate = slow_communicate
+    proc.stdout = _HangStream()
+    proc.stderr = _HangStream()
 
     calls = {"n": 0}
 
@@ -73,12 +87,8 @@ async def test_run_shell_command_times_out(tmp_path) -> None:
     proc = MagicMock()
     proc.pid = 99999
     proc.returncode = None
-
-    async def slow_communicate() -> tuple[bytes, bytes]:
-        await asyncio.sleep(3600)
-        return b"", b""
-
-    proc.communicate = slow_communicate
+    proc.stdout = _HangStream()
+    proc.stderr = _HangStream()
 
     tick = {"t": 0.0}
 
