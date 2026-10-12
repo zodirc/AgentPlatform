@@ -14,6 +14,15 @@ from app.tools.core.sandbox import (
 )
 
 
+class _BytesStream:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    async def read(self, _n: int) -> bytes:
+        data, self._data = self._data, b""
+        return data
+
+
 @pytest.fixture(autouse=True)
 def _reset_sandbox_cache() -> None:
     clear_sandbox_backend_cache()
@@ -152,7 +161,8 @@ async def test_run_shell_command_off_uses_subprocess_shell(
     proc = MagicMock()
     proc.pid = 99999
     proc.returncode = 0
-    proc.communicate = AsyncMock(return_value=(b"ok\n", b""))
+    proc.stdout = _BytesStream(b"ok\n")
+    proc.stderr = _BytesStream(b"")
     proc.wait = AsyncMock(return_value=0)
 
     with patch(
@@ -179,7 +189,8 @@ async def test_run_argv_uses_exec_and_sandbox_wrap(
     proc = MagicMock()
     proc.pid = 1
     proc.returncode = 0
-    proc.communicate = AsyncMock(return_value=(b"3 passed\n", b""))
+    proc.stdout = _BytesStream(b"3 passed\n")
+    proc.stderr = _BytesStream(b"")
     proc.wait = AsyncMock(return_value=0)
 
     with patch(

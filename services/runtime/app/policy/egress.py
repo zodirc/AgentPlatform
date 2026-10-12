@@ -129,13 +129,47 @@ def classify_http(
     has_body = bool(args.get("body"))
     if method != "GET" or has_body:
         return "require_approval"
-    if not host_allowlisted(host):
-        return "deny"
+    if not host_allowlisted(host) and not _registry_host(host):
+        from app.tenant_context import current_ops_eval
+
+        if current_ops_eval():
+            return "deny"
+        from app.policy.egress_proxy import host_granted
+
+        if not host_granted(host):
+            from app.policy.egress_audit import note_egress_host
+
+            note_egress_host(host, "require_approval")
+            return "require_approval"
     from app.policy.scenario_policy import scenario_network_hosts
 
     scenario_hosts = scenario_network_hosts(str(getattr(state, "scenario_id", "") or ""))
     if scenario_hosts is not None and host.lower() not in scenario_hosts:
         return "deny"
     if window_taint == "external" and not url_in_context(url, state):
+        from app.policy.egress_audit import note_egress_host
+
+        note_egress_host(host, "require_approval")
         return "require_approval"
+    from app.policy.egress_audit import note_egress_host
+
+    note_egress_host(host, "allow")
     return "allow"
+
+
+_REGISTRIES = (
+    "pypi.org",
+    "files.pythonhosted.org",
+    "registry.npmjs.org",
+    "registry.yarnpkg.com",
+    "crates.io",
+    "static.crates.io",
+    "proxy.golang.org",
+    "sum.golang.org",
+    "github.com",
+)
+
+
+def _registry_host(host: str) -> bool:
+    name = (host or "").strip().lower().rstrip(".")
+    return any(name == item or name.endswith("." + item) for item in _REGISTRIES)

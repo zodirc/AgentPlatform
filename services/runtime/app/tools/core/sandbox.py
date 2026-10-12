@@ -271,13 +271,23 @@ def _is_relative_to(path: Path, root: Path) -> bool:
         return False
 
 
-def _landlock_inner_argv(argv: Sequence[str], cwd: Path) -> list[str]:
+def _landlock_inner_argv(
+    argv: Sequence[str],
+    cwd: Path,
+    *,
+    extra_roots: Sequence[str] = (),
+) -> list[str]:
     """Prefix the user command with the in-sandbox Landlock wrapper when Python exists."""
     py = "/usr/bin/python3"
     script = Path(__file__).resolve().parent / "landlock_fs.py"
     if not Path(py).is_file() or not script.is_file():
         return list(argv)
-    return [py, "/landlock_fs.py", "--root", "/work", "--root", str(cwd), "--", *argv]
+    cmd = [py, "/landlock_fs.py", "--root", "/work", "--root", str(cwd)]
+    for root in extra_roots:
+        cmd.extend(["--root", root])
+    cmd.append("--")
+    cmd.extend(argv)
+    return cmd
 
 
 def build_bwrap_argv(
@@ -285,6 +295,8 @@ def build_bwrap_argv(
     argv: Sequence[str],
     cwd: Path,
     network: bool = False,
+    extra_binds: Sequence[str] | None = None,
+    egress_dir: Path | None = None,
 ) -> list[str]:
     """构造 ``bwrap … -- <argv>``。默认无网络，新 pid 命名空间里挂新的 /proc。
 
@@ -339,14 +351,26 @@ def build_bwrap_argv(
     cmd.extend(["--dev", "/dev"])
     # New procfs in the new pid namespace. Do not bind the host /proc.
     cmd.extend(["--proc", "/proc"])
+    for path in extra_binds or ():
+        if path and Path(path).exists():
+            cmd.extend(["--bind", path, path])
 
     script = Path(__file__).resolve().parent / "landlock_fs.py"
     if Path("/usr/bin/python3").is_file() and script.is_file():
         cmd.extend(["--ro-bind", str(script), "/landlock_fs.py"])
+    extra_roots: list[str] = []
+    if egress_dir is not None:
+        relay = egress_dir / "relay.py"
+        sock = egress_dir / "egress.sock"
+        if relay.is_file() and sock.exists():
+            cmd.extend(["--dir", "/egress"])
+            cmd.extend(["--ro-bind", str(relay), "/egress/relay.py"])
+            cmd.extend(["--bind", str(sock), "/egress/egress.sock"])
+            extra_roots.append("/egress")
 
     cmd.extend(["--chdir", "/work"])
     cmd.append("--")
-    cmd.extend(_landlock_inner_argv(argv, cwd))
+    cmd.extend(_landlock_inner_argv(argv, cwd, extra_roots=extra_roots))
     return cmd
 
 
@@ -354,6 +378,9 @@ def wrap_argv_for_exec(
     *,
     argv: Sequence[str],
     cwd: Path,
+    network: bool = False,
+    extra_binds: Sequence[str] | None = None,
+    egress_dir: Path | None = None,
 ) -> tuple[list[str], SandboxBackend]:
     """包装 argv。bwrap 且无网络；只有 break-glass 才原样返回。
 
@@ -370,13 +397,18 @@ def wrap_argv_for_exec(
     backend = resolve_sandbox_backend()
     if backend == "off":
         return list(argv), "off"
-    return build_bwrap_argv(argv=argv, cwd=cwd, network=False), "bwrap"
+    return build_bwrap_argv(
+        argv=argv, cwd=cwd, network=network, extra_binds=extra_binds, egress_dir=egress_dir
+    ), "bwrap"
 
 
 def wrap_shell_command_for_exec(
     *,
     command: str,
     cwd: Path,
+    network: bool = False,
+    extra_binds: Sequence[str] | None = None,
+    egress_dir: Path | None = None,
 ) -> tuple[list[str], SandboxBackend]:
     """将 shell 命令串经 ``sh -c`` 纳入沙箱 exec 路径。
 
@@ -388,7 +420,13 @@ def wrap_shell_command_for_exec(
         与 ``wrap_argv_for_exec`` 相同。
     """
     sh = shutil.which("sh") or "/bin/sh"
-    return wrap_argv_for_exec(argv=[sh, "-c", command], cwd=cwd)
+    return wrap_argv_for_exec(
+        argv=[sh, "-c", command],
+        cwd=cwd,
+        network=network,
+        extra_binds=extra_binds,
+        egress_dir=egress_dir,
+    )
 
 
 def sandbox_status() -> dict[str, object]:

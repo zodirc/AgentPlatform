@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import logging
 import os
 import shutil
@@ -21,6 +22,16 @@ from typing import Any
 from app.settings import settings
 
 logger = logging.getLogger(__name__)
+
+_output_sink: contextvars.ContextVar = contextvars.ContextVar("command_output_sink", default=None)
+
+
+def bind_command_output_sink(callback: Callable[[str], Awaitable[None]]):
+    return _output_sink.set(callback)
+
+
+def reset_command_output_sink(token) -> None:
+    _output_sink.reset(token)
 
 TERMINATE_GRACE_SECONDS = 0.5
 MAX_OUTPUT_CHARS = 32_000
@@ -152,19 +163,15 @@ def _safe_env() -> dict[str, str]:
 
 
 def _maybe_redact(text: str) -> str:
-    """按 settings 对 stdout/stderr 做 PII 脱敏。
+    """PII 脱敏之后再按密钥模式替换。原文不进入事件。"""
+    cleaned = text or ""
+    if settings.pii_redact_enabled and cleaned:
+        from app.privacy.redact import redact_text
 
-    参数:
-        text: 原始输出文本。
+        cleaned = redact_text(cleaned)
+    from app.privacy.secret_scan import redact_secrets
 
-    返回:
-        脱敏后文本；未启用 redact 时原样返回。
-    """
-    if not settings.pii_redact_enabled or not text:
-        return text
-    from app.privacy.redact import redact_text
-
-    return redact_text(text)
+    return redact_secrets(cleaned)
 
 
 async def _run_exec(
@@ -241,7 +248,32 @@ async def _finish_process(
     返回:
         与 ``_run_exec`` 相同结构的结果 dict。
     """
-    comm_task = asyncio.create_task(proc.communicate())
+    stdout_buf = bytearray()
+    stderr_buf = bytearray()
+
+    async def _drain(stream: asyncio.StreamReader | None, buf: bytearray) -> None:
+        if stream is None:
+            return
+        while True:
+            piece = await stream.read(8192)
+            if not piece:
+                return
+            buf.extend(piece)
+            callback = _output_sink.get()
+            if callback is not None and piece:
+                text = piece.decode("utf-8", errors="replace")
+                if text:
+                    emitted = callback(text[-2000:])
+                    if asyncio.iscoroutine(emitted):
+                        await emitted
+
+    async def _drain_both() -> None:
+        await asyncio.gather(
+            _drain(proc.stdout, stdout_buf),
+            _drain(proc.stderr, stderr_buf),
+        )
+
+    comm_task = asyncio.create_task(_drain_both())
     started = time.monotonic()
 
     while not comm_task.done():
@@ -264,20 +296,25 @@ async def _finish_process(
         if time.monotonic() - started > timeout_s:
             await _terminate_process(proc, force=True)
             comm_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            stdout_b, stderr_b = b"", b""
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await comm_task
+            tail_out = _maybe_redact(bytes(stdout_buf).decode("utf-8", errors="replace"))[-2048:]
+            tail_err = _maybe_redact(bytes(stderr_buf).decode("utf-8", errors="replace"))[-2048:]
             return {
                 "status": "timeout",
                 "command": command,
-                "stdout": "",
-                "stderr": "",
+                "stdout": tail_out,
+                "stderr": tail_err,
                 "exit_code": None,
                 "summary": f"Command timed out after {timeout_s:.0f}s",
             }
 
         await asyncio.sleep(0.05)
 
-    stdout_b, stderr_b = await comm_task
+    await comm_task
+    await proc.wait()
+    stdout_b, stderr_b = bytes(stdout_buf), bytes(stderr_buf)
     stdout = _maybe_redact(stdout_b.decode("utf-8", errors="replace"))
     stderr = _maybe_redact(stderr_b.decode("utf-8", errors="replace"))
     truncated = False
@@ -363,6 +400,21 @@ async def _execute_via_egress(argv: list[str], *, display: str) -> dict[str, Any
             "_taint": "external",
             "sandbox": "egress",
         }
+    if verdict == "require_approval":
+        from urllib.parse import urlparse as _urlparse
+
+        host = _urlparse(url).hostname or ""
+        return {
+            "status": "failed",
+            "command": display,
+            "stdout": "",
+            "stderr": f"EGRESS_APPROVAL_REQUIRED host={host}",
+            "exit_code": 1,
+            "summary": f"首次访问 {host} 需要审批。请带 egress_hosts 再请求一次。",
+            "egress_denied": [host] if host else [],
+            "_taint": "external",
+            "sandbox": "egress",
+        }
     from urllib.parse import urlparse
 
     from app.policy.credentials import authorization_for
@@ -392,6 +444,7 @@ async def run_argv_command(
     timeout_s: float,
     display_command: str | None = None,
     check_cancel: Callable[[], Awaitable[tuple[bool, bool]]] | None = None,
+    sandbox_relax: bool = False,
 ) -> dict[str, Any]:
     """执行已解析的 argv（不经 shell），供 ``run_tests`` 等在 SB0 门控后调用。
 
@@ -443,7 +496,25 @@ async def run_argv_command(
     if proxied is not None:
         return proxied
     try:
-        wrapped, backend = wrap_argv_for_exec(argv=argv, cwd=cwd)
+        from app.tools.core.sandbox import resolve_sandbox_backend
+
+        backend_name = resolve_sandbox_backend()
+        network, binds, use_proxy = (False, [], False)
+        if backend_name != "off":
+            network, binds, use_proxy = _command_network(
+                display or " ".join(argv), relax=sandbox_relax
+            )
+        egress_dir = None
+        launch = list(argv)
+        if use_proxy:
+            from app.policy.egress_proxy import proxy_dir, wrap_shell
+
+            egress_dir = proxy_dir()
+            if egress_dir is not None:
+                launch = ["/bin/sh", "-c", wrap_shell('exec "$@"'), "agent-egress", *argv]
+        wrapped, backend = wrap_argv_for_exec(
+            argv=launch, cwd=cwd, network=network, extra_binds=binds, egress_dir=egress_dir
+        )
         preexec = sandbox_preexec_fn(cwd) if backend == "landlock" else None
     except RuntimeError as exc:
         return {
@@ -465,7 +536,24 @@ async def run_argv_command(
         private_tmpdir=backend == "landlock",
     )
     result["sandbox"] = backend
-    return result
+    return _attach_egress_denied(result)
+
+
+def _command_network(command: str, *, relax: bool = False) -> tuple[bool, list[str], bool]:
+    """评测断网。放宽审批后才共享宿主网络。其余命令走出网代理，不共享网络。"""
+    from app.tenant_context import current_ops_eval
+
+    if current_ops_eval():
+        return False, [], False
+    binds: list[str] = []
+    if relax:
+        home = Path.home()
+        for rel in (".cache/pip", ".npm", ".cargo"):
+            path = home / rel
+            if path.exists():
+                binds.append(str(path))
+        return True, binds, False
+    return False, [], True
 
 
 async def run_shell_command(
@@ -474,6 +562,7 @@ async def run_shell_command(
     cwd: Path,
     timeout_s: float,
     check_cancel: Callable[[], Awaitable[tuple[bool, bool]]] | None = None,
+    sandbox_relax: bool = False,
 ) -> dict[str, Any]:
     """通过 ``/bin/sh -c`` 执行 shell 命令字符串，带沙箱与软 jail。
 
@@ -579,7 +668,27 @@ async def run_shell_command(
         return result
 
     try:
-        wrapped, backend = wrap_shell_command_for_exec(command=command, cwd=cwd)
+        from app.tools.core.sandbox import resolve_sandbox_backend
+
+        backend_name = resolve_sandbox_backend()
+        network, binds, use_proxy = (False, [], False)
+        if backend_name != "off":
+            network, binds, use_proxy = _command_network(command, relax=sandbox_relax)
+        launch = command
+        egress_dir = None
+        if use_proxy:
+            from app.policy.egress_proxy import proxy_dir, wrap_shell
+
+            egress_dir = proxy_dir()
+            if egress_dir is not None:
+                launch = wrap_shell(command)
+        wrapped, backend = wrap_shell_command_for_exec(
+            command=launch,
+            cwd=cwd,
+            network=network,
+            extra_binds=binds,
+            egress_dir=egress_dir,
+        )
         preexec = sandbox_preexec_fn(cwd) if backend == "landlock" else None
     except RuntimeError as exc:
         return {
@@ -601,4 +710,17 @@ async def run_shell_command(
         private_tmpdir=backend == "landlock",
     )
     result["sandbox"] = backend
+    return _attach_egress_denied(result)
+
+
+def _attach_egress_denied(result: dict[str, Any]) -> dict[str, Any]:
+    from app.policy.egress_proxy import drain_denied
+
+    denied = drain_denied()
+    if not denied:
+        return result
+    result["egress_denied"] = denied
+    hint = "首次访问需审批：" + "，".join(denied) + "。请带 egress_hosts 再请求一次。"
+    summary = str(result.get("summary") or "").strip()
+    result["summary"] = f"{summary} {hint}".strip()
     return result

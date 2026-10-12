@@ -106,6 +106,18 @@ class _PathBeneathAttr(ctypes.Structure):
     ]
 
 
+class _NetPortAttr(ctypes.Structure):
+    """Landlock ``landlock_net_port_attr``。只放行沙箱内出网转发器的本机端口。"""
+    _fields_ = [
+        ("allowed_access", ctypes.c_uint64),
+        ("port", ctypes.c_uint64),
+    ]
+
+
+_LANDLOCK_RULE_NET_PORT = 2
+_EGRESS_PROXY_PORT = 3128
+
+
 def _libc() -> ctypes.CDLL:
     """加载 libc 并配置 ``syscall`` restype。"""
     lib = ctypes.CDLL(None, use_errno=True)
@@ -224,6 +236,8 @@ def apply_landlock_fs(
             _add_path_beneath(lib, int(ruleset_fd), root, write_access)
         if Path("/tmp").is_dir() and "/tmp" not in roots:
             _add_path_beneath(lib, int(ruleset_fd), "/tmp", read_access | write_access)
+        if abi >= 4 and Path("/egress").is_dir():
+            _allow_local_proxy_port(lib, int(ruleset_fd))
 
         if lib.prctl(_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0:
             e = ctypes.get_errno()
@@ -239,6 +253,20 @@ def apply_landlock_fs(
             raise OSError(e, f"landlock_restrict_self: {os.strerror(e)}")
     finally:
         os.close(int(ruleset_fd))
+
+
+def _allow_local_proxy_port(lib: ctypes.CDLL, ruleset_fd: int) -> None:
+    """ABI ≥ 4 默认拒绝全部 TCP。只允许连接沙箱里的 127.0.0.1:3128。"""
+    attr = _NetPortAttr(allowed_access=_NET_CONNECT_TCP, port=_EGRESS_PROXY_PORT)
+    err = lib.syscall(
+        ctypes.c_long(_SYS_LANDLOCK_ADD_RULE),
+        ctypes.c_int(ruleset_fd),
+        ctypes.c_int(_LANDLOCK_RULE_NET_PORT),
+        ctypes.byref(attr),
+        ctypes.c_uint32(0),
+    )
+    if err < 0:
+        logger.warning("landlock net port rule failed errno=%s", ctypes.get_errno())
 
 
 def _main(argv: list[str]) -> None:
