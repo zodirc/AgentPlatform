@@ -23,6 +23,13 @@ import {
   SCENARIO_META,
 } from "../../shared/workbench/scenarioMeta";
 import { PlanPanel } from "../../shared/workbench/PlanPanel";
+import { TurnRollbackBar } from "./TurnRollbackBar";
+import {
+  readPermissionMode,
+  saveAgentsCommand,
+  writePermissionMode,
+  type PermissionMode,
+} from "../../shared/api/client";
 import { OpeningPondsPanel } from "../../shared/workbench/OpeningPondsPanel";
 import {
   openingChoiceFromUserInput,
@@ -710,6 +717,15 @@ export function AgentChatPanel({
                           思考中…
                         </p>
                       ) : null}
+                      {!isOptimistic && !isLive && turn.status === "completed" ? (
+                        <TurnRollbackBar turnId={turn.id} />
+                      ) : null}
+                      {isLive && !wb.busy && wb.displayStatus === "completed" ? (
+                        <>
+                          <TurnRollbackBar turnId={turn.id} />
+                          <CommandOffer events={wb.events} />
+                        </>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -924,6 +940,7 @@ export function AgentChatPanel({
               }}
             />
             <div className="flex flex-wrap items-center gap-2 border-t border-border/60 px-2.5 py-2">
+              {wb.scenarioId === "agent" ? <PermissionModeSelect /> : null}
               <Button
                 size="sm"
                 variant={wb.planMode ? "default" : "ghost"}
@@ -983,5 +1000,65 @@ export function AgentChatPanel({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function PermissionModeSelect() {
+  const [mode, setMode] = useState<PermissionMode>(readPermissionMode);
+  return (
+    <label className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+      权限
+      <select
+        className="rounded-md border border-border bg-background px-1 py-0.5 text-[11px] text-foreground"
+        value={mode}
+        onChange={(event) => {
+          const next = event.target.value as PermissionMode;
+          setMode(next);
+          writePermissionMode(next);
+        }}
+      >
+        <option value="ask">询问</option>
+        <option value="auto_edit">自动编辑</option>
+        <option value="full_auto">全自动</option>
+      </select>
+    </label>
+  );
+}
+
+function CommandOffer({
+  events,
+}: {
+  events: { type: string; payload?: Record<string, unknown> }[];
+}) {
+  const [note, setNote] = useState("");
+  const [hidden, setHidden] = useState(false);
+  const completed = [...events].reverse().find((event) => event.type === "turn.completed");
+  const offer = String(completed?.payload?.command_offer ?? "");
+  const command = offer.includes("：") ? offer.slice(offer.indexOf("：") + 1).trim() : "";
+  if (hidden || !command) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+      <span>把这条命令写入 AGENTS.md：{command}</span>
+      <button
+        type="button"
+        className="rounded-md border border-border px-2 py-0.5 hover:text-foreground"
+        onClick={() => {
+          void saveAgentsCommand(command).then(
+            () => setNote("已写入 AGENTS.md"),
+            () => setNote("写入失败"),
+          );
+        }}
+      >
+        写入
+      </button>
+      <button
+        type="button"
+        className="rounded-md border border-border px-2 py-0.5 hover:text-foreground"
+        onClick={() => setHidden(true)}
+      >
+        忽略
+      </button>
+      {note ? <span>{note}</span> : null}
+    </div>
   );
 }

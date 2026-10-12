@@ -46,6 +46,7 @@ class StartTurnCommand(BaseModel):
     ops_eval: bool = False
     # User-initiated. Drops prior transcript taint before this turn is assembled.
     clear_context: bool = False
+    permission_mode: Literal["ask", "auto_edit", "full_auto"] = "ask"
 
 
 class CancelTurnCommand(BaseModel):

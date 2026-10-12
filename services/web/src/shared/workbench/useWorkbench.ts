@@ -15,6 +15,7 @@ import {
   fetchTurnView,
   invalidateTurnViewCache,
   fetchWorkspaceFile,
+  readPermissionMode,
   rejectPatch,
   startTurn,
   warmupRetrieval,
@@ -781,7 +782,12 @@ export function useWorkbenchImpl(): WorkbenchState {
       sid: string;
       msg: string;
       planPhase?: PlanPhaseWire | null;
-    }) => startTurn(sid, msg, activeScenarioId, { plan_phase: planPhase }),
+    }) =>
+      startTurn(sid, msg, activeScenarioId, {
+        plan_phase: planPhase,
+        permission_mode:
+          activeScenarioId === "agent" ? readPermissionMode() : undefined,
+      }),
   });
 
   /**

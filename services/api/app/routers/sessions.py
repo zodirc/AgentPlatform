@@ -323,6 +323,7 @@ async def create_turn(
                     owner_user_id=actor.id,
                     visibility_seed=work.visibility_seed,
                     clear_context=bool(body.clear_context),
+                    permission_mode=body.permission_mode,
                 )
                 from app.observability.slo import mark_turn_accepted_at_api
 

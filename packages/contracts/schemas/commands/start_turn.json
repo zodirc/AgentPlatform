@@ -78,6 +78,11 @@
       "type": "boolean",
       "default": false,
       "description": "User-initiated. Prior transcript is not assembled into this turn."
+    },
+    "permission_mode": {
+      "type": "string",
+      "enum": ["ask", "auto_edit", "full_auto"],
+      "default": "ask"
     }
   }
 }

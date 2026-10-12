@@ -307,3 +307,84 @@ async def upload_source_file(
         if isinstance(detail, str) and len(detail) > 500:
             detail = detail[:500]
         raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+
+
+class RollbackTurnBody(BaseModel):
+    """按影子快照撤销本轮。"""
+
+    turn_id: str = Field(min_length=1)
+
+
+class RollbackFileBody(BaseModel):
+    """撤销单个已跟踪文件。"""
+
+    turn_id: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+
+
+@router.post("/rollback/turn")
+async def rollback_workspace_turn(
+    request: Request,
+    body: RollbackTurnBody,
+    work_id: UUID | None = Query(default=None),
+):
+    """把工作区恢复到本轮影子快照。工作区外的副作用无法撤销。"""
+    try:
+        tenant = await resolve_workspace_tenant(request, work_id=work_id)
+        return await workspace_svc.rollback_turn(tenant=tenant, turn_id=body.turn_id)
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/rollback/file")
+async def rollback_workspace_file(
+    request: Request,
+    body: RollbackFileBody,
+    work_id: UUID | None = Query(default=None),
+):
+    """撤销单个文件到本轮影子快照。"""
+    try:
+        tenant = await resolve_workspace_tenant(request, work_id=work_id)
+        return await workspace_svc.rollback_file(
+            tenant=tenant, turn_id=body.turn_id, path=body.path
+        )
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.get("/rollback/diff")
+async def workspace_rollback_diff(
+    request: Request,
+    turn_id: str = Query(min_length=1),
+    from_rev: str | None = Query(default=None),
+    to_rev: str | None = Query(default=None),
+    work_id: UUID | None = Query(default=None),
+):
+    """本轮影子快照的变更统计与已跟踪路径。"""
+    try:
+        tenant = await resolve_workspace_tenant(request, work_id=work_id)
+        return await workspace_svc.rollback_diff(
+            tenant=tenant, turn_id=turn_id, from_rev=from_rev, to_rev=to_rev
+        )
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+class AgentsCommandBody(BaseModel):
+    """用户确认写入 AGENTS.md 的命令。"""
+
+    command: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/agents-md")
+async def append_workspace_agents_command(
+    request: Request,
+    body: AgentsCommandBody,
+    work_id: UUID | None = Query(default=None),
+):
+    """经用户确认后，把一条命令写入 AGENTS.md。"""
+    try:
+        tenant = await resolve_workspace_tenant(request, work_id=work_id)
+        return await workspace_svc.append_agents_command(tenant=tenant, command=body.command)
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

@@ -128,7 +128,10 @@ export function deriveAgentActivity(
         detail,
       };
     }
-    return { phase: "completed", label: "任务已完成" };
+    const verified = verificationDetail(completed?.payload);
+    return verified
+      ? { phase: "completed", label: "任务已完成", detail: verified }
+      : { phase: "completed", label: "任务已完成" };
   }
   if (runningTool) {
     const toolName = String(runningTool.payload.tool_name ?? "tool");
@@ -169,6 +172,22 @@ export function deriveAgentActivity(
     return { phase: "running", label: "Agent 运行中" };
   }
   return { phase: "idle", label: "等待任务" };
+}
+
+function verificationDetail(
+  payload: Record<string, unknown> | undefined,
+): string | undefined {
+  const verification = String(payload?.verification ?? "");
+  if (!verification) return undefined;
+  const labels: Record<string, string> = {
+    verified: "已验证",
+    unverified: "未验证",
+    failed: "验证失败",
+    not_applicable: "无需验证",
+  };
+  const command = String(payload?.last_test_command ?? "");
+  const label = labels[verification] ?? verification;
+  return command ? `${label} · ${command}` : label;
 }
 
 const PHASE_STYLES: Record<AgentPhase, string> = {

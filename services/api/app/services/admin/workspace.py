@@ -506,3 +506,95 @@ async def taste_writing_book(
     if resp.status_code >= 400:
         raise WorkspaceProxyError(resp.status_code, resp.text)
     return resp.json()
+
+
+async def rollback_turn(
+    *,
+    tenant: dict[str, str] | None = None,
+    turn_id: str,
+) -> dict:
+    """把工作区恢复到本轮影子快照。"""
+    base = settings.runtime_url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{base}/internal/workspace/rollback/turn",
+                params={**_tenant_params(tenant or {}), "turn_id": turn_id},
+                headers={"X-Internal-Token": settings.internal_service_token},
+            )
+    except httpx.HTTPError as exc:
+        raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
+    if resp.status_code >= 400:
+        raise WorkspaceProxyError(resp.status_code, resp.text)
+    return resp.json()
+
+
+async def rollback_file(
+    *,
+    tenant: dict[str, str] | None = None,
+    turn_id: str,
+    path: str,
+) -> dict:
+    """撤销单个文件到本轮影子快照。"""
+    base = settings.runtime_url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{base}/internal/workspace/rollback/file",
+                params={**_tenant_params(tenant or {}), "turn_id": turn_id, "path": path},
+                headers={"X-Internal-Token": settings.internal_service_token},
+            )
+    except httpx.HTTPError as exc:
+        raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
+    if resp.status_code >= 400:
+        raise WorkspaceProxyError(resp.status_code, resp.text)
+    return resp.json()
+
+
+async def rollback_diff(
+    *,
+    tenant: dict[str, str] | None = None,
+    turn_id: str,
+    from_rev: str | None = None,
+    to_rev: str | None = None,
+) -> dict:
+    """本轮影子快照的变更统计与已跟踪路径。"""
+    base = settings.runtime_url.rstrip("/")
+    params = {**_tenant_params(tenant or {}), "turn_id": turn_id}
+    if from_rev:
+        params["from_rev"] = from_rev
+    if to_rev:
+        params["to_rev"] = to_rev
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{base}/internal/workspace/rollback/diff",
+                params=params,
+                headers={"X-Internal-Token": settings.internal_service_token},
+            )
+    except httpx.HTTPError as exc:
+        raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
+    if resp.status_code >= 400:
+        raise WorkspaceProxyError(resp.status_code, resp.text)
+    return resp.json()
+
+
+async def append_agents_command(
+    *,
+    tenant: dict[str, str] | None = None,
+    command: str,
+) -> dict:
+    """经用户确认后，把一条命令写入 AGENTS.md。"""
+    base = settings.runtime_url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{base}/internal/workspace/agents-md",
+                params={**_tenant_params(tenant or {}), "command": command},
+                headers={"X-Internal-Token": settings.internal_service_token},
+            )
+    except httpx.HTTPError as exc:
+        raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
+    if resp.status_code >= 400:
+        raise WorkspaceProxyError(resp.status_code, resp.text)
+    return resp.json()

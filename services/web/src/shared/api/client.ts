@@ -581,19 +581,42 @@ export async function fetchSessionTurns(
  * @param scenarioId 场景 id
  * @param opts.plan_phase Plan 模式阶段（planning | executing）
  */
+export type PermissionMode = "ask" | "auto_edit" | "full_auto";
+
+export function readPermissionMode(): PermissionMode {
+  const raw = sessionStorage.getItem("agent-permission-mode");
+  if (raw === "auto_edit" || raw === "full_auto" || raw === "ask") return raw;
+  return "ask";
+}
+
+export function writePermissionMode(mode: PermissionMode): void {
+  sessionStorage.setItem("agent-permission-mode", mode);
+}
+
 export async function startTurn(
   sessionId: string,
   message: string,
   scenarioId: string,
-  opts?: { plan_phase?: "planning" | "executing" | null },
+  opts?: {
+    plan_phase?: "planning" | "executing" | null;
+    permission_mode?: PermissionMode;
+  },
 ) {
   const body: {
     message: string;
     scenario_id: string;
     plan_phase?: "planning" | "executing";
+    permission_mode?: PermissionMode;
   } = { message, scenario_id: scenarioId };
   if (opts?.plan_phase === "planning" || opts?.plan_phase === "executing") {
     body.plan_phase = opts.plan_phase;
+  }
+  if (
+    opts?.permission_mode === "ask" ||
+    opts?.permission_mode === "auto_edit" ||
+    opts?.permission_mode === "full_auto"
+  ) {
+    body.permission_mode = opts.permission_mode;
   }
   const res = await fetch(`${API_BASE}/sessions/${sessionId}/turns`, {
     ...sessionFetchInit,
@@ -957,6 +980,64 @@ export async function fetchWorkspaceFile(path: string): Promise<WorkspaceFile> {
     headers: apiAuthHeaders(),
   });
   if (!res.ok) throw new Error(`fetchWorkspaceFile failed: ${res.status}`);
+  return res.json();
+}
+
+/** 本轮影子快照的变更统计与已跟踪路径。 */
+export async function fetchTurnRollback(turnId: string): Promise<{
+  stat?: string;
+  files?: string[];
+  changes?: { path: string; status?: string }[];
+  note?: string;
+}> {
+  const params = new URLSearchParams({ turn_id: turnId });
+  const res = await fetch(`${API_BASE}/admin/workspace/rollback/diff?${params}`, {
+    ...sessionFetchInit,
+    headers: apiAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(`fetchTurnRollback failed: ${res.status}`);
+  return res.json();
+}
+
+/** 把工作区恢复到本轮开始时的影子快照。 */
+export async function rollbackTurn(turnId: string): Promise<{
+  outcome?: string;
+  restored?: string[];
+}> {
+  const res = await fetch(`${API_BASE}/admin/workspace/rollback/turn`, {
+    ...sessionFetchInit,
+    method: "POST",
+    headers: { ...apiAuthHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ turn_id: turnId }),
+  });
+  if (!res.ok) throw new Error(`rollbackTurn failed: ${res.status}`);
+  return res.json();
+}
+
+/** 撤销单个已跟踪文件到本轮快照。 */
+export async function revertTurnFile(
+  turnId: string,
+  path: string,
+): Promise<{ outcome?: string }> {
+  const res = await fetch(`${API_BASE}/admin/workspace/rollback/file`, {
+    ...sessionFetchInit,
+    method: "POST",
+    headers: { ...apiAuthHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ turn_id: turnId, path }),
+  });
+  if (!res.ok) throw new Error(`revertTurnFile failed: ${res.status}`);
+  return res.json();
+}
+
+/** 经用户确认，把一条测试或构建命令写入 AGENTS.md。 */
+export async function saveAgentsCommand(command: string): Promise<{ status?: string }> {
+  const res = await fetch(`${API_BASE}/admin/workspace/agents-md`, {
+    ...sessionFetchInit,
+    method: "POST",
+    headers: { ...apiAuthHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ command }),
+  });
+  if (!res.ok) throw new Error(`saveAgentsCommand failed: ${res.status}`);
   return res.json();
 }
 
