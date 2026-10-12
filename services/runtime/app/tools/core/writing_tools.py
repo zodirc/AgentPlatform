@@ -1117,6 +1117,12 @@ async def draft_section(
     if handoff:
         entry["structural_return"] = handoff
         drafts[section_id] = entry
+    if isinstance(signals_block, dict):
+        noted = str(result.get("summary") or "")
+        if "writing_signals" not in noted:
+            result["summary"] = (
+                f"{noted}; writing_signals".strip("; ") if noted else "writing_signals"
+            )
     result.pop("writing_signals", None)
     result.pop("consistency_flags", None)
     result.pop("thread_stale", None)
@@ -1149,6 +1155,9 @@ async def draft_section(
     # 作者档不把篇幅评价句回给模型；数字已在 visible_chars / target_range。
     if summary and "低于门槛" not in summary:
         shrunk["summary"] = summary
+    if isinstance(signals_block, dict) and "writing_signals" not in str(shrunk.get("summary") or ""):
+        base = str(shrunk.get("summary") or "")
+        shrunk["summary"] = f"{base}; writing_signals".strip("; ") if base else "writing_signals"
     span = result.get("repair_span")
     if isinstance(span, dict):
         shrunk["repair_span"] = span
@@ -1408,12 +1417,22 @@ async def propose_book_candidates(
             embedding=vec,
             embedding_digest=digest,
         )
+    titles = "、".join(
+        str(it.get("title") or "").strip()
+        for it in saved["items"]
+        if str(it.get("title") or "").strip()
+    )
+    summary = (
+        saved.get("summary")
+        or f"{len(ranked)} 本作品候选，待你点选或说「我要其他的」"
+    )
+    if titles and titles not in summary:
+        summary = f"{titles}。{summary}"
     return {
         "status": "ok",
         "ponds_id": saved["ponds_id"],
         "items": saved["items"],
-        "summary": saved.get("summary")
-        or f"{len(ranked)} 本作品候选，待你点选或说「我要其他的」",
+        "summary": summary,
         "awaiting_choice": True,
     }
 

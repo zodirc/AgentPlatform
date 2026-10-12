@@ -1,7 +1,7 @@
 id: agent.01_read_and_edit_file
 scenario_id: agent
 phase: 1
-description: Read file then edit_file (in-place after approval)
+description: Read file then edit_file. A snapshot makes the reversible write allowed.
 
 fixtures:
   workspace:
@@ -22,8 +22,8 @@ assertions:
   events:
     sequence_contains:
       - tool.started
-      - approval.requested
-      - approval.resolved
+      - security.decision
+      - tool.completed
       - turn.completed
   turn:
     status: completed

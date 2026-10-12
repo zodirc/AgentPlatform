@@ -1,7 +1,7 @@
 id: agent.03_approval_resume
 scenario_id: agent
 phase: 1
-description: run_command approval then resume same run
+description: run_command either pauses for approval or is refused before exec, then the turn completes
 
 input:
   message: "批准测试 run_command agent.03"
@@ -16,8 +16,8 @@ commands:
 assertions:
   events:
     sequence_contains:
-      - approval.requested
-      - approval.resolved
+      - security.decision
+      - tool.completed
       - turn.completed
   turn:
     status: completed

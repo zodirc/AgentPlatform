@@ -19,6 +19,7 @@ assertions:
       - turn.thinking
       - usage.reported
       - tool.started
+      - security.decision
       - tool.completed
       - step.completed
       - turn.completed

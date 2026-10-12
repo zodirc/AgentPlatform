@@ -24,8 +24,8 @@ assertions:
   events:
     sequence_contains:
       - tool.started
-      - approval.requested
-      - approval.resolved
+      - security.decision
+      - tool.completed
       - turn.completed
     sequence_not_contains:
       - turn.failed

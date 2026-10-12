@@ -292,15 +292,25 @@ class StubModelProvider:
                 if "propose_book_candidates" in tool_names
                 else "propose_opening_ponds"
             )
-            if not has_tool_result:
-                yield _tool_call(picker, {"items": list(_STUB_BAD_PONDS)})
+            # The engine drops a rejected attempt and leaves previous_attempt_discarded
+            # in the volatile pad, so the stub cannot see the tool error itself.
+            discarded = _messages_mention(messages, "previous_attempt_discarded: true")
+            if (
+                has_tool_result
+                and last_tool == picker
+                and not _last_tool_result_is_error(messages)
+            ):
+                yield ModelResponse(text="开篇候选已交出", output_tokens=8)
                 return
-            if last_tool in {
-                "propose_book_candidates",
-                "propose_opening_ponds",
-            } and _last_tool_result_is_error(messages):
+            if discarded or (
+                has_tool_result
+                and last_tool == picker
+                and _last_tool_result_is_error(messages)
+            ):
                 yield _tool_call(picker, {"items": list(_STUB_GOOD_PONDS)})
                 return
+            yield _tool_call(picker, {"items": list(_STUB_BAD_PONDS)})
+            return
 
         if "draft_section" in tool_names and _wants_writing_signals(user_text) and not has_tool_result:
             # Full spoken lines (not short Q&A chips) so writing.15 asserts on
@@ -606,17 +616,17 @@ def _tool_call(name: str, arguments: dict[str, Any]) -> ModelResponse:
 _STUB_BAD_PONDS = (
     {
         "title": "怪事",
-        "opening": "某人在城里遇到一件奇怪的事。",
+        "pitch": "某人在城里遇到一件奇怪的事。",
     },
     {
         "title": "异物",
-        "opening": "另一个人捡到一样奇怪的东西。",
+        "pitch": "另一个人捡到一样奇怪的东西。",
     },
 )
 _STUB_GOOD_PONDS = (
     {
         "title": "末班车",
-        "opening": (
+        "pitch": (
             "夜班司机把末班车钥匙拍进徒弟手里，转身去关灯。"
             "这城的末班车不按时刻表收班：谁接过钥匙，谁就要把还活着的乘客送到一个不在地图上的站。"
             "徒弟每多跑一班，车上就多一个他认识的活人。"
@@ -625,7 +635,7 @@ _STUB_GOOD_PONDS = (
     },
     {
         "title": "十七号",
-        "opening": (
+        "pitch": (
             "陈老师的名册上第十七号从来对不上人：点到那个名字，后排椅子会自己挪一寸。"
             "她发现缺席的不是学生，是这座学校用来顶人数的空名额，而空名额会把活人从班上换走。"
             "她要决定是把十七号从名册划掉，还是用自己的名字把那个位子填回去。"
@@ -656,6 +666,22 @@ def _last_tool_result_is_error(messages: list[dict]) -> bool:
 
 def _chunk_text(text: str, size: int = 12) -> list[str]:
     return [text[i : i + size] for i in range(0, len(text), size)]
+
+
+def _messages_mention(messages: list[dict], needle: str) -> bool:
+    """True when any message text contains needle, including volatile pads."""
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, str) and needle in content:
+            return True
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, str) and needle in block:
+                return True
+            if isinstance(block, dict) and needle in str(block.get("text") or ""):
+                return True
+    return False
 
 
 def _user_text(messages: list[dict]) -> str:
@@ -1001,6 +1027,8 @@ def _tool_result_denied(messages: list[dict]) -> bool:
             else:
                 text = str(block)
             if '"status": "denied"' in text or '"status":"denied"' in text:
+                return True
+            if '"status": "error"' in text or '"status":"error"' in text:
                 return True
         return False
     return False

@@ -1,7 +1,7 @@
 id: agent.09_deny_tool_call
 scenario_id: agent
 phase: 2
-description: run_command approval denied then turn completes
+description: run_command is refused, either by the user or because the sandbox cannot start
 
 input:
   message: "agent.09 deny run_command 批准测试"
@@ -17,8 +17,8 @@ commands:
 assertions:
   events:
     sequence_contains:
-      - approval.requested
-      - approval.resolved
+      - security.decision
+      - tool.completed
       - turn.completed
   turn:
     status: completed

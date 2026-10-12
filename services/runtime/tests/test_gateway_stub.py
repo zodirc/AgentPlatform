@@ -45,6 +45,8 @@ def test_tool_result_denied_detects_status() -> None:
         },
     ]
     assert _tool_result_denied(messages) is True
+    messages[0]["content"][0]["content"] = '{"status": "error", "summary": "sandbox unavailable"}'
+    assert _tool_result_denied(messages) is True
 
 
 def test_assistant_requested_verify_delegate() -> None:
