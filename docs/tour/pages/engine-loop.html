@@ -108,8 +108,10 @@ handler 改道（工具名不变）
 
 编码两类（剩余步数须 ≥ verify_receipt_reserve_steps，默认 10）
   1  成功 edit/write 之后未跑 testish 命令          verify_pending
-  2  仓库测试已绿，但 problem.md 例子未在最新编辑后被成功命令覆盖
+  2  工作区根有 problem.md / PROBLEM.md / issue.md，且已抽出义务
+     仓库测试已绿，但这些例子未在最新编辑后被成功命令覆盖
      issue_repro_armed 且未 satisfied
+     文件不在则这条不武装。日常编码只走上面的经典收据
   每类每 Turn 至多一次（verify_receipt_sent / issue_repro_receipt_sent）
   cancel / budget_exceeded 不注入
 

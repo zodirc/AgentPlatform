@@ -1,56 +1,82 @@
 <section class="page" data-id="coding-fuse" data-group="Coding" data-title="找定义 · 改完再验">
+        <style>
+          [data-id="coding-fuse"] table { table-layout: fixed; }
+          [data-id="coding-fuse"] th:first-child,
+          [data-id="coding-fuse"] td:first-child { width: 28%; }
+          [data-id="coding-fuse"] th,
+          [data-id="coding-fuse"] td { overflow-wrap: anywhere; }
+        </style>
         <div class="card">
-          <h2>编码 Turn：从读题到交卷</h2>
-          <p class="lede">模型已会调用 <code>search_codebase</code>、<code>edit_file</code>、<code>run_tests</code>。平台不另发明导航工具，而是在返回值中写入模型无法忽视的事实。仍在同一 AgentEngine while（编排容器）；live 模型经 model-gateway，shell/tests 经 sandbox 平面 HTTP。官方是否判通过看 Docker 内隐藏测（<code>resolve_rate</code>），不是看这些探针是否为绿。</p>
+          <h2>编码场景</h2>
+          <p class="lede">编码场景使用 <code>agent</code> Profile，<code>max_steps</code> 为 150。用户消息给出本轮任务，源文件位于该 Work 的工作区。定义与引用由符号表和语言服务提供，测试与 shell 在 sandbox 中执行。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 官方通过与否看 Docker 内的隐藏测试。定义以符号表加 LSP 的确认结果为准。</li>
+            <li><span class="pt">◆ 要点</span> 写盘与执行分开。<code>edit_file</code> 不运行被修改的代码，建议的测试命令留待后续调用执行。</li>
           </ul>
+          <table>
+            <thead><tr><th>部分</th><th>职责</th></tr></thead>
+            <tbody>
+              <tr><td>用户消息</td><td>本轮任务。Controller 将其写入 <code>turn_user_text</code>。定义查找不读取该字段。</td></tr>
+              <tr><td>符号表</td><td>扫描工作区源文件，为函数名、类名建立索引，供定义查找取出候选。</td></tr>
+              <tr><td>语言服务</td><td>在源文件的行、列上确认定义，查询引用，并参与诊断。</td></tr>
+              <tr><td><code>edit_file</code></td><td>在编排进程中修改工作区里的已有文件。不执行这段代码。</td></tr>
+              <tr><td><code>run_tests</code> / <code>run_command</code></td><td>在 sandbox 中执行。sandbox 不可用时拒绝。</td></tr>
+            </tbody>
+          </table>
 
-          <h3>主链（仍是 Engine while，虚线汇入 tool_use）</h3>
-          <pre class="seq">1  读题  extract_issue_repro_hints(problem.md / PROBLEM.md / issue.md)
-     抽出符号名、报错串、代码块、REPL、raises
-     上限：命令 4 · 标记 8 · token 6 · 资产 2 · 信号 6 · fence 400 字
-     禁止先 list_dir(".") 枚举仓库根（写在 scenarios/agent/system.md，由返回值落实）
-     隐藏 F2P / gold patch 不进 Work
-     ◆ 要点  抽取器只能看见 issue 写过的例子。把 F2P 名字塞进 prompt，测的是泄漏。
+          <h3>符号名判定</h3>
+          <p><code>is_symbol_query</code> 只检查这一次传入的字符串。空串与超长在前，空白次之，正则元字符再次，最后才接受标识符。</p>
+          <table>
+            <thead><tr><th>字符串</th><th>后续路径</th></tr></thead>
+            <tbody>
+              <tr><td>空，或长度大于 128</td><td>文本搜索</td></tr>
+              <tr><td>含空白，如 <code>TypeError: login failed</code></td><td>文本搜索。报错原文属于此类。</td></tr>
+              <tr><td>含 <code>\ ^ $ * + ? { } [ ] | ( )</code>，如 <code>foo.*bar</code></td><td>文本搜索。这些字符按正则处理，不用于查定义。</td></tr>
+              <tr><td>整段为标识符或点分路径，如 <code>login</code>、<code>Card</code>、<code>pkg.Class.method</code></td><td>定义查找：符号表取候选，语言服务确认。</td></tr>
+            </tbody>
+          </table>
+          <p>文本搜索将正则字符转义为普通字符后，在文件正文中做子串匹配，位置写入 <code>hits</code>，<code>definitions</code> 为空。<code>locate_incomplete</code> 为假，表示本次未尝试查找定义。定义查找若未得到语言服务确认的位置，<code>definitions</code> 同样为空，<code>locate_incomplete</code> 为真。</p>
 
-2  复现  用 issue 内最小例子；改完必须再跑同一条命令
-     仓库 pytest 全绿只武装 issue_repro_armed
-     覆盖判定：issue_repro_edits_since == 0（最新一次成功 edit/write 之后）
-     失败签名仍在 stdout → 不算清；写再读须同一套 format/kwargs；casefold 主张须再跑折叠变体
+          <h3>符号表</h3>
+          <p>索引记录函数、类所在的文件。冷启动写入 <code>work_ast_index_jobs</code>，由 ast-indexer 另进程消费，不阻塞本轮。文件变更后的刷新去抖为 0.5 秒。一次查询至多返回 5 个同名候选。索引中尚无该名字时，按名称末段匹配文件名，例如 <code>Card</code> 对应 <code>Card.py</code>，上限 8 个文件、200 个目录，不等待整库索引完成。</p>
+          <p>编码 Profile 的 <code>structural_prewarm</code> 为真时，Controller 在后台预热语言服务，StartTurn 不等待预热结束。对符号名调用 <code>grep</code> 时，处理函数改走定义查找，工具名仍为 <code>grep</code>。</p>
 
-3  找定义  search_codebase（Locate）
-     符号表粗筛 top_k=5 → LSP 在标识符列确认 → 只有确认过的进 definitions[]
-     grep 符号形 pattern → handler 整条改道（redirected_from=grep），工具名不变
-     词面 hits 不得冒充定义；模块名/形参查空 → locate_incomplete，不是索引故障
-     产品对话不等 AST ready；索引默认入队 work_ast_index_jobs（inline 仅测试）
-     ◆ 要点  符号表无向量。写作打开 Locate，会把散文专名当代码符号。
+          <h3>语言服务</h3>
+          <p>符号表给出候选后，语言服务按该文件的路径、行、列确认是否为定义。确认结果写入 <code>definitions</code>，并停在第一个确认成功的候选。导航超时默认 15 秒。语言服务不可用、超时、缺少提供者或语言不受支持时，本次定位失败；符号表候选可留在 <code>candidates</code>，不进入 <code>definitions</code>。</p>
+          <p>索引没有结果或调用失败时，改为直接调用 <code>goto_definition</code>。没有结果包括：当前没有 Work、索引未启用、索引状态为 <code>ERROR</code>、按文件名也未命中。直接调用仍无位置时，退回文本搜索，<code>locate_incomplete</code> 为真。<code>self</code>、<code>cls</code>、<code>args</code>、<code>kwargs</code>、<code>msg</code>、<code>exc</code>、<code>err</code> 以及全小写点分模块路径，原因记为 <code>non_definition_query</code>，其余记为 <code>no_workspace_symbol_match</code>。</p>
 
-4  就地改  edit_file 替换一小段（非唯一命中回显最多 5 个 span）
-     32k 截断时附大纲
-     模型拿完整 result；Ops 侧 tool.completed 只落瘦 meta
-       impact / checks（单文件增量，最多 20 条，超时 30s）
-       related_tests 最多 5 条 + python -m pytest {path} -x -q
-     平台不代跑相关测试（启发式 250ms / import 反向 400ms）
-     ◆ 要点  代跑会把探针绿和官方 resolve_rate 混在一起。
+          <h3>写盘</h3>
+          <p><code>old_text</code> 在目标文件中须恰好出现一次，<code>new_text</code> 只替换该处。出现 0 次时不写盘，并返回至多 5 条邻近候选。出现多次时不写盘，并返回出现位置，至多 20 条。新文件使用 <code>write_file</code>。写盘前比较新旧文本的语法，新引入的语法错误拒绝写入。快照写成时，此次写入按可回退直接放行；快照未写成时等待批准。<code>edit_file</code> 不读取定位结果，<code>definitions</code> 为空不构成拒绝写盘的条件。</p>
+          <p>写盘成功后，同一次结果附带下列三项。平台不据此再改一稿，也不执行其中的测试命令。</p>
+          <table>
+            <thead><tr><th>附带内容</th><th>来源与限度</th></tr></thead>
+            <tbody>
+              <tr><td>引用</td><td>从 <code>old_text</code> 与 <code>new_text</code> 中抽出一个符号，由语言服务列出引用位置。路径不是代码，或片段中没有符号，则跳过。</td></tr>
+              <tr><td>新增诊断</td><td>比较写盘前后的诊断，只保留新增项。默认至多 20 条，超时 30 秒。</td></tr>
+              <tr><td>测试命令</td><td>至多 5 条，形式为 <code>python -m pytest {path} -x -q</code>。按文件名查找的预算为 250 毫秒，按 import 反向查找至多 250 个文件、400 毫秒。</td></tr>
+            </tbody>
+          </table>
+          <p>跨文件诊断由模型另行调用 <code>read_lints</code>。该工具合并 ruff 与语言服务的诊断后返回。</p>
 
-5  改完再验  checks · related_tests 命令 · 邻文件 read_lints · 同一条复现
-     失败摘要从<strong>未截断全文</strong>抽 first_failures（入 state 再截 400 字）
-     评测路径剥 | tail，送进该题 sweb.eval；宿主树上的绿不算
-     pip/uv install 在 SWE 镜像内拒绝
+          <h3>sandbox 中的执行</h3>
+          <p>读文件与改文件由编排进程直接访问工作区。sandbox 可用，指已配置远程 sandbox 平面，或本进程的 bwrap 可用。编排进程未配置 <code>SANDBOX_PLANE_URL</code>，或隔离探针失败时，<code>run_tests</code> 与 <code>run_command</code> 被拒绝，原因为 <code>sandbox unavailable</code>。</p>
+          <table>
+            <thead><tr><th>调用</th><th>执行条件</th></tr></thead>
+            <tbody>
+              <tr><td><code>run_tests</code></td><td>仅接受 <code>pytest</code>、<code>python -m pytest</code>、<code>npm</code> / <code>pnpm</code> / <code>yarn test</code>、<code>npx vitest</code>、<code>npx jest</code>。其它字符串拒绝，不进入 shell。sandbox 可用时允许执行，可写范围为当前工作区根。</td></tr>
+              <tr><td><code>run_command</code></td><td>用于构建、安装及其它命令。sandbox 可用且命令在允许列表中时直接执行；不在允许列表中、且不属于评测命令集时，先经批准。单文件的 <code>cat</code>、<code>head</code>、<code>tail</code>、<code>sed -n</code>，且命令行不含管道时，改为 <code>read_file</code>，不进入 shell。</td></tr>
+            </tbody>
+          </table>
 
-6  终局边  欠验证 → verify_receipt continue 同一 while
-     剩余步数 &lt; 10 则省略；每类每 Turn 至多一次
-     不是新图节点；菜单不可见
-     ◆ 要点  探针全绿仍可能 harness unresolved（14365：issue 无小写 NO，隐藏 roundtrip 仍红）。</pre>
-          <p>超时与文件帽是配置，不是能力开关。Capability 在 Profile.tool_names。structural_prewarm 不挡 TTFB。</p>
-          <p class="figure-lead">下图上半三条虚线分组是读题、Locate（符号表加 LSP）、改完再验；下半仍是 Engine while，虚线汇入 <code>tool_use</code>。欠验证才注入 <code>verify_receipt</code> 并 continue。主链没有「制定计划」或「分步 commit」。</p>
-          <div class="src"><code>structural/workspace_index/locate.py</code> · <code>structural/related_tests.py</code> · <code>structural/issue_repro.py</code> · <code>engine/verify_receipt.py</code></div>
+          <h3>编辑之后尚未运行测试</h3>
+          <p>代码文件编辑成功后，<code>verify_pending</code> 置为真。非代码路径，或引用与诊断均被跳过时，不置该标记。随后一次被接受的 <code>run_tests</code>，或被判定为测试的 <code>run_command</code>，将该标记清掉。被拒绝的测试命令不清。</p>
+          <p>模型本次只返回文本、未再调用工具，且剩余步数不少于 10 时，引擎追加一条用户消息：写明本轮改过的代码文件数、最后一次编辑后尚未运行测试，并附上已收集的测试命令与上一次失败摘要。摘要截断至 400 字。追加之后 <code>continue</code>，进入同一次 while 的下一步。<code>cancelled</code> 或 <code>budget_exceeded</code> 时不追加。</p>
+          <p class="figure-lead">下图依次为：符号表取候选，语言服务确认定义，<code>edit_file</code> 写盘并附带诊断与测试命令，测试和 shell 进入 sandbox。编辑后仍未运行测试时，注入收据并继续同一条循环。</p>
+          <div class="src"><code>tools/core/codebase_search.py</code> · <code>structural/workspace_index/locate.py</code> · <code>tools/core/edit_tools.py</code> · <code>tools/core/lsp_tools.py</code> · <code>policy/plane.py</code> · <code>engine/verify_receipt.py</code></div>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">
-            <img src="../assets/harness/coding-fuse-zh.png" alt="编码融合：找定义·改完再验" />
+            <img src="../assets/harness/coding-fuse-zh.png" alt="编码场景：符号表与语言服务找定义，edit_file 写盘，测试在 sandbox 执行" />
           </div>
-          <figcaption>编码融合详流 · 点击放大</figcaption>
+          <figcaption>编码场景详流 · 点击放大</figcaption>
         </figure>
       </section>
