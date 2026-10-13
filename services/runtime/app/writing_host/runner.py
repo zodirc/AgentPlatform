@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -33,33 +34,45 @@ from app.ports import (
     reset_summary_store,
 )
 from app.scenarios.registry import ScenarioRegistry
-from app.settings import settings
 from app.tenant_context import bind_tenant_context, reset_tenant_context
 from app.tools.writing_registry import build_writing_registry
+from app.writing.intents import resolve_intent
 from app.writing.turn_assembly import assemble_writing_turn
-from app.writing_host.errors import HostError, classify_model_error
+from app.writing_host.errors import Busy, HostError, classify_model_error
+from app.writing_host.events import (
+    TurnEventLog,
+    completed_payload,
+    failed_payload,
+    publish,
+)
 from app.writing_host.files import (
     FileCheckpointStore,
     FileEvaluationStore,
-    FileEventLog,
     NullSummaryStore,
     PlatformPrefsSource,
     ensure_sidecar_format,
 )
 from app.writing_host.protocol import (
-    HostEvent,
     ModelConfig,
     ProbeCheck,
     ProbeReport,
     TurnBudget,
     TurnResult,
 )
+from app.writing_host.works import snapshot_turn
 
 _CANCELLED: set[str] = set()
+_RESULTS: dict[str, TurnResult] = {}
+_ACTIVE: str | None = None
+_GATE = threading.Lock()
 
 
 def cancel_turn(turn_id: str) -> None:
     _CANCELLED.add(str(turn_id))
+
+
+def turn_busy() -> bool:
+    return _ACTIVE is not None
 
 
 def _host_ids(work_root: Path) -> tuple[UUID, UUID]:
@@ -80,34 +93,36 @@ async def _no_database():
     raise RuntimeError("writing host has no database")
 
 
-def _map_engine_event(event_type: str, payload: dict[str, Any]) -> HostEvent | None:
-    if event_type == "step.started":
-        return HostEvent("step_started", {"step_index": payload.get("step_index")})
-    if event_type == "tool.completed":
-        changed = [
-            str(payload[key])
-            for key in ("path", "new_path", "output_path")
-            if payload.get(key)
-        ]
-        return HostEvent(
-            "tool_finished",
-            {
-                "name": payload.get("tool_name") or "",
-                "summary": payload.get("summary") or "",
-                "changed_files": changed,
-            },
-        )
-    if event_type == "usage.reported":
-        return HostEvent(
-            "usage",
-            {
-                "input_tokens": payload.get("step_input_tokens", payload.get("input_tokens", 0)),
-                "output_tokens": payload.get("step_output_tokens", payload.get("output_tokens", 0)),
-                "cache_read_input_tokens": payload.get("cache_read_input_tokens", 0),
-                "cache_creation_input_tokens": payload.get("cache_creation_input_tokens", 0),
-            },
-        )
-    return None
+def _begin(turn_id: str | None) -> tuple[str, TurnResult | None]:
+    global _ACTIVE
+    with _GATE:
+        if turn_id and turn_id in _RESULTS and turn_id != _ACTIVE:
+            return turn_id, _RESULTS[turn_id]
+        if _ACTIVE:
+            raise Busy()
+        chosen = turn_id or str(uuid4())
+        _ACTIVE = chosen
+        return chosen, None
+
+
+def _occupy(turn_id: str) -> None:
+    global _ACTIVE
+    with _GATE:
+        if _ACTIVE:
+            raise Busy()
+        _ACTIVE = turn_id
+
+
+def _release(turn_id: str, result: TurnResult | None) -> None:
+    global _ACTIVE
+    with _GATE:
+        if _ACTIVE == turn_id:
+            _ACTIVE = None
+        if result is not None:
+            _RESULTS[turn_id] = result
+            if len(_RESULTS) > 32:
+                for key in list(_RESULTS)[:-32]:
+                    _RESULTS.pop(key, None)
 
 
 async def _run(
@@ -121,13 +136,13 @@ async def _run(
     recording: str | None,
     resume_turn_id: str | None,
     host: bool,
+    turn_id: str | None = None,
+    intent: dict | None = None,
 ) -> TurnResult:
     root = Path(work_root).resolve()
     root.mkdir(parents=True, exist_ok=True)
     ensure_sidecar_format(root)
     work_id, owner = _host_ids(root)
-    previous_root = settings.workspace_root
-    settings.workspace_root = str(root)
     tenant = bind_tenant_context(
         work_root=str(root),
         work_id=work_id,
@@ -153,28 +168,34 @@ async def _run(
 
     raw_token = bind_raw_snapshot(_noop)
     envelope_token = bind_model_envelope(_noop)
-    previous_recordings = settings.recordings_dir
     recordings_dir = (model.capabilities or {}).get("recordings_dir")
-    if recordings_dir:
-        settings.recordings_dir = str(recordings_dir)
     emit = on_event or (lambda _event: None)
+    result: TurnResult | None = None
+    log: TurnEventLog | None = None
+    ids: dict[str, str] = {}
+    terminal = False
     try:
         store = FileCheckpointStore(root)
         if resume_turn_id:
             state, _interrupt, _step = store.load(resume_turn_id)
             profile = ScenarioRegistry.get(state.scenario_id or "writing")
+            text = state.turn_user_text
+            phase = state.plan_phase
         else:
             profile = ScenarioRegistry.get("writing")
-            turn_id = uuid4()
+            text, phase = resolve_intent(intent, message=message or "")
+            if plan_phase:
+                phase = plan_phase
             state = TurnState(
-                turn_id=turn_id,
+                turn_id=UUID(turn_id),
                 session_id=uuid4(),
                 run_id=uuid4(),
                 trace_id=uuid4(),
                 scenario_id="writing",
                 max_steps=budget.max_steps or profile.max_steps,
-                messages=[user_message(message or "")],
-                turn_user_text=message or "",
+                messages=[user_message(text)],
+                turn_user_text=text,
+                plan_phase=phase,
             )
         state.max_steps = budget.max_steps or state.max_steps
         state.max_input_tokens = int(budget.max_input_tokens or 0)
@@ -184,43 +205,80 @@ async def _run(
         assembly = assemble_writing_turn(
             profile=profile,
             registry=registry,
-            message=message if message is not None else state.turn_user_text,
-            plan_phase=plan_phase if plan_phase is not None else state.plan_phase,
+            message=text if resume_turn_id is None else state.turn_user_text,
+            plan_phase=phase if resume_turn_id is None else state.plan_phase,
             seed_visible=True,
         )
         if resume_turn_id is None:
             state.volatile_context = assembly.volatile_context
-        log = FileEventLog(root, str(state.turn_id))
-        _CANCELLED.discard(str(state.turn_id))
+            snapshot_turn(root, str(state.turn_id))
+        log = TurnEventLog(root, str(state.turn_id))
+        ids = {
+            "turn_id": str(state.turn_id),
+            "run_id": str(state.run_id),
+            "trace_id": str(state.trace_id),
+        }
+        held: dict[str, Any] | None = None
+
+        def _emit(event_type: str, payload: dict[str, Any], step_index: int) -> None:
+            nonlocal terminal
+            publish(
+                log,
+                emit,
+                event_type=event_type,
+                payload=payload,
+                step_index=step_index,
+                **ids,
+            )
+            if event_type in {"turn.completed", "turn.failed", "turn.cancelled"}:
+                terminal = True
+
+        if resume_turn_id is None:
+            accepted = {
+                "scenario_id": "writing",
+                "user_input_preview": (state.turn_user_text or "")[:256],
+                "model_name": model.model[:128],
+            }
+            if state.plan_phase in {"planning", "executing"}:
+                accepted["plan_phase"] = state.plan_phase
+            _emit("turn.accepted", accepted, 0)
+            if str(state.turn_id) in _CANCELLED:
+                _emit("turn.cancelled", {"reason": "user_requested", "cancelled_at_phase": "step_boundary"}, 0)
+                result = TurnResult(str(state.turn_id), "", "user_requested", "cancelled")
+                return result
 
         async def write_event(**kwargs: Any) -> None:
+            nonlocal held
             event_type = str(kwargs.get("event_type") or "")
             payload = kwargs.get("payload") if isinstance(kwargs.get("payload"), dict) else {}
-            await log.append({"event_type": event_type, "payload": payload})
-            mapped = _map_engine_event(event_type, payload)
-            if mapped is not None:
-                emit(mapped)
+            step_index = int(kwargs.get("step_index") or payload.get("step_index") or 0)
+            if event_type == "step.completed":
+                held = {"payload": dict(payload), "step_index": step_index}
+                return
+            _emit(event_type, payload, step_index)
 
         async def on_step_checkpoint(current: TurnState, step_index: int) -> None:
+            nonlocal held
             await store.save(state=current, step_index=step_index)
-            emit(
-                HostEvent(
-                    "step_committed",
-                    {
-                        "step_index": step_index,
-                        "input_tokens": current.usage.input_tokens,
-                        "output_tokens": current.usage.output_tokens,
-                        "cache_read_input_tokens": current.usage.cache_read_input_tokens,
-                        "cache_creation_input_tokens": current.usage.cache_creation_input_tokens,
-                    },
-                )
-            )
+            if held is None:
+                return
+            payload = held["payload"]
+            payload["usage"] = {
+                "input_tokens": current.usage.input_tokens,
+                "output_tokens": current.usage.output_tokens,
+                "cache_read_input_tokens": current.usage.cache_read_input_tokens,
+                "cache_creation_input_tokens": current.usage.cache_creation_input_tokens,
+            }
+            _emit("step.completed", payload, int(held["step_index"]))
+            held = None
 
         async def check_cancel() -> tuple[bool, bool]:
             return str(state.turn_id) in _CANCELLED, False
 
         if recording:
-            gateway = ModelGateway(RecordedModelProvider(recording))
+            gateway = ModelGateway(
+                RecordedModelProvider(recording, recordings_dir=str(recordings_dir) if recordings_dir else None)
+            )
         else:
             gateway = ModelGateway(
                 OpenAIProvider(
@@ -240,28 +298,43 @@ async def _run(
             volatile_context=state.volatile_context or assembly.volatile_context,
         )
         summary = await engine.run(state)
-        if state.delivery:
-            emit(HostEvent("delivery", {"summary": str(state.delivery)}))
         reason = state.termination_reason or "final"
         status = "ok"
         if state.cancelled:
             status = "cancelled"
-        elif state.budget_exceeded:
-            status = "budget_exceeded"
-        emit(HostEvent("turn_finished", {"status": status, "reason": reason}))
-        return TurnResult(
-            turn_id=str(state.turn_id),
-            summary=summary or "",
-            termination_reason=reason,
-            status=status,
-        )
-    except HostError:
-        raise
+            _emit("turn.cancelled", {"reason": "user_requested", "cancelled_at_phase": "step_boundary"}, state.step_count)
+            reason = "user_requested"
+        else:
+            if state.budget_exceeded:
+                status = "budget_exceeded"
+                reason = "budget_exceeded"
+            _emit("turn.completed", completed_payload(state, summary or ""), state.step_count)
+        result = TurnResult(str(state.turn_id), summary or "", reason, status)
+        return result
     except Exception as exc:
-        raise classify_model_error(exc) from exc
+        error = exc if isinstance(exc, HostError) else classify_model_error(exc)
+        if log is not None and not terminal:
+            detail = f"{error.detail} {error.user_message}".lower()
+            reason = "model_timeout" if "timeout" in detail or "timed out" in detail else "fatal_error"
+            try:
+                publish(
+                    log,
+                    emit,
+                    event_type="turn.failed",
+                    payload=failed_payload(
+                        termination_reason=reason,
+                        message=error.user_message,
+                        error_kind=error.code,
+                    ),
+                    step_index=0,
+                    **ids,
+                )
+            except Exception:
+                pass
+        if isinstance(exc, HostError):
+            raise
+        raise error from exc
     finally:
-        settings.workspace_root = previous_root
-        settings.recordings_dir = previous_recordings
         reset_model_envelope(envelope_token)
         reset_raw_snapshot(raw_token)
         reset_summary_store(summary_token)
@@ -276,25 +349,37 @@ async def _run(
 async def start_turn(
     *,
     work_root: Path,
-    message: str,
+    message: str = "",
     model: ModelConfig,
     budget: TurnBudget,
     plan_phase: str | None = None,
     on_event=None,
     recording: str | None = None,
     host: bool = True,
+    turn_id: str | None = None,
+    intent: dict | None = None,
 ) -> TurnResult:
-    return await _run(
-        work_root=work_root,
-        message=message,
-        model=model,
-        budget=budget,
-        plan_phase=plan_phase,
-        on_event=on_event,
-        recording=recording,
-        resume_turn_id=None,
-        host=host,
-    )
+    chosen, cached = _begin(turn_id)
+    if cached is not None:
+        return cached
+    result: TurnResult | None = None
+    try:
+        result = await _run(
+            work_root=work_root,
+            message=message,
+            model=model,
+            budget=budget,
+            plan_phase=plan_phase,
+            on_event=on_event,
+            recording=recording,
+            resume_turn_id=None,
+            host=host,
+            turn_id=chosen,
+            intent=intent,
+        )
+        return result
+    finally:
+        _release(chosen, result)
 
 
 async def resume_turn(
@@ -307,17 +392,23 @@ async def resume_turn(
     recording: str | None = None,
     host: bool = True,
 ) -> TurnResult:
-    return await _run(
-        work_root=work_root,
-        message=None,
-        model=model,
-        budget=budget,
-        plan_phase=None,
-        on_event=on_event,
-        recording=recording,
-        resume_turn_id=turn_id,
-        host=host,
-    )
+    _occupy(turn_id)
+    result: TurnResult | None = None
+    try:
+        result = await _run(
+            work_root=work_root,
+            message=None,
+            model=model,
+            budget=budget,
+            plan_phase=None,
+            on_event=on_event,
+            recording=recording,
+            resume_turn_id=turn_id,
+            host=host,
+        )
+        return result
+    finally:
+        _release(turn_id, None)
 
 
 async def probe_model(model: ModelConfig) -> ProbeReport:

@@ -186,6 +186,7 @@ async def start_turn_command(
         ops_eval=bool(body.ops_eval),
         clear_context=bool(body.clear_context),
         permission_mode=str(getattr(body, "permission_mode", None) or "ask"),
+        intent=body.intent,
     )
     return {"accepted": True, "turn_id": str(body.turn_id)}
 

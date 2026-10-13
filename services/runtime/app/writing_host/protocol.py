@@ -99,16 +99,71 @@ def list_resumable(work_root: Path) -> list[ResumableTurn]:
     ]
 
 
+def read_events(work_root: Path, turn_id: str, after_sequence: int = 0):
+    from app.writing_host.events import read_events as impl
+
+    return impl(Path(work_root), turn_id, after_sequence)
+
+
+def work_view(work_root: Path):
+    from app.writing_host.works import work_view as impl
+
+    return impl(Path(work_root))
+
+
+def read_document(work_root: Path, doc_id: str):
+    from app.writing_host.works import read_document as impl
+
+    return impl(Path(work_root), doc_id)
+
+
+def write_document(work_root: Path, doc_id: str, text: str, *, base_revision: str):
+    from app.writing_host.runner import turn_busy
+    from app.writing_host.works import write_document as impl
+
+    return impl(Path(work_root), doc_id, text, base_revision=base_revision, busy=turn_busy())
+
+
+def list_turn_history(work_root: Path):
+    from app.writing_host.works import list_turn_history as impl
+
+    return impl(Path(work_root))
+
+
+def revert_turn(work_root: Path, turn_id: str) -> None:
+    from app.writing_host.runner import turn_busy
+    from app.writing_host.errors import Busy
+    from app.writing_host.works import revert_turn as impl
+
+    if turn_busy():
+        raise Busy()
+    impl(Path(work_root), turn_id)
+
+
+def export_work(work_root: Path, dest: Path) -> None:
+    from app.writing_host.works import export_work as impl
+
+    impl(Path(work_root), Path(dest))
+
+
+def import_work(src: Path, work_root: Path):
+    from app.writing_host.works import import_work as impl
+
+    return impl(Path(src), Path(work_root))
+
+
 async def start_turn(
     *,
     work_root: Path,
-    message: str,
+    message: str = "",
     model: ModelConfig,
     budget: TurnBudget,
     plan_phase: str | None = None,
     on_event: HostEventCallback | None = None,
     recording: str | None = None,
     host: bool = True,
+    turn_id: str | None = None,
+    intent: dict | None = None,
 ) -> TurnResult:
     from app.writing_host.runner import start_turn as impl
 
@@ -121,6 +176,8 @@ async def start_turn(
         on_event=on_event,
         recording=recording,
         host=host,
+        turn_id=turn_id,
+        intent=intent,
     )
 
 

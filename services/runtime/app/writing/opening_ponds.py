@@ -896,7 +896,9 @@ def find_committed_pond(
         data = load_opening_ponds(workspace_root=workspace_root)
         if data:
             for item in data["items"]:
-                if (item.get("title") or item.get("id") or "").strip() == title:
+                title_key = (item.get("title") or "").strip()
+                id_key = (item.get("id") or "").strip()
+                if title == title_key or title == id_key or title == (title_key or id_key):
                     save_committed_pond(item, workspace_root=workspace_root)
                     return item
         saved = load_committed_pond(workspace_root=workspace_root)

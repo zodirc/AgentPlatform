@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from app.tenant_context import current_work_root, current_work_root_path
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -125,13 +126,12 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
     try:
         from pathlib import Path
 
-        from app.settings import settings
         from app.writing.focus import infer_focus_section_id
         from app.writing.manuscript import extract_section, list_section_ids, load_manuscript_doc
 
         from app.writing.outline_store import project_outline
 
-        outline_text = project_outline(Path(settings.workspace_root))
+        outline_text = project_outline(current_work_root_path())
 
         doc, _rel = load_manuscript_doc()
         if doc.strip():
@@ -153,7 +153,7 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
             focus = infer_focus_section_id(
                 user_text,
                 available,
-                workspace_root=Path(settings.workspace_root),
+                workspace_root=current_work_root_path(),
                 outline=outline_text,
             ) or (
                 available[-1] if available else ""
@@ -175,7 +175,7 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
                     from app.writing.regime import is_author_regime
 
                     is_author = is_author_regime(
-                        user_text, workspace_root=Path(settings.workspace_root)
+                        user_text, workspace_root=current_work_root_path()
                     )
 
                     measured = save_surface(focus or "ch", chapter_text)
@@ -219,7 +219,6 @@ def _writing_focus_bookmark(
 ) -> None:
     from pathlib import Path
 
-    from app.settings import settings
     from app.writing.delivery_gate import (
         looks_like_delivery_playbook,
         manuscript_preview_for_compact,
@@ -233,12 +232,12 @@ def _writing_focus_bookmark(
     )
     from app.writing.manuscript import list_section_ids, load_manuscript_doc
 
-    doc, _rel = load_manuscript_doc(Path(settings.workspace_root))
+    doc, _rel = load_manuscript_doc(current_work_root_path())
     sections = list_section_ids(doc) if doc else []
     focus = infer_focus_section_id(
         last_user_message,
         sections,
-        workspace_root=Path(settings.workspace_root),
+        workspace_root=current_work_root_path(),
     )
     if not focus and sections:
         focus = sections[-1]
@@ -246,7 +245,7 @@ def _writing_focus_bookmark(
     if (not recent_user or recent_user.strip() in {"/compact", "compact"}) and rows:
         recent_user = str(rows[0].get("user_input") or "")
         focus = infer_focus_section_id(
-            recent_user, sections, workspace_root=Path(settings.workspace_root)
+            recent_user, sections, workspace_root=current_work_root_path()
         ) or focus
 
     narrative = strip_delivery_playbook(getattr(summary, "narrative", "") or "")

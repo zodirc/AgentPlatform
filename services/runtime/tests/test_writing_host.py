@@ -145,8 +145,10 @@ async def test_recorded_turn_and_resume(tmp_path: Path):
     )
     assert result.status == "ok"
     assert "第一章写完了" in result.summary
-    assert any(event.type == "step_committed" for event in events)
-    assert events[-1].type == "turn_finished"
+    assert any(event.type == "step.completed" for event in events)
+    assert events[0].type == "turn.accepted"
+    assert events[-1].type == "turn.completed"
+    assert all(getattr(event, "turn_id", "") == result.turn_id for event in events)
     assert list_resumable(work)
 
     again = _recording(tmp_path, "host_more", "又写了一点")
@@ -518,3 +520,400 @@ def _manifest_bytes(dist: Path) -> str:
     archive = next(dist.glob("writing-core-*.zip"))
     with zipfile.ZipFile(archive) as handle:
         return handle.read("manifest.json").decode("utf-8")
+
+
+def test_runner_does_not_assign_process_settings():
+    source = Path(__file__).resolve().parents[1].joinpath("app/writing_host/runner.py").read_text(encoding="utf-8")
+    assert "settings." not in source
+
+
+def test_resolve_intent_messages():
+    from app.writing.intents import resolve_intent
+    from app.writing_host.errors import InvalidIntent
+
+    text, phase = resolve_intent({"kind": "select_pond", "ponds_id": "p1", "item_id": "a"})
+    assert text == "采用此开篇「a」"
+    assert phase is None
+    noted, _phase = resolve_intent(
+        {"kind": "select_pond", "ponds_id": "p1", "item_id": "a"},
+        message="更短一点",
+    )
+    assert noted.endswith("更短一点")
+    more, _phase = resolve_intent({"kind": "more_ponds", "ponds_id": "p1"})
+    assert more == "我要其他的"
+    confirmed, executing = resolve_intent({"kind": "confirm_plan", "plan_id": "plan-1"}, message="附言")
+    assert confirmed == "附言"
+    assert executing == "executing"
+    accepted, _phase = resolve_intent({"kind": "accept_patch", "patch_id": "patch-1"})
+    assert accepted == "采用补丁「patch-1」"
+    rejected, _phase = resolve_intent({"kind": "reject_patch", "patch_id": "patch-1"})
+    assert "不采用补丁" in rejected
+    with pytest.raises(InvalidIntent):
+        resolve_intent({"kind": "select_pond", "ponds_id": "", "item_id": "a"})
+    with pytest.raises(InvalidIntent):
+        resolve_intent(None, message="  ")
+
+
+@pytest.mark.asyncio
+async def test_intent_reaches_turn_accepted(tmp_path: Path):
+    work = tmp_path / "book"
+    model = _recording(tmp_path, "intent_finish", "收到开篇")
+    events = []
+    result = await start_turn(
+        work_root=work,
+        message="选择开篇",
+        intent={"kind": "select_pond", "ponds_id": "ponds-1", "item_id": "item-a"},
+        model=model,
+        budget=TurnBudget(max_steps=1),
+        on_event=events.append,
+        recording="intent_finish",
+    )
+    assert result.status == "ok"
+    assert events[0].payload["user_input_preview"].startswith("采用此开篇「item-a」")
+
+
+@pytest.mark.asyncio
+async def test_cancel_before_first_step(tmp_path: Path):
+    from app.writing_host.protocol import cancel_turn
+
+    work = tmp_path / "book"
+    model = _recording(tmp_path, "never", "不会写到")
+    turn_id = str(uuid4())
+    cancel_turn(turn_id)
+    events = []
+    result = await start_turn(
+        work_root=work,
+        message="请看一下大纲",
+        turn_id=turn_id,
+        model=model,
+        budget=TurnBudget(max_steps=1),
+        on_event=events.append,
+        recording="never",
+    )
+    assert result.status == "cancelled"
+    assert [event.type for event in events] == ["turn.accepted", "turn.cancelled"]
+    assert events[-1].payload["reason"] == "user_requested"
+    assert not any(event.type == "step.started" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_turn_id_returns_original(tmp_path: Path):
+    work = tmp_path / "book"
+    model = _recording(tmp_path, "once", "只跑一次")
+    turn_id = str(uuid4())
+    first_events = []
+    first = await start_turn(
+        work_root=work,
+        message="请看一下大纲",
+        turn_id=turn_id,
+        model=model,
+        budget=TurnBudget(max_steps=1),
+        on_event=first_events.append,
+        recording="once",
+    )
+    second_events = []
+    second = await start_turn(
+        work_root=work,
+        message="另一句",
+        turn_id=turn_id,
+        model=model,
+        budget=TurnBudget(max_steps=1),
+        on_event=second_events.append,
+        recording="once",
+    )
+    assert second.turn_id == first.turn_id
+    assert second.summary == first.summary
+    assert second_events == []
+
+
+@pytest.mark.asyncio
+async def test_second_start_while_busy(tmp_path: Path):
+    import asyncio
+    import threading
+
+    from app.writing_host.errors import Busy
+
+    work = tmp_path / "book"
+    model = _recording(tmp_path, "hold", "占住回合")
+    held = threading.Event()
+    release = threading.Event()
+
+    def on_event(event):
+        if event.type == "turn.accepted":
+            held.set()
+            assert release.wait(timeout=10)
+
+    def run_first():
+        asyncio.run(
+            start_turn(
+                work_root=work,
+                message="请看一下大纲",
+                model=model,
+                budget=TurnBudget(max_steps=1),
+                on_event=on_event,
+                recording="hold",
+            )
+        )
+
+    thread = threading.Thread(target=run_first)
+    thread.start()
+    assert held.wait(timeout=10)
+    with pytest.raises(Busy):
+        await start_turn(
+            work_root=tmp_path / "other",
+            message="第二个",
+            model=model,
+            budget=TurnBudget(max_steps=1),
+            recording="hold",
+        )
+    release.set()
+    thread.join(timeout=15)
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_read_events_replays_without_duplicates(tmp_path: Path):
+    from app.writing_host.protocol import read_events
+
+    work = tmp_path / "book"
+    model = _recording(tmp_path, "replay", "补齐事件")
+    live = []
+    result = await start_turn(
+        work_root=work,
+        message="请看一下大纲",
+        model=model,
+        budget=TurnBudget(max_steps=1),
+        on_event=live.append,
+        recording="replay",
+    )
+    cut = 2
+    replay = read_events(work, result.turn_id, after_sequence=cut)
+    stitched = live[:cut] + replay
+    assert [event.sequence for event in stitched] == [event.sequence for event in live]
+    assert [event.type for event in stitched] == [event.type for event in live]
+    assert [event.sequence for event in read_events(work, result.turn_id, after_sequence=0)] == [
+        event.sequence for event in live
+    ]
+
+
+@pytest.mark.asyncio
+async def test_step_completed_follows_checkpoint(tmp_path: Path):
+    work = tmp_path / "book"
+    model = _recording(tmp_path, "commit", "已提交")
+    seen = []
+
+    def on_event(event):
+        if event.type == "step.completed":
+            checkpoint = work / ".agent" / "checkpoints" / f"{event.turn_id}.json"
+            assert checkpoint.is_file()
+            assert "usage" in event.payload
+        seen.append(event.type)
+
+    await start_turn(
+        work_root=work,
+        message="请看一下大纲",
+        model=model,
+        budget=TurnBudget(max_steps=1),
+        on_event=on_event,
+        recording="commit",
+    )
+    assert seen[0] == "turn.accepted"
+    assert "step.completed" in seen
+    assert seen[-1] == "turn.completed"
+
+
+@pytest.mark.asyncio
+async def test_model_error_emits_turn_failed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from app.model.recorded_provider import RecordedModelProvider
+    from app.writing_host.errors import NetworkError
+    from app.writing_host.protocol import read_events
+
+    async def boom(self, *, messages, tools, abort=None):
+        del self, messages, tools, abort
+        raise TimeoutError("timed out")
+        yield ""  # pragma: no cover
+
+    monkeypatch.setattr(RecordedModelProvider, "stream", boom)
+    work = tmp_path / "book"
+    model = _recording(tmp_path, "down", "不会用到")
+    events = []
+    with pytest.raises(NetworkError):
+        await start_turn(
+            work_root=work,
+            message="请看一下大纲",
+            model=model,
+            budget=TurnBudget(max_steps=1),
+            on_event=events.append,
+            recording="down",
+        )
+    assert events[-1].type == "turn.failed"
+    assert events[-1].payload["termination_reason"] == "model_timeout"
+    assert events[-1].payload["error_kind"] == "network"
+    logged = read_events(work, events[-1].turn_id)
+    assert logged[-1].type == "turn.failed"
+
+
+@pytest.mark.asyncio
+async def test_budget_completed_and_work_roundtrip(tmp_path: Path):
+    from app.writing_host.errors import Conflict
+    from app.writing_host.protocol import (
+        export_work,
+        import_work,
+        list_turn_history,
+        read_document,
+        revert_turn,
+        work_view,
+        write_document,
+    )
+
+    work = tmp_path / "book"
+    work.mkdir(parents=True)
+    (work / "outline.md").write_text("# 旧题\n原来的大纲\n", encoding="utf-8")
+    before = work_view(work)
+    model = _recording(tmp_path, "budget", "这句话会超出预算")
+    events = []
+    result = await start_turn(
+        work_root=work,
+        message="请看一下大纲",
+        model=model,
+        budget=TurnBudget(max_steps=2, max_output_tokens=1),
+        on_event=events.append,
+        recording="budget",
+    )
+    assert result.status == "budget_exceeded"
+    assert events[-1].type == "turn.completed"
+    assert events[-1].payload["termination_reason"] == "budget_exceeded"
+    assert list_turn_history(work)
+    (work / "outline.md").write_text("# 新题\n改过了\n", encoding="utf-8")
+    doc = read_document(work, "outline")
+    updated = write_document(work, "outline", "# 手改\n", base_revision=doc.revision)
+    assert updated.revision != doc.revision
+    with pytest.raises(Conflict):
+        write_document(work, "outline", "# 再改\n", base_revision=doc.revision)
+    revert_turn(work, result.turn_id)
+    restored = work_view(work)
+    assert restored.title == before.title
+    assert read_document(work, "outline").text.startswith("# 旧题")
+    assert list_turn_history(work) == []
+
+    (work / "outline.md").write_text("# 旧题\n原来的大纲\n", encoding="utf-8")
+    archive = tmp_path / "book.zip"
+    export_work(work, archive)
+    imported = import_work(archive, tmp_path / "restored")
+    assert any(item.doc_id == "outline" for item in imported.documents)
+    assert read_document(tmp_path / "restored", "outline").text.startswith("# 旧题")
+
+
+def _turn_fixture(name: str) -> dict:
+    path = (
+        Path(__file__).resolve().parents[3]
+        / "packages"
+        / "contracts"
+        / "tests"
+        / "fixtures"
+        / "turns"
+        / f"{name}.json"
+    )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+@pytest.mark.asyncio
+async def test_fixtures_follow_host_replay(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """夹具的事件类型序列来自宿主回放，不另写一套。"""
+    from app.model.recorded_provider import RecordedModelProvider
+
+    def recorded(name: str, steps: list) -> ModelConfig:
+        path = tmp_path / "recordings"
+        path.mkdir(exist_ok=True)
+        (path / f"{name}.json").write_text(json.dumps({"steps": steps}, ensure_ascii=False), encoding="utf-8")
+        return ModelConfig(
+            base_url="http://127.0.0.1",
+            api_key="recording",
+            model="recorded",
+            context_window_tokens=8000,
+            capabilities={"recordings_dir": str(path)},
+        )
+
+    async def replay(name: str, steps: list, **kwargs):
+        events = []
+        await start_turn(
+            work_root=tmp_path / name,
+            model=recorded(name, steps),
+            on_event=events.append,
+            recording=name,
+            **kwargs,
+        )
+        return [event.type for event in events]
+
+    text = await replay("text-turn", message="请看一下大纲", budget=TurnBudget(max_steps=1), steps=[{"text": "第一章写完了"}])
+    assert text == [item["type"] for item in _turn_fixture("text-turn")["events"]]
+
+    budget = await replay(
+        "budget",
+        message="请看一下大纲",
+        budget=TurnBudget(max_steps=2, max_output_tokens=1),
+        steps=[{"text": "这句话会超出预算"}],
+    )
+    assert budget == [item["type"] for item in _turn_fixture("budget")["events"]]
+    assert _turn_fixture("budget")["events"][-1]["payload"]["termination_reason"] == "budget_exceeded"
+
+    plan = await replay(
+        "plan",
+        message="先列一个计划",
+        budget=TurnBudget(max_steps=3),
+        plan_phase="planning",
+        steps=[
+            {
+                "tool_calls": [
+                    {
+                        "name": "update_plan",
+                        "input": {
+                            "items": [{"id": "1", "title": "写开篇", "status": "pending"}],
+                            "summary": "先列计划",
+                        },
+                    }
+                ]
+            },
+            {"text": "等你确认"},
+        ],
+    )
+    assert plan == [item["type"] for item in _turn_fixture("plan")["events"]]
+    assert _turn_fixture("plan")["view"]["plan"]["items"][0]["title"] == "写开篇"
+
+    duplicate = _turn_fixture("resume-duplicate")
+    assert duplicate["events"][0]["sequence"] == duplicate["events"][1]["sequence"]
+    assert duplicate["view"]["last_event_sequence"] == _turn_fixture("text-turn")["view"]["last_event_sequence"]
+
+    async def boom(self, *, messages, tools, abort=None):
+        del self, messages, tools, abort
+        raise TimeoutError("timed out")
+        yield ""  # pragma: no cover
+
+    monkeypatch.setattr(RecordedModelProvider, "stream", boom)
+    events = []
+    from app.writing_host.errors import NetworkError
+
+    with pytest.raises(NetworkError):
+        await start_turn(
+            work_root=tmp_path / "failed",
+            message="请看一下大纲",
+            model=_recording(tmp_path, "failed", [{"text": "x"}]),
+            budget=TurnBudget(max_steps=1),
+            on_event=events.append,
+            recording="failed",
+        )
+    assert [event.type for event in events] == [item["type"] for item in _turn_fixture("failed")["events"]]
+    assert events[-1].payload["error_kind"] == "network"
+    assert events[-1].payload["termination_reason"] == "model_timeout"
+
+
+def test_kernel_package_includes_turn_fixtures(tmp_path: Path):
+    import zipfile
+
+    build_package = _builder()
+    fixtures = Path(__file__).resolve().parents[3] / "packages" / "contracts" / "tests" / "fixtures" / "turns"
+    assert any(fixtures.glob("*.json"))
+    archive = build_package(tmp_path / "dist", private_key=Ed25519PrivateKey.generate())
+    with zipfile.ZipFile(archive) as handle:
+        names = set(handle.namelist())
+    assert any(name.startswith("fixtures/turns/") and name.endswith(".json") for name in names)

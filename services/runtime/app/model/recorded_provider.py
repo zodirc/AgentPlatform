@@ -21,14 +21,15 @@ _RECORDING_RE = re.compile(r"\[recording:([^\]]+)\]")
 class RecordedModelProvider:
     """作用：按 eval 录音逐步回放。"""
 
-    def __init__(self, case_id: str) -> None:
+    def __init__(self, case_id: str, *, recordings_dir: str | None = None) -> None:
         self._case_id = case_id
+        self._recordings_dir = recordings_dir
         self._steps = self._load_steps(case_id)
         self._index = 0
         self._stub = StubModelProvider()
 
     def _load_steps(self, case_id: str) -> list[dict[str, Any]]:
-        root = Path(settings.recordings_dir)
+        root = Path(self._recordings_dir or settings.recordings_dir)
         if not root.is_dir():
             root = Path(__file__).resolve().parents[5] / "eval" / "recordings"
         path = root / f"{case_id.replace('.', '_')}.json"

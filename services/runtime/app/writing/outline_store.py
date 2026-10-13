@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from app.tenant_context import current_work_root, current_work_root_path
 import re
 import shutil
 from pathlib import Path
@@ -18,9 +19,8 @@ _STAGE_REL = Path(".agent") / "work" / "outline_stage"
 def _root(workspace_root: Path | None) -> Path:
     if workspace_root is not None:
         return Path(workspace_root).resolve()
-    from app.settings import settings
-
-    return Path(settings.workspace_root).resolve()
+    
+    return current_work_root_path()
 
 
 def layout_of(workspace_root: Path | None = None) -> str:

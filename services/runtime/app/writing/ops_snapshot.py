@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.tenant_context import current_work_root, current_work_root_path
 import json
 import math
 from pathlib import Path
@@ -15,9 +16,8 @@ def _report_dir() -> Path:
         if cand.is_dir() or (parent / "eval").is_dir():
             return cand
     try:
-        from app.settings import settings
-
-        return Path(settings.workspace_root).resolve() / "eval" / "reports" / "writing"
+        
+        return current_work_root_path() / "eval" / "reports" / "writing"
     except Exception:
         return here.parents[min(2, len(here.parents) - 1)] / "eval" / "reports" / "writing"
 
@@ -25,9 +25,8 @@ def _report_dir() -> Path:
 def _workspace(workspace_root: Path | None = None) -> Path:
     if workspace_root is not None:
         return Path(workspace_root).resolve()
-    from app.settings import settings
-
-    return Path(settings.workspace_root).resolve()
+    
+    return current_work_root_path()
 
 
 def _load_json(path: Path) -> dict[str, Any] | None:

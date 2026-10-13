@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.tenant_context import current_work_root, current_work_root_path
 import hashlib
 import json
 from typing import Any
@@ -87,11 +88,10 @@ async def load_metric_space(
     """platform+overlay 空间。作者档且本书原型样本≥4 时整类替换平台金标。"""
     from pathlib import Path
 
-    from app.settings import settings
     from app.writing.signals.space import load_platform_space, load_work_taste_space
     from app.writing.regime import is_author_regime
 
-    root = Path(settings.workspace_root)
+    root = current_work_root_path()
     if is_author_regime(turn_user_text, workspace_root=root):
         work_space = load_work_taste_space(workspace_root=root)
         if work_space is not None:

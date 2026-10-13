@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.tenant_context import current_work_root, current_work_root_path
 import json
 import re
 from pathlib import Path
@@ -68,9 +69,8 @@ def fragment_label(frag: str) -> str:
 
 
 def _workspace_root(workspace_root: Path | None = None) -> Path:
-    from app.settings import settings
-
-    return Path(workspace_root or settings.workspace_root).resolve()
+    
+    return Path(workspace_root or current_work_root()).resolve()
 
 
 def writing_prefs_path(*, workspace_root: Path | None = None) -> Path:

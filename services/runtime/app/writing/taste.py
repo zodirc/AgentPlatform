@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.settings import settings
+from app.tenant_context import current_work_root, current_work_root_path
 import json
 import re
 from datetime import datetime, timezone
@@ -24,9 +26,8 @@ KIND_LABELS = {
 def _workspace(workspace_root: Path | None) -> Path:
     if workspace_root is not None:
         return Path(workspace_root).resolve()
-    from app.settings import settings
-
-    return Path(settings.workspace_root).resolve()
+    
+    return current_work_root_path()
 
 
 def taste_path(*, workspace_root: Path | None = None) -> Path:
@@ -64,8 +65,7 @@ def append_taste_mark(
     paired_excerpt: str = "",
     workspace_root: Path | None = None,
 ) -> dict[str, Any]:
-    from app.settings import settings
-
+    
     token = str(kind or "").strip().lower()
     if token not in KIND_LABELS:
         return {"status": "error", "error": "taste_bad_kind", "summary": "kind 须为 yes/ai/off/cut"}
@@ -116,8 +116,7 @@ def format_taste_block(
     audience: str = "writer",
     query: str = "",
 ) -> str:
-    from app.settings import settings
-
+    
     marks = load_taste_marks(workspace_root=workspace_root)
     if not marks:
         return ""

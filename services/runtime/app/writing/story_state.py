@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.settings import settings
+from app.tenant_context import current_work_root, current_work_root_path
 import json
 import re
 from pathlib import Path
@@ -57,9 +59,8 @@ _PLANNED_VERB = re.compile(r"杀死|揭穿|决战|叛变|结婚|登基|炸毁|�
 def _workspace(workspace_root: Path | None) -> Path:
     if workspace_root is not None:
         return Path(workspace_root).resolve()
-    from app.settings import settings
-
-    return Path(settings.workspace_root).resolve()
+    
+    return current_work_root_path()
 
 
 def story_state_json_path(*, workspace_root: Path | None = None) -> Path:
@@ -298,7 +299,6 @@ def save_story_state(
 
 def format_story_state_block(*, workspace_root: Path | None = None) -> str:
     """进 volatile：[story_state]。账本不是工单。作者档帽 1200，严格档 900。"""
-    from app.settings import settings
     from app.writing.regime import is_author_regime
 
     state = load_story_state(workspace_root=workspace_root)

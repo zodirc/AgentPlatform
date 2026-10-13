@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.tenant_context import current_work_root, current_work_root_path
 import hashlib
 import re
 from dataclasses import dataclass, field
@@ -74,7 +75,7 @@ def cards_root(*, workspace_root: Path | None = None) -> Path:
     
     返回:
         Path。"""
-    root = Path(workspace_root or settings.workspace_root).resolve()
+    root = Path(workspace_root or current_work_root()).resolve()
     rel = settings.writing_cards_dir.strip().lstrip("/")
     return (root / rel).resolve()
 
@@ -88,7 +89,7 @@ def is_cards_path(path: Path, *, workspace_root: Path | None = None) -> bool:
     返回:
         bool。"""
     try:
-        rel = path.resolve().relative_to(Path(workspace_root or settings.workspace_root).resolve())
+        rel = path.resolve().relative_to(Path(workspace_root or current_work_root()).resolve())
     except ValueError:
         return "cards" in path.parts
     return rel.parts[:2] == ("sources", "cards") or (len(rel.parts) >= 1 and rel.parts[0] == "cards")
@@ -138,7 +139,7 @@ def load_writing_cards(*, workspace_root: Path | None = None) -> list[WritingCar
     root = cards_root(workspace_root=workspace_root)
     if not root.is_dir():
         return []
-    base = Path(workspace_root or settings.workspace_root).resolve()
+    base = Path(workspace_root or current_work_root()).resolve()
     cards: list[WritingCard] = []
     for fp in sorted(root.rglob("*.md")):
         if not fp.is_file() or fp.name.startswith("."):

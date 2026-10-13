@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.tenant_context import current_work_root, current_work_root_path
 import hashlib
 import re
 from datetime import datetime, timezone
@@ -24,9 +25,8 @@ _USER_DIRECTION = re.compile(
 
 
 def _workspace_root(workspace_root: Path | None) -> Path:
-    from app.settings import settings
-
-    return Path(workspace_root or settings.workspace_root).resolve()
+    
+    return Path(workspace_root or current_work_root()).resolve()
 
 
 def style_lock_path(workspace_root: Path | None = None) -> Path:

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from app.tenant_context import current_work_root, current_work_root_path
 import re
 from pathlib import Path
 
@@ -17,9 +18,8 @@ def planning_mode(*, workspace_root: Path | None = None, outline: str = "") -> s
     """planned / discovery / hybrid。默认 hybrid。不由 literary / web_serial 决定。"""
     root = workspace_root
     if root is None:
-        from app.settings import settings
-
-        root = Path(settings.workspace_root)
+        
+        root = current_work_root_path()
     path = Path(root).resolve() / _MODE_FILE
     if path.is_file():
         token = path.read_text(encoding="utf-8", errors="replace").strip().lower()

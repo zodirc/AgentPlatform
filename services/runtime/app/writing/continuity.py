@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+from app.tenant_context import current_work_root, current_work_root_path
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.settings import settings
 
 _NAME_RE = re.compile(r"[\u4e00-\u9fff]{2,4}")  # retained for tests/diagnostics
 _STATE_LINE_RE = re.compile(
@@ -214,7 +214,7 @@ def pending_cards_dir(*, workspace_root: Path | None = None) -> Path:
     
     返回:
         Path。"""
-    root = Path(workspace_root or settings.workspace_root).resolve()
+    root = Path(workspace_root or current_work_root()).resolve()
     return (root / "sources" / "cards" / "pending").resolve()
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.tenant_context import current_work_root, current_work_root_path
 from typing import Any
 
 from app.writing.patch_budget import MAX_PATCHES_PER_PENALTY_KEY
@@ -129,10 +130,9 @@ def manuscript_preview_for_compact(
     """稿面末尾一小段，给 compact 当 last_output_preview。"""
     from pathlib import Path
 
-    from app.settings import settings
     from app.writing.manuscript import load_manuscript_doc
 
-    root = Path(workspace_root or settings.workspace_root).resolve()
+    root = Path(workspace_root or current_work_root()).resolve()
     doc, _rel = load_manuscript_doc(root)
     body = str(doc or "").strip()
     if not body:

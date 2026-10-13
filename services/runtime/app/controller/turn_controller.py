@@ -470,6 +470,7 @@ async def start_turn(
     permission_mode: str = "ask",
     already_claimed: bool = False,
     reject_when_full: bool = True,
+    intent: dict | None = None,
 ) -> None:
     """领取（或已 claim）后执行一次完整 Turn：Intake → Engine → 终态。
 
@@ -499,6 +500,12 @@ async def start_turn(
         already_claimed: ``True`` 表示 pull 路径已占有 runner 租约，跳过再次 claim。
         reject_when_full: inflight 已满时是否将 Turn 记为 ``budget_exceeded`` 失败。
     """
+    if intent:
+        from app.writing.intents import resolve_intent
+
+        message, intent_phase = resolve_intent(intent, message=message)
+        if intent_phase:
+            plan_phase = intent_phase
     if turn_id in _active_turns:
         return
     max_inflight = int(getattr(settings, "runtime_max_inflight_turns", 0) or 0)

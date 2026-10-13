@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.tenant_context import current_work_root, current_work_root_path
 from typing import Any
 
 MAX_PATCHES_PER_PENALTY_KEY = 2
@@ -437,7 +438,6 @@ def check_propose_patch_allowed(
     """Return error payload when patch must stop; None when allowed."""
     from pathlib import Path
 
-    from app.settings import settings
     from app.writing.regime import is_author_regime
 
     sid = normalize_section_id(section_id)
@@ -447,7 +447,7 @@ def check_propose_patch_allowed(
         row = raw if isinstance(raw, dict) else None
     if str((row or {}).get("regime") or "").strip().lower() == "author":
         return None
-    if is_author_regime(workspace_root=Path(settings.workspace_root)):
+    if is_author_regime(workspace_root=current_work_root_path()):
         return None
     penalty_key = normalize_penalty_key(resolve_penalty_key(prior, old_text=old_text))
     long_form = _long_form(manifest, prior)

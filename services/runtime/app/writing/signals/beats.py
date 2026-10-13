@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from app.tenant_context import current_work_root
 from app.writing.signals.prefs_loader import _module as _writing_prefs
 from app.writing.signals.repair import is_l0_weak, l0_penalty_hits, penalty_hits
 from app.writing.signals.spec import infer_fragment_from_duty
@@ -54,9 +55,8 @@ def beat_window_payload(
 
 def local_beats_path(workspace_root: Path | None = None) -> Path:
     """sidecar 路径。"""
-    from app.settings import settings
-
-    root = Path(workspace_root or settings.workspace_root).resolve()
+    
+    root = Path(workspace_root or current_work_root()).resolve()
     return root / _SIDECAR
 
 

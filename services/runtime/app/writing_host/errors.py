@@ -53,6 +53,21 @@ class ResumeIncompatible(HostError):
     user_message = "断点由更新的内核写成，当前版本无法恢复。"
 
 
+class Busy(HostError):
+    code = "busy"
+    user_message = "已有回合在进行，请等它结束或先中止。"
+
+
+class Conflict(HostError):
+    code = "conflict"
+    user_message = "稿已被改过，请重新载入后再编辑。"
+
+
+class InvalidIntent(HostError):
+    code = "invalid_intent"
+    user_message = "这个选择已经失效，请重新点选。"
+
+
 class InternalError(HostError):
     code = "internal"
     user_message = "写作内核遇到内部错误，请稍后重试。"
@@ -62,7 +77,7 @@ def classify_model_error(exc: BaseException) -> HostError:
     """把模型层异常收成宿主错误。"""
     status = getattr(exc, "status_code", None)
     text = str(exc).lower()
-    if isinstance(exc, (ConnectionError, TimeoutError, OSError)) or "connect" in text or "timed out" in text:
+    if isinstance(exc, (ConnectionError, TimeoutError, OSError)) or "connect" in text or "timed out" in text or "timeout" in text:
         return NetworkError(detail=str(exc))
     if "insufficient_quota" in text or "quota" in text or status == 402:
         return QuotaExceeded(detail=str(exc))

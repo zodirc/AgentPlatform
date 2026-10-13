@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.tenant_context import current_work_root, current_work_root_path
 from pathlib import Path
 
 from app.settings import settings
@@ -58,7 +59,7 @@ def build_work_index(
     
     返回:
         str。"""
-    root = Path(workspace_root or settings.workspace_root).resolve()
+    root = Path(workspace_root or current_work_root()).resolve()
     budget = max_chars if max_chars is not None else settings.writing_work_index_max_chars
     budget = max(200, int(budget))
     mode = manuscript_mode()

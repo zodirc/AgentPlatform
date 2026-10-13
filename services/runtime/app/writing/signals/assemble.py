@@ -6,6 +6,7 @@ import json
 from typing import Any
 from uuid import UUID
 
+from app.settings import settings
 from app.writing.signals.prefs_loader import _module as _writing_prefs
 
 normalize_fragment = _writing_prefs().normalize_fragment
@@ -389,8 +390,7 @@ async def build_writing_signals(
     )
 
     from app.writing.outline_arc import STYLE_CONTRACT_TEMPLATE_VERSION
-    from app.settings import settings
-
+    
     model_id = str(getattr(settings, "model_name", "") or "").strip()
     block: dict[str, Any] = {
         "prefs_scope": "platform",

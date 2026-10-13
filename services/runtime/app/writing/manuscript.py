@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from app.settings import settings
+from app.tenant_context import current_work_root, current_work_root_path
 import re
 from pathlib import Path
 
-from app.settings import settings
 
 _HTML_SECTION_RE = re.compile(
     r"<!--\s*section:(?P<id>[^\s>]+)\s*-->\s*(?P<body>.*?)\s*<!--\s*/section:(?P=id)\s*-->",
@@ -386,7 +387,7 @@ def load_manuscript_doc(workspace_root: Path | None = None) -> tuple[str, str]:
     
     返回:
         (text,rel)。"""
-    root = Path(workspace_root or settings.workspace_root).resolve()
+    root = Path(workspace_root or current_work_root()).resolve()
     for rel in (
         draft_manuscript_rel(),
         legacy_draft_manuscript_rel(),

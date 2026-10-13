@@ -9,7 +9,9 @@ _REVISE = re.compile(
     r"^\[revise\]|/revise\b|按这个问题改|修订这一段|按原句改",
     re.I,
 )
-_APPLY = re.compile(r"采用候选\s*[ABab]|用候选\s*[ABab]|就用候选\s*[ABab]")
+_APPLY = re.compile(
+    r"采用候选\s*[ABab]|用候选\s*[ABab]|就用候选\s*[ABab]|采用补丁「[^」]+」"
+)
 _VAGUE = re.compile(r"去掉\s*AI\s*味|去\s*AI\s*味|不要\s*AI\s*味|太\s*AI")
 _CONCRETE = re.compile(
     r"重复解释|抽象情绪|对称|升华|章末|对白|钩子|原句|「|“|这一句|这一段"

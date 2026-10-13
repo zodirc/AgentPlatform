@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.settings import settings
+from app.tenant_context import current_work_root, current_work_root_path
 import json
 import re
 from datetime import datetime, timezone
@@ -48,9 +50,8 @@ _REREAD_ENTRY_RE = re.compile(r"^###\s+", re.M)
 def _workspace(workspace_root: Path | None) -> Path:
     if workspace_root is not None:
         return Path(workspace_root).resolve()
-    from app.settings import settings
-
-    return Path(settings.workspace_root).resolve()
+    
+    return current_work_root_path()
 
 
 def author_state_path(*, workspace_root: Path | None = None) -> Path:
@@ -127,8 +128,7 @@ def save_author_state(
 
 
 def _section_cap(name: str) -> int:
-    from app.settings import settings
-
+    
     if name == REREAD_ONLY:
         return 3 * 300
     return int(getattr(settings, "writing_author_state_section_max_chars", 600) or 600)
@@ -243,8 +243,7 @@ def append_user_said(
 
 
 def format_author_state_block(*, workspace_root: Path | None = None) -> str:
-    from app.settings import settings
-
+    
     sections = load_author_state(workspace_root=workspace_root)
     if not any((sections.get(name) or "").strip() for name in SECTION_ORDER):
         return ""
