@@ -63,8 +63,10 @@ runtime  仅 runner_id 匹配且 lease 仍有效的副本消费
     <span class="pt">◆ 要点  索引可慢；首 token 与 query embed 禁止上 Redis 总线。</span></pre>
 
           <h3>官方评测 Turn</h3>
-          <pre class="seq">StartTurn 即预批准写盘与 exec（ops_eval：无人值守，不拦人审）
-  writes_preapproved / exec_preapproved 随 checkpoint 存活，approve 续跑仍免审
+          <pre class="seq">ops_eval 不在 StartTurn 预批准写盘或 exec
+  评测改的是允许的命令和网络。预批准会让写盘和 exec 跳过审批记录
+  s1_granted_this_turn / s2_granted_this_turn 随 checkpoint 存活
+  用户已经批准过、且影子快照在的可回退写，续跑时不再问一次
   编码评测可在开题前等待符号表 ready（仅评测套件）
     <span class="pt">◆ 要点  产品对话仍先受理，不等索引。把评测的「等 ready」抄到产品路径，R1（首 token）就破了。</span></pre>
           <p class="figure-lead">下图菱形在落库之后、领取之前：pull 走 SUBSCRIBE 与 CAS；push 成功是 runtime <code>/internal/commands/start-turn</code> 返回 202。502 只是这次调用失败时 api 回给浏览器的状态。</p>

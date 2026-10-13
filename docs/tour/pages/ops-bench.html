@@ -12,7 +12,7 @@
 3  物化隔离 Work：beir-index / cmteb-index / LongBench passage.md / SWE Lite checkout
 4  索引进 bench-postgres 独立 schema（retrieval_ops / retrieval_ops_zh）
      与产品 agent-postgres 不是同一份资料；cgroup 另 1g
-5  菱形 eval_path==agent？  否 → 拒跑。是 → 建产品 Session/Turn（ops_eval 预批准写/exec）
+5  菱形 eval_path==agent？  否 → 拒跑。是 → 建产品 Session/Turn（ops_eval 不预批准写/exec，只收紧命令集并断网）
 6  AgentEngine 跑真工具（search_sources / read_file / edit_file / run_tests…）
 7  从 tool_result / turn_events 抽 ranked / Answer: / 补丁
 8  套件尺子（见下）对照官方金标（金标不在 Work 内）

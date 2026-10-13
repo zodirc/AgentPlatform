@@ -27,11 +27,16 @@ waiting_approval     Run 仍在；仍占 inflight + lease
 
 同 Turn 粘性
 ────
-  writes_preapproved：写盘批准一次后，本 Turn 同类写盘免再审
-  exec_preapproved：run_command 第一次仍须审；通过后本 Turn 后续同类 shell 可免再审
-  Plan 进入 executing 只预授权清单内写盘（_PLAN_EXECUTING_WAIVE_APPROVAL），不等于 shell 免审
-  普通进度清单更新 ≠ 已批准开工
-  ops_eval 在 StartTurn 已预置这两位，无人值守
+  矩阵路径上，写盘免审要同时有 s1_granted_this_turn 和 shadow_snapshot_id
+  标记只在用户真正批准之后置位。没有快照的写，续跑时仍要问
+  writes_preapproved 不承担这条粘性。没有 sink 的旧规格走 _legacy，下一次写盘不因此放行
+  命令粘性是 s2_granted_this_turn。带 egress_hosts、或仍要网络批准的命令不粘
+  主机名单每次单独批。上一条命令的批准不覆盖下一条的 egress_hosts
+  permission_mode：ask 默认；auto_edit / full_auto 在影子快照存在时放行可回退写盘
+  工作区构建、测试、格式化，在沙箱就绪且不是评测时可以直接执行
+  .git、工作流、package.json 等执行配置路径强制再审。改这些文件会改变以后每次命令怎么跑
+  Plan 进入 executing 只预授权清单内写盘，shell 仍要审
+  ops_eval 不在 StartTurn 预批准写盘或 exec。评测改的是命令集和网络；预批准会让评测回合跳过审批记录
     <span class="pt">◆ 要点  把 update_plan 当成开工批准，未审的 shell 会直接跑。</span></pre>
 
           <h3>取消</h3>

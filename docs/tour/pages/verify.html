@@ -13,6 +13,11 @@
     10 的含义：注入后再跑一轮模型 + 至少一次 testish，仍要留出失败再改的余量
   写作 L0 更紧：hinge_reserve = min(reserve, 3)；四类 writing receipt 本 Turn 互斥只发一张
 
+产品执行一条相关命令（先于收据，只产品编码回合）
+  scenario=agent ∧ ¬ops_eval ∧ product_post_edit_hook ∧ verify_pending ∧ 已有相关命令
+  沙箱里跑路径最长的一条，每 Turn 一次，结果写回用户消息后 continue
+  模型在同一次回合里看到输出。评测不进入：工作区里的这条结果不记成分数
+
 编码 1  经典 verify
   verify_pending ∧ code_edits_since_verify ≥ 1 ∧ ¬verify_receipt_sent
   文案引用 related_tests_union 里的可复制命令，以及 last_test_first_failure（若有）

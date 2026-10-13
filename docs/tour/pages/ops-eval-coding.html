@@ -68,7 +68,9 @@ ValueError: Unrecognized QDP line: read serr 1 2</pre>
      P2P 8 条全绿不能替代这一条 F2P</pre>
           <p>对照会过的题 <code>astropy__astropy-12907</code>（同一 <code>repo</code>；<code>base_commit</code> <a href="https://github.com/astropy/astropy/tree/d16bfe05a744909de4b27f5875fe0d4ed41ce607"><code>d16bfe05a744909de4b27f5875fe0d4ed41ce607</code></a>；issue <a href="https://github.com/astropy/astropy/issues/12907">#12907</a>）。<code>problem_statement</code> 是嵌套 <code>CompoundModels</code> 的 <code>separability_matrix</code> 算错：<code>Pix2Sky_TAN() &amp; cm</code> 不应把后两维粘成不可分。issue 里的 REPL 与隐藏 F2P <code>test_separable[compound_model6/9]</code> 同向，第4–6轮均 resolved。</p>
           <h3>执行路径与 harness 职责</h3>
-          <pre class="seq">产品路径  checkout + problem.md → agent Turn（ops_eval 预批准写盘）
+          <pre class="seq">产品路径  checkout + problem.md → agent Turn
+          ops_eval 不预批准写盘或 exec；它收紧命令集并关掉网络
+          预批准会让评测回合跳过审批记录，工作区里的安装也会进到评测环境
           评测还会等符号表 ready|stale（比产品对话更乐观）
           pytest 改道进该题 Docker = 解题辅助，仍不是分数
 harness   swebench.harness.run_evaluation

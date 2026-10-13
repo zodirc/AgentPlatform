@@ -1,9 +1,9 @@
 <section class="page" data-id="related-tests" data-group="Coding" data-title="失败摘要与相关测试">
         <div class="card">
           <h2>失败摘要、相关测试命令、找定义路径</h2>
-          <p class="lede">三件写入既有 <code>tool_result</code> 的事实：失败摘要、相关测试命令、Locate 定义。平台永不代跑相关测试；官方分仍看 harness。</p>
+          <p class="lede">失败摘要、相关测试命令和 Locate 定义都写进既有的 <code>tool_result</code>，不另开工具名。附带的测试命令默认留给模型决定要不要跑。产品编码回合里，模型已经准备结束、测试仍欠着时，引擎执行其中路径最长的一条，把输出放回对话。评测回合不执行这一条，分数只来自镜像里的 harness。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 相关测试命令写在 tool_result 中，由模型决定是否执行。平台不代跑。</li>
+            <li><span class="pt">◆ 要点</span> 相关测试是 <code>tool_result</code> 里的事实。产品回合在交卷前执行一条；评测分数不看这一条。</li>
           </ul>
           <h3>三条车道</h3>
           <pre class="seq">失败摘要（test_summary）
@@ -13,13 +13,16 @@
   is_testish_command 决定这次 run_command/run_tests 能不能清掉 verify_pending
   冒烟从 0 走到第5轮 0.50，出口线仍 ≥0.6（评测观察）
 
-相关测试（edit_file 成功后附带，平台永不代跑）
+相关测试（edit_file 成功后附带）
   最多 5 条：{path, command}，command = python -m pytest {path} -x -q
+  产品交卷且 verify_pending：run_product_verify_hook 执行路径最长的一条，每 Turn 一次，然后 continue
+  模型能在同一次回合里看到输出。评测或 product_post_edit_hook 关闭时不执行
+  评测若在工作区里跑这条命令，结果会看起来像分数，而官方分在镜像里
   命名启发式 rglob 预算 250ms；import 反向最多 250 文件 / 400ms
   跳过 .git / venv / node_modules / __pycache__ / build / dist …
   优先精确到单个测试文件（便于送进该题 Docker），而不是 pytest 全库
   第5轮：coverage 1.0，adoption 0.0——门能给出命令，模型仍经常不跑
-  <span class="pt">◆ 要点  相关测试是 tool_result 里的事实，不是隐藏调度。平台代跑会让官方 resolve_rate 与探针绿混在一起。</span>
+  <span class="pt">◆ 要点  相关测试是 tool_result 里的事实。产品回合在交卷前只执行一条。评测分数仍只认镜像里的 harness。</span>
 
 找定义（search_codebase / Locate）
   符号表粗筛 top_k=5 → LSP 在标识符列确认 → 只有确认过的进 definitions[]

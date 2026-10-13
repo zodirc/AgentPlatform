@@ -1,7 +1,7 @@
 <section class="page" data-id="sandbox" data-group="场景与工具" data-title="exec 沙箱">
         <div class="card">
           <h2>exec 沙箱与评测解题改道</h2>
-          <p class="lede">审批门通过之后，仍须决定进程可触达的范围。威胁模型是保护<strong>宿主机与 agent 服务</strong>：子进程文件系统只对当前 Work 根 RW。默认经 <code>SANDBOX_PLANE_URL</code> 调 sandbox 平面 <code>POST /internal/sandbox/exec</code>（HTTP 热路径，不上 Redis 总线）；平面内再选 Landlock / bwrap / off。日常出站网络默认可用（已审批的 <code>curl https://…</code> 不应被沙箱误杀）；产品层「禁 curl」是另一条规则，不要焊进内核隔离。</p>
+          <p class="lede">审批通过只说明这次调用可以执行。可写路径和出网主机由沙箱再定：子进程对当前 Work 根可写，宿主机和 agent 服务的其余路径不在这个可写面里。执行请求走 <code>SANDBOX_PLANE_URL</code> 的 <code>POST /internal/sandbox/exec</code>，不进 Redis。调用方等的是这一次的退出码，队列里的消息可以晚到。产品命令在 bwrap 里 <code>--unshare-net</code>，注册表和 GitHub 经沙箱内 <code>127.0.0.1:3128</code> 出去；其它主机要在 <code>egress_hosts</code> 里点名再批。评测关掉这条代理。<code>sandbox_relax</code> 批准之后，网络才改为共享。</p>
           <ul class="seq-legend">
             <li><span class="pt">◆ 要点</span> 评测要求断网时必须使用 bwrap。工作区里的测试通过不算官方分数。</li>
           </ul>
@@ -13,8 +13,9 @@
 平面内选择顺序  Landlock → bwrap → off
   Landlock  Linux ≥5.13，ABI≥1；restrict_self 不可逆，探针在子进程做
             可写 jail = 当前 work_root（与 bwrap RW 面一致）；私有 tmpdir
-            <strong>撤不掉 egress</strong>——只锁 FS
-  bwrap     包装 argv；日常 network=True（不 --unshare-net）
+            ABI≥4 且挂了 /egress 时，TCP 只允许连本机 3128
+  bwrap     包装 argv；产品命令 --unshare-net，并绑定 /egress 代理
+            评测：不启代理。sandbox_relax 批准后才 --share-net
   off       裸 shell；argv 仍先过路径软 jail（不得越出 Work 根）
   TOOL_SANDBOX=off|landlock|bwrap  破窗覆盖；off 每次调用都生效，自动探测结果 pin 在进程生命周期
   结果 dict 带 sandbox 后端标识，便于 Ops 判断「这步到底关在哪一层」
@@ -35,12 +36,12 @@
   否  走上一节日常沙箱
       仍不得越出当前 Work 根
       与审批门正交：未批准的 run_command 根本不会进 sandbox</pre>
-          <p class="figure-lead">下图菱形「是否评测题」对应主链第 2 步；否分支才是日常沙箱。</p>
+          <p class="figure-lead">下图有三处菱形。未配置平面地址则回退到本进程。后端不是 bwrap 则走路径软 jail，是则组装 <code>--unshare-net</code> 与 <code>/egress</code>。官方评测题在镜像内执行并关闭网络。右栏写审批与出网条件。</p>
           <div class="src"><code>services/sandbox</code> · <code>tools/core/remote_sandbox.py</code> · <code>tools/core/sandbox.py</code> · <code>tools/core/landlock_fs.py</code> · <code>structural/test_run_redirect.py</code></div>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">
-            <img src="../assets/sandbox/bwrap-exec-flow-zh.png" alt="exec 沙箱与评测题 Docker 跑测" />
+            <img src="../assets/sandbox/bwrap-exec-flow-zh.png" alt="bwrap 沙箱 exec 详流：平面 HTTP 提交执行，产品命令保持 --unshare-net，评测题在镜像内执行" />
           </div>
           <figcaption>exec 沙箱详流 · 点击放大</figcaption>
         </figure>
