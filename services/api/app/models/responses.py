@@ -72,6 +72,7 @@ class CreateTurnRequest(BaseModel):
     plan_phase: PlanPhase | None = None
     clear_context: bool = False
     permission_mode: str | None = None
+    intent: dict | None = None
 
     @model_validator(mode="after")
     def _resolve_scenario_alias(self) -> "CreateTurnRequest":

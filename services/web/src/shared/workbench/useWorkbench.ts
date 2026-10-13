@@ -37,7 +37,6 @@ import type {
 } from "./types";
 import { writePreviewFromApprovalPayload } from "./filePreview";
 import {
-  executePlanMessage,
   isPlanSuggestCooldownActive,
   latestPlanFromArtifacts,
   planFromEventPayload,
@@ -51,11 +50,9 @@ import {
   type PlanPhaseWire,
 } from "./plan";
 import {
-  formatSelectPondMessage,
   isOpeningChoiceMessage,
   latestOpeningPondsFromArtifacts,
   latestOpeningPondsFromEvents,
-  MORE_PONDS_MESSAGE,
   openingPondsFromEventPayload,
   preferSettledOutput,
   visibleChatUserInputs,
@@ -778,15 +775,24 @@ export function useWorkbenchImpl(): WorkbenchState {
       sid,
       msg,
       planPhase,
+      intent,
     }: {
       sid: string;
       msg: string;
       planPhase?: PlanPhaseWire | null;
+      intent?: {
+        kind: "select_pond" | "more_ponds" | "confirm_plan" | "accept_patch" | "reject_patch";
+        ponds_id?: string;
+        item_id?: string;
+        plan_id?: string;
+        patch_id?: string;
+      };
     }) =>
       startTurn(sid, msg, activeScenarioId, {
         plan_phase: planPhase,
         permission_mode:
           activeScenarioId === "agent" ? readPermissionMode() : undefined,
+        intent,
       }),
   });
 
@@ -803,6 +809,13 @@ export function useWorkbenchImpl(): WorkbenchState {
       planPhase?: PlanPhaseWire | null;
       /** 勾选等 UI 动作：发下一回合，但不当成用户输入显示。 */
       hideUserInput?: boolean;
+      intent?: {
+        kind: "select_pond" | "more_ponds" | "confirm_plan" | "accept_patch" | "reject_patch";
+        ponds_id?: string;
+        item_id?: string;
+        plan_id?: string;
+        patch_id?: string;
+      };
     },
   ): Promise<boolean> {
     const text = textRaw.trim();
@@ -875,6 +888,7 @@ export function useWorkbenchImpl(): WorkbenchState {
         sid: sessionId,
         msg: text,
         planPhase: wirePhase,
+        intent: opts?.intent,
       });
       setTurnId(turn.id);
       setTurnHistory((prev) =>
@@ -941,7 +955,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- flush on busy/approval/session only
   }, [busy, pendingApproval, sessionId]);
 
-  /** 用户确认 Plan 清单后，以 executing phase 发送 executePlanMessage()。 */
+  /** 用户确认 Plan 清单后，以 confirm_plan 意图进入 executing。 */
   async function handleExecutePlan() {
     const snapshot =
       livePlan ??
@@ -954,9 +968,12 @@ export function useWorkbenchImpl(): WorkbenchState {
     }
     planWrapSentRef.current = false;
     setPlanAwaitingConfirm(false);
-    await handleSendText(executePlanMessage(), {
+    await handleSendText("按此执行", {
       planModeSend: false,
       planPhase: "executing",
+      intent: snapshot.plan_id
+        ? { kind: "confirm_plan", plan_id: snapshot.plan_id }
+        : undefined,
     });
   }
 
@@ -973,9 +990,14 @@ export function useWorkbenchImpl(): WorkbenchState {
     ) {
       return;
     }
-    await handleSendText(formatSelectPondMessage(item), {
+    await handleSendText("选择开篇", {
       planModeSend: false,
       hideUserInput: true,
+      intent: {
+        kind: "select_pond",
+        ponds_id: snapshot.ponds_id || snapshot.items?.[0]?.id || "",
+        item_id: item.id,
+      },
     });
   }
 
@@ -984,9 +1006,13 @@ export function useWorkbenchImpl(): WorkbenchState {
     if (busy || pendingApproval || !snapshot?.items?.length) {
       return;
     }
-    await handleSendText(MORE_PONDS_MESSAGE, {
+    await handleSendText("换一组开篇", {
       planModeSend: false,
       hideUserInput: true,
+      intent: {
+        kind: "more_ponds",
+        ponds_id: snapshot.ponds_id || snapshot.items?.[0]?.id || "",
+      },
     });
   }
 

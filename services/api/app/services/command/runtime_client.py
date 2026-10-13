@@ -117,6 +117,7 @@ class RuntimeClient:
         ops_eval: bool = False,
         clear_context: bool = False,
         permission_mode: str | None = None,
+        intent: dict | None = None,
     ) -> None:
         """向 runtime 下发 StartTurn 命令。
 
@@ -162,6 +163,8 @@ class RuntimeClient:
             payload["model_override"] = model_override
         if permission_mode in {"ask", "auto_edit", "full_auto"}:
             payload["permission_mode"] = permission_mode
+        if intent:
+            payload["intent"] = intent
 
         await self._post("/internal/commands/start-turn", timeout=30.0, json=payload)
 

@@ -387,6 +387,13 @@ export interface components {
              * @enum {string}
              */
             plan_phase?: "planning" | "executing";
+            intent?: {
+                kind: "select_pond" | "more_ponds" | "confirm_plan" | "accept_patch" | "reject_patch";
+                ponds_id?: string;
+                item_id?: string;
+                plan_id?: string;
+                patch_id?: string;
+            };
         };
         TurnResponse: {
             /** Format: uuid */

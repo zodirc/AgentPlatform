@@ -600,6 +600,13 @@ export async function startTurn(
   opts?: {
     plan_phase?: "planning" | "executing" | null;
     permission_mode?: PermissionMode;
+    intent?: {
+      kind: "select_pond" | "more_ponds" | "confirm_plan" | "accept_patch" | "reject_patch";
+      ponds_id?: string;
+      item_id?: string;
+      plan_id?: string;
+      patch_id?: string;
+    };
   },
 ) {
   const body: {
@@ -607,9 +614,13 @@ export async function startTurn(
     scenario_id: string;
     plan_phase?: "planning" | "executing";
     permission_mode?: PermissionMode;
+    intent?: NonNullable<typeof opts>["intent"];
   } = { message, scenario_id: scenarioId };
   if (opts?.plan_phase === "planning" || opts?.plan_phase === "executing") {
     body.plan_phase = opts.plan_phase;
+  }
+  if (opts?.intent) {
+    body.intent = opts.intent;
   }
   if (
     opts?.permission_mode === "ask" ||
