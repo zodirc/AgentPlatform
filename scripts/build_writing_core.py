@@ -119,6 +119,34 @@ def _imported_app_files() -> list[Path]:
     return files
 
 
+def _contract_files() -> dict[str, Path]:
+    """本地包要能校验契约载荷，不能依赖源码树还在旁边。"""
+    contracts = ROOT / "packages" / "contracts"
+    found: dict[str, Path] = {}
+    module = contracts / "validate_payload.py"
+    if module.is_file():
+        found["packages/contracts/validate_payload.py"] = module
+    payloads = contracts / "schemas" / "events" / "payloads"
+    if payloads.is_dir():
+        for path in sorted(payloads.rglob("*")):
+            if path.is_file():
+                rel = path.relative_to(contracts).as_posix()
+                found[f"packages/contracts/{rel}"] = path
+    return found
+
+
+def _fixture_files() -> dict[str, Path]:
+    fixtures = ROOT / "packages" / "contracts" / "tests" / "fixtures" / "turns"
+    found: dict[str, Path] = {}
+    if not fixtures.is_dir():
+        return found
+    for path in sorted(fixtures.rglob("*")):
+        if path.is_file():
+            rel = path.relative_to(fixtures).as_posix()
+            found[f"fixtures/turns/{rel}"] = path
+    return found
+
+
 def _extra_files() -> list[Path]:
     roots = [
         RUNTIME / "app" / "scenarios" / "writing",
@@ -166,6 +194,8 @@ def build_package(
             files["scenarios/writing/" + rel.removeprefix("app/scenarios/writing/")] = path
         if "/exemplars/" in rel:
             files["data/exemplars/" + rel.split("/exemplars/", 1)[1]] = path
+    files.update(_fixture_files())
+    files.update(_contract_files())
     data_names = [name for name in files if "/exemplars/" in f"/{name}" or name.endswith(".md")]
     manifest = {
         "core_version": version,

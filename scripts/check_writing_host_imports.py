@@ -88,6 +88,7 @@ def isolated_import_graph(tmp: Path | None = None) -> list[str]:
             "pydantic-settings>=2.2",
             "httpx>=0.27",
             "pyyaml>=6.0",
+            "jsonschema>=4.21",
         ],
         check=True,
     )
