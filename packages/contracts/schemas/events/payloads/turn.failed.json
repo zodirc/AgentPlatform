@@ -23,6 +23,11 @@
       ]
     },
     "message": { "type": "string", "maxLength": 1024 },
+    "error_kind": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "壳可直接展示的错误类别，如 auth、network、budget。termination_reason 仍用既有枚举。"
+    },
     "post_turn_jobs": {
       "type": "array",
       "items": { "type": "string", "minLength": 1, "maxLength": 128 },

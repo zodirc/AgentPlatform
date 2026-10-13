@@ -1,0 +1,31 @@
+{
+  "name": "cancel",
+  "events": [
+    {
+      "sequence": 1,
+      "type": "turn.accepted",
+      "payload": {
+        "scenario_id": "writing",
+        "user_input_preview": "请看一下大纲",
+        "model_name": "recorded"
+      }
+    },
+    {
+      "sequence": 2,
+      "type": "turn.cancelled",
+      "payload": {
+        "reason": "user_requested",
+        "cancelled_at_phase": "step_boundary"
+      }
+    }
+  ],
+  "view": {
+    "status": "cancelled",
+    "opening_ponds": null,
+    "plan": null,
+    "patch_candidates": [],
+    "pinned_cards": null,
+    "usage": null,
+    "last_event_sequence": 2
+  }
+}

@@ -113,6 +113,32 @@
         "output_tokens": { "type": "integer", "minimum": 0 },
         "source": { "type": "string", "enum": ["provider", "estimated", "mixed"] }
       }
+    },
+    "opening_ponds": {
+      "type": ["object", "null"],
+      "description": "最近一次 opening.ponds 载荷"
+    },
+    "plan": {
+      "type": ["object", "null"],
+      "description": "最近一次 turn.plan 载荷"
+    },
+    "patch_candidates": {
+      "type": "array",
+      "description": "尚未决定的 patch.proposed",
+      "items": { "type": "object" }
+    },
+    "pinned_cards": {
+      "type": ["object", "null"],
+      "description": "最近一次 cards.pinned 载荷"
+    },
+    "usage": {
+      "type": ["object", "null"],
+      "description": "从 step.completed 或 usage.reported 折出的累计用量",
+      "additionalProperties": false,
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 }
+      }
     }
   }
 }

@@ -547,6 +547,23 @@ components:
           description: >
             Optional Plan-mode phase (docs/25). planning = hard read-only tool
             gate; executing = full tools after user consent. Omit for normal turns.
+        intent:
+          type: object
+          additionalProperties: false
+          description: Structured pick. When set, message is only an optional note.
+          required: [kind]
+          properties:
+            kind:
+              type: string
+              enum: [select_pond, more_ponds, confirm_plan, accept_patch, reject_patch]
+            ponds_id:
+              type: string
+            item_id:
+              type: string
+            plan_id:
+              type: string
+            patch_id:
+              type: string
     TurnResponse:
       type: object
       required: [id, session_id, scenario_id, status, created_at]

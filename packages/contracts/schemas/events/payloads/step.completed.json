@@ -31,6 +31,17 @@
       "type": "integer",
       "minimum": 0
     },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "累计 token。本地接头在断点落盘后附上。",
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 },
+        "cache_read_input_tokens": { "type": "integer", "minimum": 0 },
+        "cache_creation_input_tokens": { "type": "integer", "minimum": 0 }
+      }
+    },
     "subagent_id": {
       "type": "string",
       "minLength": 1,

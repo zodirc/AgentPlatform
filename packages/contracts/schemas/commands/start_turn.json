@@ -83,6 +83,22 @@
       "type": "string",
       "enum": ["ask", "auto_edit", "full_auto"],
       "default": "ask"
+    },
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "结构化点选。与 message 同时出现时，message 只作附言。",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["select_pond", "more_ponds", "confirm_plan", "accept_patch", "reject_patch"]
+        },
+        "ponds_id": { "type": "string", "maxLength": 128 },
+        "item_id": { "type": "string", "maxLength": 128 },
+        "plan_id": { "type": "string", "maxLength": 128 },
+        "patch_id": { "type": "string", "maxLength": 128 }
+      }
     }
   }
 }

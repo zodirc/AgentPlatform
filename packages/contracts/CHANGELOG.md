@@ -3,6 +3,13 @@
 版本规则见 [README.md](README.md) §版本化。每次改动 `schemas/`、`openapi/`、
 `python/agent_contracts` 时,在此追加一条并按规则调整版本号。
 
+## 0.3.23 — 2026-10-13
+
+- `step.completed` 增加可选 `usage`（累计 token）。本地接头在断点落盘后附上。向后兼容。
+- `turn.failed` 增加可选 `error_kind`。`termination_reason` 枚举不变。向后兼容。
+- `commands/start_turn.json` 增加可选 `intent`（开篇、Plan、修订点选）。向后兼容。
+- `projections/turn_view.json` 增加可选写作字段：`opening_ponds`、`plan`、`patch_candidates`、`pinned_cards`、`usage`。向后兼容。
+
 ## 0.3.22 — 2026-09-22
 
 - `turn.completed.termination_reason` 增补 `outline_awaiting_direction`（长篇大纲写完后停转，等用户说写第一章或改纲）。向后兼容。

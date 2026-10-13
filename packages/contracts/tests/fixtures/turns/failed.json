@@ -1,0 +1,107 @@
+{
+  "name": "failed",
+  "events": [
+    {
+      "sequence": 1,
+      "type": "turn.accepted",
+      "payload": {
+        "scenario_id": "writing",
+        "user_input_preview": "请看一下大纲",
+        "model_name": "recorded"
+      }
+    },
+    {
+      "sequence": 2,
+      "type": "step.started",
+      "payload": {
+        "step_index": 0,
+        "label": "step-0"
+      }
+    },
+    {
+      "sequence": 3,
+      "type": "context.reported",
+      "payload": {
+        "step_index": 0,
+        "tokens_before": 7512,
+        "tokens_after": 7556,
+        "token_budget": 8000,
+        "system_tokens": 1247,
+        "tools_tokens": 5622,
+        "messages_tokens": 687,
+        "project_tokens": 0,
+        "runtime_tokens": 22,
+        "volatile_tokens": 501,
+        "reserve_tokens": 8744,
+        "fill_ratio": 1.2336,
+        "assemble_ms": 6.919215011294,
+        "breakdown": {
+          "system": 1247,
+          "tools": 5622,
+          "session": 0,
+          "user": 0,
+          "assistant": 0,
+          "tool_results": 0,
+          "compaction": 70,
+          "project": 0,
+          "runtime": 41,
+          "volatile": 570
+        },
+        "source": "estimated",
+        "strategies": [
+          "compact"
+        ],
+        "budget_truncated_n": 0,
+        "budget_truncated_by_tool": {},
+        "estimated_tokens": 7512,
+        "pointerized_n": 0,
+        "tool_result_tokens": 0
+      }
+    },
+    {
+      "sequence": 4,
+      "type": "turn.thinking",
+      "payload": {
+        "step_index": 0,
+        "label": "step-0"
+      }
+    },
+    {
+      "sequence": 5,
+      "type": "step.completed",
+      "payload": {
+        "step_index": 0,
+        "label": "step-0",
+        "outcome": "failed",
+        "duration_ms": 1518,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        }
+      }
+    },
+    {
+      "sequence": 6,
+      "type": "turn.failed",
+      "payload": {
+        "termination_reason": "model_timeout",
+        "message": "无法连接模型服务，请检查网络和地址。",
+        "error_kind": "network"
+      }
+    }
+  ],
+  "view": {
+    "status": "failed",
+    "opening_ponds": null,
+    "plan": null,
+    "patch_candidates": [],
+    "pinned_cards": null,
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    "last_event_sequence": 6
+  }
+}

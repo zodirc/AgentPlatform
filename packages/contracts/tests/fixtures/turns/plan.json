@@ -1,0 +1,184 @@
+{
+  "name": "plan",
+  "events": [
+    {
+      "sequence": 1,
+      "type": "turn.accepted",
+      "payload": {
+        "scenario_id": "writing",
+        "user_input_preview": "先列一个计划",
+        "model_name": "recorded",
+        "plan_phase": "planning"
+      }
+    },
+    {
+      "sequence": 2,
+      "type": "step.started",
+      "payload": {
+        "step_index": 0,
+        "label": "step-0"
+      }
+    },
+    {
+      "sequence": 3,
+      "type": "context.reported",
+      "payload": {
+        "step_index": 0,
+        "tokens_before": 2272,
+        "tokens_after": 2272,
+        "token_budget": 8000,
+        "system_tokens": 1247,
+        "tools_tokens": 239,
+        "messages_tokens": 786,
+        "project_tokens": 0,
+        "runtime_tokens": 22,
+        "volatile_tokens": 641,
+        "reserve_tokens": 3361,
+        "fill_ratio": 0.3709,
+        "assemble_ms": 3.578969990485348,
+        "breakdown": {
+          "system": 1247,
+          "tools": 239,
+          "session": 0,
+          "user": 26,
+          "assistant": 0,
+          "tool_results": 0,
+          "compaction": 0,
+          "project": 0,
+          "runtime": 41,
+          "volatile": 713
+        },
+        "source": "estimated",
+        "strategies": [],
+        "budget_truncated_n": 0,
+        "budget_truncated_by_tool": {},
+        "estimated_tokens": 2272,
+        "pointerized_n": 0,
+        "tool_result_tokens": 0
+      }
+    },
+    {
+      "sequence": 4,
+      "type": "turn.thinking",
+      "payload": {
+        "step_index": 0,
+        "label": "step-0"
+      }
+    },
+    {
+      "sequence": 5,
+      "type": "usage.reported",
+      "payload": {
+        "step_index": 0,
+        "input_tokens": 2272,
+        "output_tokens": 8,
+        "step_input_tokens": 2272,
+        "step_output_tokens": 8,
+        "source": "estimated",
+        "retry_count": 0,
+        "estimated_tokens": 2272,
+        "model_queue_wait_s": 0.0
+      }
+    },
+    {
+      "sequence": 6,
+      "type": "tool.started",
+      "payload": {
+        "tool_call_id": "call_b9ba3027",
+        "tool_name": "update_plan",
+        "arguments": {
+          "items": [
+            {
+              "id": "1",
+              "title": "写开篇",
+              "status": "pending"
+            }
+          ],
+          "summary": "先列计划"
+        }
+      }
+    },
+    {
+      "sequence": 7,
+      "type": "turn.plan",
+      "payload": {
+        "plan_id": "plan-c73e8d41",
+        "items": [
+          {
+            "id": "1",
+            "title": "写开篇",
+            "status": "pending"
+          }
+        ],
+        "summary": "先列计划",
+        "plan_phase": "planning",
+        "awaiting_consent": true
+      }
+    },
+    {
+      "sequence": 8,
+      "type": "tool.completed",
+      "payload": {
+        "tool_call_id": "call_b9ba3027",
+        "tool_name": "update_plan",
+        "status": "ok",
+        "summary": "先列计划"
+      }
+    },
+    {
+      "sequence": 9,
+      "type": "step.completed",
+      "payload": {
+        "step_index": 0,
+        "label": "step-0",
+        "outcome": "completed",
+        "duration_ms": 156,
+        "usage": {
+          "input_tokens": 2272,
+          "output_tokens": 8,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        }
+      }
+    },
+    {
+      "sequence": 10,
+      "type": "turn.completed",
+      "payload": {
+        "summary": "先列计划",
+        "termination_reason": "plan_awaiting_consent",
+        "step_count": 1,
+        "delivery_status": "ok",
+        "token_usage": {
+          "input_tokens": 2272,
+          "output_tokens": 8
+        },
+        "post_turn_jobs": []
+      }
+    }
+  ],
+  "view": {
+    "status": "completed",
+    "opening_ponds": null,
+    "plan": {
+      "plan_id": "plan-c73e8d41",
+      "items": [
+        {
+          "id": "1",
+          "title": "写开篇",
+          "status": "pending"
+        }
+      ],
+      "summary": "先列计划",
+      "plan_phase": "planning",
+      "awaiting_consent": true
+    },
+    "patch_candidates": [],
+    "pinned_cards": null,
+    "usage": {
+      "input_tokens": 2272,
+      "output_tokens": 8
+    },
+    "last_event_sequence": 10
+  }
+}

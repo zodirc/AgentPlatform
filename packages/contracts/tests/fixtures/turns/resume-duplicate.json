@@ -1,0 +1,144 @@
+{
+  "name": "resume-duplicate",
+  "events": [
+    {
+      "sequence": 1,
+      "type": "turn.accepted",
+      "payload": {
+        "scenario_id": "writing",
+        "user_input_preview": "请看一下大纲",
+        "model_name": "recorded"
+      }
+    },
+    {
+      "sequence": 1,
+      "type": "turn.accepted",
+      "payload": {
+        "scenario_id": "writing",
+        "user_input_preview": "请看一下大纲",
+        "model_name": "recorded"
+      }
+    },
+    {
+      "sequence": 2,
+      "type": "step.started",
+      "payload": {
+        "step_index": 0,
+        "label": "step-0"
+      }
+    },
+    {
+      "sequence": 3,
+      "type": "context.reported",
+      "payload": {
+        "step_index": 0,
+        "tokens_before": 7512,
+        "tokens_after": 7556,
+        "token_budget": 8000,
+        "system_tokens": 1247,
+        "tools_tokens": 5622,
+        "messages_tokens": 687,
+        "project_tokens": 0,
+        "runtime_tokens": 22,
+        "volatile_tokens": 501,
+        "reserve_tokens": 8744,
+        "fill_ratio": 1.2336,
+        "assemble_ms": 9.002588005387224,
+        "breakdown": {
+          "system": 1247,
+          "tools": 5622,
+          "session": 0,
+          "user": 0,
+          "assistant": 0,
+          "tool_results": 0,
+          "compaction": 70,
+          "project": 0,
+          "runtime": 41,
+          "volatile": 570
+        },
+        "source": "estimated",
+        "strategies": [
+          "compact"
+        ],
+        "budget_truncated_n": 0,
+        "budget_truncated_by_tool": {},
+        "estimated_tokens": 7512,
+        "pointerized_n": 0,
+        "tool_result_tokens": 0
+      }
+    },
+    {
+      "sequence": 4,
+      "type": "turn.thinking",
+      "payload": {
+        "step_index": 0,
+        "label": "step-0"
+      }
+    },
+    {
+      "sequence": 5,
+      "type": "turn.token",
+      "payload": {
+        "delta": "第一章写完了"
+      }
+    },
+    {
+      "sequence": 6,
+      "type": "usage.reported",
+      "payload": {
+        "step_index": 0,
+        "input_tokens": 7556,
+        "output_tokens": 1,
+        "step_input_tokens": 7556,
+        "step_output_tokens": 1,
+        "source": "estimated",
+        "retry_count": 0,
+        "estimated_tokens": 7512,
+        "model_queue_wait_s": 0.0
+      }
+    },
+    {
+      "sequence": 7,
+      "type": "step.completed",
+      "payload": {
+        "step_index": 0,
+        "label": "step-0",
+        "outcome": "completed",
+        "duration_ms": 23,
+        "usage": {
+          "input_tokens": 7556,
+          "output_tokens": 1,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        }
+      }
+    },
+    {
+      "sequence": 8,
+      "type": "turn.completed",
+      "payload": {
+        "summary": "第一章写完了",
+        "termination_reason": "max_steps",
+        "step_count": 1,
+        "delivery_status": "ok",
+        "token_usage": {
+          "input_tokens": 7556,
+          "output_tokens": 1
+        },
+        "post_turn_jobs": []
+      }
+    }
+  ],
+  "view": {
+    "status": "completed",
+    "opening_ponds": null,
+    "plan": null,
+    "patch_candidates": [],
+    "pinned_cards": null,
+    "usage": {
+      "input_tokens": 7556,
+      "output_tokens": 1
+    },
+    "last_event_sequence": 8
+  }
+}
