@@ -322,23 +322,27 @@ handler 返回之后、追加进 `messages` 之前：
 - 被隔离的原始正文不进 `turn_events`，单独存隔离区：加密、限期删除、访问需要权限并留痕。审计库不应该变成恶意载荷和泄露数据的集中仓库。
 - 界面上的审批卡只是 `approval.requested` 的投影。
 
-## 现状与差距
+## 现状
 
-以下是按当前代码核对的结果，落地顺序据此排列。
+写这份模型时，下面左列是当时代码上的口子。后续运行时提交已经把它们接进现有循环。右列是现在的行为。
 
-| 问题 | 位置 | 风险 |
-|---|---|---|
-| 命令允许名单是字符串前缀匹配，`pytest && curl …` 能匹配 `pytest` | `packages/contracts/python/agent_contracts/command_allowlist.py` `command_matches_prefix` | 名单内命令可续接任意命令且免审 |
-| 一次写审批后整个 Turn 的写操作都免审 | `services/runtime/app/controller/turn_controller.py`（`state.writes_preapproved = True`） | 一次批准变成整 Turn 放行 |
-| `force_approval` 布尔值直接跳过审批门 | `services/runtime/app/context/engine.py` `ToolExecutor.run` | 恢复路径不核对批准的是不是这次调用 |
-| 子代理工具强制 `requires_approval=False` | `services/runtime/app/tools/delegate_runner.py` `_resolve_sub_tools` | 经子代理绕过所有审批 |
-| `remember` 的 `trust` 由模型参数给出，默认 `user`，只拦字面值 `retrieved` | `services/runtime/app/tools/core/memory.py`、`app/policy/inject.py` | 模型不传该参数即可把检索内容写进记忆 |
-| 来源标签只给 `search_sources` 结果打，且写在结果正文里给模型看，没有执行效力 | `app/policy/inject.py` `inject_tool_result` | 污点没有被任何门槛使用 |
-| 沙箱探测失败自动降为 `off`，经 `/bin/sh -c` 裸执行并保留宿主网络；强制指定后端不可用时也降为 `off` | `app/tools/core/sandbox.py` `resolve_sandbox_backend`、`app/tools/core/shell.py` | 沙箱失效时静默放开 |
-| Landlock 后端对整个 `/` 授予读与执行，且不限网络 | `app/tools/core/landlock_fs.py` `apply_landlock_fs` | 能读其它 Work、`/app` 配置，并能外发 |
-| bwrap 后端 bind 宿主 `/proc`、不建新 pid 命名空间，日常 Turn 默认有网络 | `app/tools/core/sandbox.py` `build_bwrap_argv` | 同 uid 下可读 runtime 进程的 `/proc/<pid>/environ`，环境变量里的凭据可被读取后外发 |
-| 日常 Turn 默认保留宿主网络，只有评测档关网 | `app/settings.py` `ops_eval_deny_network`、`app/tenant_context.py` `sandbox_network_allowed` | 致命三角的「送出去」这条腿常开 |
-| 评测档通过 `ops_eval` 直接跳过审批 | `ToolExecutor.run` | 应改为独立策略档，而不是执行器里的特判 |
+| 当时的口子 | 现在 |
+|---|---|
+| 命令名单按字符串前缀，`pytest && curl …` 能匹配 `pytest` | `command_allowlist.py` 的 `command_argv` 用 `shlex` 拆成一条简单 argv。token 含 shell 元字符或命令含换行时，匹配失败，按名单外处理 |
+| 一次写批准后，整个 Turn 的写都免审 | `gate.py` 里矩阵路径的写盘免审要 `s1_granted_this_turn` 与 `shadow_snapshot_id` 同时在。`writes_preapproved` 不承担这条粘性。没有 sink 的旧规格走 `_legacy`，不因它放行下一次写 |
+| `force_approval` 布尔值跳过审批门 | 恢复执行时 `approval.py` 核对 `args_hash`（规范化参数的 sha256）和 `policy_version`。对不上就重新请求审批 |
+| 子代理工具强制 `requires_approval=False` | `delegate_runner.py`：允许名单内的 S2 在子层执行。其余要审批的调用带 `origin: child/<id>` 冒泡到父 Turn，批准后 `child_join` 恢复该子 Run |
+| `remember` 的 `trust` 由模型参数给出 | `memory.py` 丢掉入参 `trust`。入库等级来自窗口污点 |
+| 来源标签只写在检索结果正文里 | `matrix.py` 的 `TOOL_CLASS` 声明每个工具的 `sink_class` 和结果来源。`taint.py` 把窗口等级记在消息的 `_taint` 上，不发给模型。执行器按这个等级查矩阵 |
+| 沙箱探测失败降为 `off`，裸进程保留宿主网络 | `resolve_sandbox_backend` 在沙箱不可用且没有 `ALLOW_UNSANDBOXED_EXEC` 时拒绝执行。该开关只供开发和单测 |
+| Landlock 对整个 `/` 授予读与执行，且不限网络 | `LANDLOCK_READ_ROOTS` 只有 `/usr`、`/bin`、`/sbin`、`/lib`、`/lib64`、`/lib32`、`/etc`、`/opt`、`/proc`。`/` 不在名单里。ABI ≥ 4 时 TCP 默认全拒，只放行 `127.0.0.1:3128` |
+| bwrap 绑定宿主 `/proc`，不建新 pid 命名空间，日常 Turn 默认有网络 | `build_bwrap_argv` 使用 `--unshare-all`、`--die-with-parent`、`--new-session`、`--cap-drop ALL`，并在新 pid 命名空间里 `--proc /proc`。产品命令保持 `--unshare-net`；`sandbox_relax` 批准之后才 `--share-net` |
+| 只有评测档关网 | 产品命令默认 `--unshare-net`。注册表与 GitHub 的 80/443 只读访问经沙箱内 `127.0.0.1:3128` 的代理。其它主机记 `egress_denied`，须带 `egress_hosts` 再批。`egress.py` 对解析后的地址再查一次，内网与 `169.254.169.254` 拒绝 |
+| 评测档在执行器里跳过审批 | `ops_eval` 不预批准写盘或 exec。它收紧命令集并断网。`http_fetch` 在未批准时直接调用会被拒绝，不发出请求 |
+
+检测面默认 `detector_injection_mode=observe`。未配置 `detector_url` 时，`detector.py` 只把正文里的字面量 `[[HIGH_CONFIDENCE_INJECT]]` 当成高置信注入，没有分类器。观察模式记录信号，不改矩阵结论。`deployment_tier=saas` 且 `sandbox_isolation` 仍是 bwrap 时，`plane.py` 的 `execution_refusal` 拒绝执行；gVisor / Kata / Firecracker 不在本仓库的默认运行时里。
+
+Web 渲染的 CSP 在 `services/web/vite.config.ts`：`img-src` 为 `'self' data: blob:`，`connect-src` 为 `'self' ws: wss:`。模型输出里的外部图片不会由页面自动加载。
 
 ## 落地顺序
 
