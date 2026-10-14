@@ -434,11 +434,14 @@ async def test_draft_section_need_outline_when_long_no_jobs(workspace: Path) -> 
         "## 这本书\n\n《废脉剑声》。边荒少年。\n",
         encoding="utf-8",
     )
+    chosen = workspace / ".agent" / "work" / "committed_pond.json"
+    chosen.parent.mkdir(parents=True, exist_ok=True)
+    chosen.write_text('{"id": "p", "title": "废脉剑声"}\n', encoding="utf-8")
     result = await core.draft_section(
         "ch1",
         "镇上的钟表铺开在河埠头，门脸窄，里面却深。" * 20,
         turn_id=uuid4(),
-        turn_user_text="采用此开篇「废脉剑声」",
+        turn_user_text="就用这个开篇：废脉剑声",
     )
     assert result["status"] == "error"
     assert result["error"] == "need_outline"
@@ -483,10 +486,11 @@ async def test_update_outline_awaiting_direction_without_write_intent(
 ) -> None:
     job = "井底试药，把简介里这场写完，不要另起一场。"
     md = f"## 这本书\n《废脉剑声》。\n\n## 第一章\n{job}\n"
-    waiting = await core.update_outline(md, turn_user_text="采用此开篇「废脉剑声」")
+    chosen = workspace / ".agent" / "work" / "committed_pond.json"
+    chosen.parent.mkdir(parents=True, exist_ok=True)
+    chosen.write_text('{"id": "p", "title": "废脉剑声"}\n', encoding="utf-8")
+    waiting = await core.update_outline(md, turn_user_text="就用这个开篇：废脉剑声")
     assert waiting.get("awaiting_direction") is True
     assert "纲已写入" in str(waiting.get("summary") or "")
-    going = await core.update_outline(
-        md, turn_user_text="采用此开篇「废脉剑声」。写第一章", force=True
-    )
+    going = await core.update_outline(md, turn_user_text="写第一章", force=True)
     assert going.get("awaiting_direction") is not True

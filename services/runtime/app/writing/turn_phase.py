@@ -11,10 +11,6 @@ from app.writing.text_metrics import looks_like_chapter_draft, visible_chars
 
 ContinueKind = Literal["", "new_chapter", "append_this"]
 
-_PICK_TOKEN = re.compile(
-    r"(?:按开篇候选|采用此开篇|按此开篇)[「『][^」』]+[」』]"
-)
-_COMMIT_POND_RE = re.compile(r"按开篇候选|采用此开篇|按此开篇")
 _ALREADY_NAMED_RE = re.compile(
     r"名叫|叫[\u4e00-\u9fff]{1,8}|像.{1,10}写|风格.{0,4}是|"
     r"凡人流|系统流|克系|灵异|探案"
@@ -138,7 +134,7 @@ def write_intent(
     has_chapter_jobs_flag: bool = False,
     has_manuscript_flag: bool = False,
 ) -> bool:
-    text = _PICK_TOKEN.sub("", message or "").strip()
+    text = (message or "").strip()
     if not text:
         return False
     if looks_like_chapter_draft(text) or _WRITE_GO_RE.search(text):
@@ -179,9 +175,7 @@ def resolve_scope(
     from app.writing.book_scope import resolve_book_scope
     from app.writing.opening_ponds import load_committed_pond
 
-    if _COMMIT_POND_RE.search(message or "") or load_committed_pond(
-        workspace_root=workspace_root
-    ):
+    if load_committed_pond(workspace_root=workspace_root):
         from app.writing.book_scope import explicit_book_scope
 
         named = explicit_book_scope(message)
@@ -205,8 +199,6 @@ def picking(
     text = (message or "").strip()
     if wants_more_ponds(text):
         return True
-    if _COMMIT_POND_RE.search(text):
-        return False
     if load_committed_pond(workspace_root=workspace_root):
         return False
     if _ALREADY_NAMED_RE.search(text):

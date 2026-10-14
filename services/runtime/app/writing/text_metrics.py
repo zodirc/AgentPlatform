@@ -53,7 +53,6 @@ _SHORT_PROSE_ASK = re.compile(
 
 _CHAPTER_DRAFT_ASK = re.compile(
     r"成篇|一篇|一章|本章|这一章|扩写|续写|"
-    r"采用此开篇|按此开篇|按开篇候选|"
     r"写第|[第][一二三四五六七八九十百千零〇两\d]+章"
 )
 

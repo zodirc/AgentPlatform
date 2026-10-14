@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   MORE_PONDS_MESSAGE,
-  formatSelectPondMessage,
   isOpeningChoiceMessage,
   latestOpeningPondsFromArtifacts,
   latestOpeningPondsFromEvents,
@@ -103,13 +102,6 @@ describe("openingPonds", () => {
     ).toBe("早高峰系统 ｜ 窗口");
   });
 
-  it("formats a select message as a short choice, not the card", () => {
-    const msg = formatSelectPondMessage(sample.items[0]);
-    expect(msg).toBe("采用此开篇「早高峰系统」");
-    expect(msg).not.toContain("跟着谁");
-    expect(msg).not.toContain("开篇：");
-  });
-
   it("drops a leaked thinking title when the projected summary is the deliverable", () => {
     expect(
       preferSettledOutput(
@@ -128,24 +120,13 @@ describe("openingPonds", () => {
     expect(MORE_PONDS_MESSAGE).not.toContain("这几个都不合适");
   });
 
-  it("treats pond checks as hidden chat tokens", () => {
-    expect(openingChoiceFromUserInput("采用此开篇「早高峰系统」")).toEqual({
-      kind: "commit",
-      title: "早高峰系统",
-    });
-    expect(
-      openingChoiceFromUserInput("按开篇候选「早高峰系统」写第一章。"),
-    ).toEqual({ kind: "commit", title: "早高峰系统" });
+  it("hides only the more-ponds phrase, not a select sentence", () => {
+    expect(openingChoiceFromUserInput("采用此开篇「早高峰系统」")).toBeNull();
+    expect(openingChoiceFromUserInput("按开篇候选「早高峰系统」写第一章。")).toBeNull();
     expect(openingChoiceFromUserInput("我要其他的")).toEqual({ kind: "more" });
-    expect(
-      openingChoiceFromUserInput("这几个都不合适。再给 2～3 个开篇候选。"),
-    ).toEqual({ kind: "more" });
-    expect(openingChoiceFromUserInput("采用此开篇「《借来的灵根》」")).toEqual({
-      kind: "commit",
-      title: "《借来的灵根》",
-    });
+    expect(openingChoiceFromUserInput("这几个都不合适。再给一组。")).toBeNull();
     expect(turnHidesUserInput({ user_input: "采用此开篇「《借来的灵根》」" })).toBe(
-      true,
+      false,
     );
     expect(
       turnHidesUserInput({ user_input: "写修真", hideUserInput: true }),
@@ -153,11 +134,7 @@ describe("openingPonds", () => {
     expect(isOpeningChoiceMessage("写一章长篇修真，我看看")).toBe(false);
     expect(pondItemSelected(sample.items[0], "早高峰系统")).toBe(true);
     expect(
-      visibleChatUserInputs([
-        "写修真",
-        "采用此开篇「早高峰系统」",
-        "我要其他的",
-      ]),
-    ).toEqual(["写修真"]);
+      visibleChatUserInputs(["写修真", "就用这个开篇：早高峰系统", "我要其他的"]),
+    ).toEqual(["写修真", "就用这个开篇：早高峰系统"]);
   });
 });

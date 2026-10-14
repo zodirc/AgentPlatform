@@ -63,11 +63,11 @@ def test_draft_length_fields_short_vs_met() -> None:
 def test_default_chapter_quota_for_chengpian() -> None:
     assert looks_like_chapter_draft("成篇，写第三章") is True
     assert looks_like_chapter_draft("写一篇短篇") is True
-    assert looks_like_chapter_draft("采用此开篇「早高峰系统」") is True
+    assert looks_like_chapter_draft("就用这个开篇：早高峰系统") is False
     assert looks_like_chapter_draft("把这句对白改短一点") is False
     assert wants_short_prose("把这句对白改短一点") is True
     assert resolve_draft_quota("成篇") == DEFAULT_CHAPTER_MIN
-    assert resolve_draft_quota("采用此开篇「早高峰系统」") == DEFAULT_CHAPTER_MIN
+    assert resolve_draft_quota("就用这个开篇：早高峰系统") is None
     assert resolve_draft_quota("写 300 字成篇") == 300
     from app.writing.turn_phase import NEAR_JOB_MIN
 

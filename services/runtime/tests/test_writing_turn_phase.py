@@ -32,8 +32,8 @@ def test_scope_一部_and_一篇_and_browse() -> None:
 
 
 def test_pick_token_is_not_write_intent() -> None:
-    assert write_intent("采用此开篇「废脉剑声」") is False
-    assert write_intent("采用此开篇「废脉剑声」。写第一章") is True
+    assert write_intent("就用这个开篇：废脉剑声") is False
+    assert write_intent("写第一章") is True
     assert write_intent("好", has_chapter_jobs_flag=True, has_manuscript_flag=False) is True
     assert write_intent("好", has_chapter_jobs_flag=False, has_manuscript_flag=False) is False
 
@@ -48,6 +48,12 @@ def test_seeded_book_is_not_chapter_jobs() -> None:
     assert has_chapter_jobs(jobs) is True
 
 
+def _mark_chosen(root: Path) -> None:
+    path = root / ".agent" / "work" / "committed_pond.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"id": "p", "title": "废脉剑声"}\n', encoding="utf-8")
+
+
 def test_outline_wait_on_pick_without_jobs(tmp_path: Path, monkeypatch) -> None:
     from app.settings import settings
 
@@ -56,19 +62,20 @@ def test_outline_wait_on_pick_without_jobs(tmp_path: Path, monkeypatch) -> None:
         "## 这本书\n\n《废脉剑声》。边荒少年。\n",
         encoding="utf-8",
     )
-    snap = snapshot("采用此开篇「废脉剑声」", workspace_root=tmp_path)
+    _mark_chosen(tmp_path)
+    snap = snapshot("就用这个开篇：废脉剑声", workspace_root=tmp_path)
     assert snap["picking"] is False
     assert snap["outline_wait"] is True
     assert snap["write_intent"] is False
-    assert should_gate_outline_wait("采用此开篇「废脉剑声」", workspace_root=tmp_path) is True
+    assert should_gate_outline_wait("就用这个开篇：废脉剑声", workspace_root=tmp_path) is True
     phase = resolve_outline_phase(
-        "采用此开篇「废脉剑声」",
+        "就用这个开篇：废脉剑声",
         outline=(tmp_path / "outline.md").read_text(encoding="utf-8"),
         workspace_root=tmp_path,
     )
     assert phase["outline_phase"] == "open"
     assert phase["outline_phase"] != "continue"
-    err = draft_need_outline_error("采用此开篇「废脉剑声」", workspace_root=tmp_path)
+    err = draft_need_outline_error("就用这个开篇：废脉剑声", workspace_root=tmp_path)
     assert err and err["error"] == "need_outline"
 
 
@@ -79,18 +86,12 @@ def test_same_turn_write_intent_still_need_outline(tmp_path: Path, monkeypatch) 
     (tmp_path / "outline.md").write_text(
         "## 这本书\n\n《废脉剑声》。\n", encoding="utf-8"
     )
-    snap = snapshot("采用此开篇「废脉剑声」。写第一章", workspace_root=tmp_path)
+    _mark_chosen(tmp_path)
+    snap = snapshot("写第一章", workspace_root=tmp_path)
     assert snap["write_intent"] is True
     assert snap["outline_wait"] is True
-    assert (
-        should_gate_outline_wait(
-            "采用此开篇「废脉剑声」。写第一章", workspace_root=tmp_path
-        )
-        is False
-    )
-    err = draft_need_outline_error(
-        "采用此开篇「废脉剑声」。写第一章", workspace_root=tmp_path
-    )
+    assert should_gate_outline_wait("写第一章", workspace_root=tmp_path) is False
+    err = draft_need_outline_error("写第一章", workspace_root=tmp_path)
     assert err and err["error"] == "need_outline"
     jobs = (
         "## 这本书\n\n《废脉剑声》。\n\n"
@@ -98,7 +99,7 @@ def test_same_turn_write_intent_still_need_outline(tmp_path: Path, monkeypatch) 
     )
     assert (
         should_await_outline_direction(
-            "采用此开篇「废脉剑声」。写第一章",
+            "写第一章",
             outline=jobs,
             workspace_root=tmp_path,
         )
@@ -106,7 +107,7 @@ def test_same_turn_write_intent_still_need_outline(tmp_path: Path, monkeypatch) 
     )
     assert (
         should_await_outline_direction(
-            "采用此开篇「废脉剑声」",
+            "就用这个开篇：废脉剑声",
             outline=jobs,
             workspace_root=tmp_path,
         )

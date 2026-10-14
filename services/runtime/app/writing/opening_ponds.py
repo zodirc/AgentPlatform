@@ -46,7 +46,12 @@ logger = logging.getLogger(__name__)
 
 
 def wants_more_ponds(message: str) -> bool:
-    """只有整句「我要其他的」才远离上一组书；「我看看」是新点选。"""
+    """换一组意图，或用户自己说整句「我要其他的」。「我看看」是新点选。"""
+    from app.writing.intents import turn_choice
+
+    choice = turn_choice()
+    if choice and choice.get("kind") == "more_ponds":
+        return True
     return (message or "").strip() == MORE_PONDS_MESSAGE
 
 
@@ -866,45 +871,13 @@ def clear_opening_ponds(*, workspace_root: Path | None = None) -> bool:
         return False
 
 
-_COMMIT_TITLE_RE = re.compile(
-    r"(?:按开篇候选|采用此开篇|按此开篇)[「『](.+?)[」』]"
-)
-
-
-def format_select_pond_message(item: dict[str, str]) -> str:
-    """勾选后发给下一回合的令牌；聊天不画这条气泡。"""
-    title = (item.get("title") or item.get("id") or "").strip()
-    return f"采用此开篇「{title}」"
-
-
-def committed_pond_title(message: str) -> str | None:
-    text = (message or "").strip()
-    if not text:
-        return None
-    match = _COMMIT_TITLE_RE.search(text)
-    title = (match.group(1) if match else "").strip()
-    return title or None
-
-
 def find_committed_pond(
     *,
-    message: str,
+    message: str = "",
     workspace_root: Path | None,
 ) -> dict[str, str] | None:
-    title = committed_pond_title(message)
-    if title:
-        data = load_opening_ponds(workspace_root=workspace_root)
-        if data:
-            for item in data["items"]:
-                title_key = (item.get("title") or "").strip()
-                id_key = (item.get("id") or "").strip()
-                if title == title_key or title == id_key or title == (title_key or id_key):
-                    save_committed_pond(item, workspace_root=workspace_root)
-                    return item
-        saved = load_committed_pond(workspace_root=workspace_root)
-        if saved and (saved.get("title") or saved.get("id") or "").strip() == title:
-            return saved
-        return None
+    """已选作品只来自意图写入的 sidecar。消息正文不再携带点选令牌。"""
+    del message
     return load_committed_pond(workspace_root=workspace_root)
 
 
@@ -915,11 +888,9 @@ def release_unadopted_ponds(
 ) -> bool:
     """新会话还没点中书时，丢掉上一轮没采用的候选。
 
-    同一会话里的「我要其他的」不走这里。点选令牌要留着当前卡片，才能对上书名。
-    已经有已选书时不动，新会话继续写这本书。
+    已经有已选书时不动。换一组由意图标记，不靠消息里的令牌。
     """
-    if committed_pond_title(message):
-        return False
+    del message
     root = _workspace(workspace_root)
     if load_committed_pond(workspace_root=root):
         return False

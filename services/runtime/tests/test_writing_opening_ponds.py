@@ -7,7 +7,6 @@ import pytest
 
 from app.writing.opening_ponds import (
     MORE_PONDS_MESSAGE,
-    format_select_pond_message,
     load_opening_ponds,
     normalize_pond_items,
     normalize_promise,
@@ -77,10 +76,7 @@ def test_wants_opening_candidates_browse_and_commit() -> None:
     assert wants_opening_candidates(MORE_PONDS_MESSAGE) is True
     assert MORE_PONDS_MESSAGE == "我要其他的"
     assert "start_kind" not in MORE_PONDS_MESSAGE
-    assert (
-        wants_opening_candidates("按开篇候选「早高峰系统」写第一章。") is False
-    )
-    assert wants_opening_candidates("采用此开篇「早高峰系统」") is False
+    assert wants_opening_candidates("写一篇故事") is False
 
 
 def test_normalize_pond_item_maps_pitch_to_opening() -> None:
@@ -189,9 +185,12 @@ def test_picking_prompt_omits_after_lock_craft(tmp_path, monkeypatch) -> None:
     )
     assert "得到了什么" not in blob
     assert SERIAL_AFTER_LOCK_CRAFT not in blob
+    chosen = tmp_path / ".agent" / "work" / "committed_pond.json"
+    chosen.parent.mkdir(parents=True, exist_ok=True)
+    chosen.write_text('{"id": "p", "title": "废脉剑声"}\n', encoding="utf-8")
     locked = prepare_writing_system_prompt(
         "You are a writing assistant.",
-        "采用此开篇「废脉剑声」。写都市修真第一章",
+        "写第一章",
         workspace_root=tmp_path,
     )
     locked_blob = "\n".join(
@@ -208,7 +207,7 @@ def test_should_gate_opening_choice_when_browsing() -> None:
         tool_names=["propose_book_candidates", "draft_section"],
     )
     assert not should_gate_opening_choice(
-        "采用此开篇「早高峰系统」",
+        "写一篇故事",
         outline="",
         tool_names=["propose_book_candidates", "draft_section"],
     )
@@ -414,8 +413,6 @@ def test_opening_ponds_edge_paths(workspace: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{", encoding="utf-8")
     assert load_opening_ponds(workspace_root=workspace) is None
-    msg = format_select_pond_message({"title": "A", "id": "p"})
-    assert msg == "采用此开篇「A」"
     row = pond_item_event_fields(
         {
             "title": "早高峰系统",
@@ -461,7 +458,6 @@ def test_clear_and_load_opening_ponds_browse_is_soft(workspace: Path) -> None:
 def test_new_session_drops_unadopted_ponds_keeps_chosen_book(workspace: Path) -> None:
     from app.writing.ledger import append_ledger, append_pond_fingerprint
     from app.writing.opening_ponds import (
-        format_select_pond_message,
         release_unadopted_ponds,
         save_committed_pond,
         save_opening_ponds,
@@ -487,9 +483,6 @@ def test_new_session_drops_unadopted_ponds_keeps_chosen_book(workspace: Path) ->
     rejected = workspace / ".agent" / "work" / "opening_ponds_rejected.jsonl"
     ledger = workspace / ".agent" / "work" / "ledger.jsonl"
 
-    assert release_unadopted_ponds("采用此开篇「深层回声」", workspace_root=workspace) is False
-    assert ponds.is_file()
-
     assert release_unadopted_ponds("写一篇散文", workspace_root=workspace) is True
     assert not ponds.is_file()
     assert not rejected.is_file()
@@ -501,7 +494,6 @@ def test_new_session_drops_unadopted_ponds_keeps_chosen_book(workspace: Path) ->
     save_committed_pond(items[0], workspace_root=workspace)
     assert release_unadopted_ponds("下一章", workspace_root=workspace) is False
     assert ponds.is_file()
-    assert format_select_pond_message(items[0]).startswith("采用此开篇")
 
 
 def test_seed_outline_from_pond_empty_wrap_and_prepend(
@@ -569,7 +561,6 @@ def test_seed_outline_from_pond_empty_wrap_and_prepend(
 def test_opening_ponds_fallback_and_bad_sidecar(workspace: Path, monkeypatch) -> None:
     from app.writing.opening_ponds import (
         _clip,
-        committed_pond_title,
         format_opening_ponds_block,
         load_committed_pond,
         opening_choice_block,
@@ -591,7 +582,6 @@ def test_opening_ponds_fallback_and_bad_sidecar(workspace: Path, monkeypatch) ->
     sidecar.write_text('{"flavor": "only"}\n', encoding="utf-8")
     assert load_committed_pond(workspace_root=workspace) is None
 
-    assert committed_pond_title("  ") is None
     assert _clip("abcdefghij", 4).endswith("…")
     assert format_opening_ponds_block(workspace_root=workspace, mode="nope") == ""
 
@@ -631,7 +621,7 @@ def test_committed_pond_block_omits_axis_labels(workspace: Path) -> None:
     from app.writing.cards import prepare_writing_system_prompt
     from app.writing.opening_ponds import (
         format_committed_pond_block,
-        format_select_pond_message,
+        save_committed_pond,
         save_opening_ponds,
     )
 
@@ -654,7 +644,8 @@ def test_committed_pond_block_omits_axis_labels(workspace: Path) -> None:
         ]
     )
     save_opening_ponds(items, summary="x", workspace_root=workspace)
-    msg = format_select_pond_message(items[0])
+    save_committed_pond(items[0], workspace_root=workspace)
+    msg = "就用这个开篇：这条街的人都很会过日子"
     block = format_committed_pond_block(message=msg, workspace_root=workspace)
     assert "## 已选作品" in block
     assert "不是正文" in block

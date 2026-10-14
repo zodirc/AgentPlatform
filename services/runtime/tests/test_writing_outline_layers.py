@@ -84,9 +84,12 @@ async def test_legacy_outline_still_reads_as_one_file(workspace: Path) -> None:
     from app.tools.core import writing_tools as core
 
     body = "## 这本书\n\n边荒少年要活下去。\n\n## 第1章 钟表铺\n\n" + ("他去铺子领粮。" * 8)
+    chosen = workspace / ".agent" / "work" / "committed_pond.json"
+    chosen.parent.mkdir(parents=True, exist_ok=True)
+    chosen.write_text('{"id": "p", "title": "钟表铺"}\n', encoding="utf-8")
     written = await core.update_outline(
         body,
-        turn_user_text="采用此开篇「钟表铺」",
+        turn_user_text="就用这个开篇：钟表铺",
     )
     assert written.get("status") != "error"
     assert written.get("awaiting_direction") is True
@@ -94,7 +97,7 @@ async def test_legacy_outline_still_reads_as_one_file(workspace: Path) -> None:
     assert outline_store.project_outline(workspace) == (workspace / "outline.md").read_text(
         encoding="utf-8"
     )
-    snap = snapshot("采用此开篇「钟表铺」", workspace_root=workspace)
+    snap = snapshot("就用这个开篇：钟表铺", workspace_root=workspace)
     assert snap["has_chapter_jobs"] is True
     assert snap["outline_ready_wait"] is True
 
@@ -107,6 +110,9 @@ async def test_documents_commit_is_atomic_and_visible(workspace: Path) -> None:
         "他今晚必须把柜台的账对上，因为铺子明天开不了门。"
         "他可以选择瞒下一笔，或把亏空摊给合伙人。"
     )
+    north = workspace / ".agent" / "work" / "committed_pond.json"
+    north.parent.mkdir(parents=True, exist_ok=True)
+    north.write_text('{"id": "p", "title": "北岸"}\n', encoding="utf-8")
     written = await core.update_outline(
         documents=[
             {
@@ -120,7 +126,7 @@ async def test_documents_commit_is_atomic_and_visible(workspace: Path) -> None:
             },
             {"scope": "chapter", "section_id": "ch1", "content": chapter},
         ],
-        turn_user_text="采用此开篇「北岸」",
+        turn_user_text="就用这个开篇：北岸",
     )
     assert written.get("status") != "error"
     assert written.get("awaiting_direction") is True
@@ -132,10 +138,10 @@ async def test_documents_commit_is_atomic_and_visible(workspace: Path) -> None:
     assert {"outline", "volume", "chapter"} <= kinds
     projected = outline_store.project_outline(workspace)
     assert has_chapter_jobs(projected) is True
-    assert snapshot("采用此开篇「北岸」", workspace_root=workspace)["outline_wait"] is False
+    assert snapshot("就用这个开篇：北岸", workspace_root=workspace)["outline_wait"] is False
     refused = await core.update_outline(
         documents=[{"scope": "aside", "content": "x"}],
-        turn_user_text="采用此开篇「北岸」",
+        turn_user_text="就用这个开篇：北岸",
     )
     assert refused["error"] == "bad_scope"
     assert (workspace / "chapters" / "ch-001.md").exists()

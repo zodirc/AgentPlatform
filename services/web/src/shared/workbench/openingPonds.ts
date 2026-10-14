@@ -181,36 +181,15 @@ export function latestOpeningPondsFromEvents(
   return found;
 }
 
-/**
- * Wire token for the next turn after a card check. Chat hides this bubble;
- * opening / arc / flavor live in the workspace sidecar.
- */
-export function formatSelectPondMessage(item: OpeningPondItem): string {
-  const title = (item.title || item.id || "").trim();
-  return `采用此开篇「${title}」`;
-}
+export type OpeningChoice = { kind: "more" };
 
-const COMMIT_POND_RE =
-  /(?:按开篇候选|采用此开篇|按此开篇)[「『](.+?)[」』]/;
-const COMMIT_POND_PREFIX_RE = /^(?:按开篇候选|采用此开篇|按此开篇)/;
-
-export type OpeningChoice =
-  | { kind: "commit"; title: string }
-  | { kind: "more" };
-
-/** 勾选/换一组是 UI 动作，不是用户输入。仅作下一回合的令牌。 */
+/** 用户自己说的换一组。点选走意图，不再从句子里拆书名。 */
 export function openingChoiceFromUserInput(
   text: string | null | undefined,
 ): OpeningChoice | null {
   const raw = (text || "").replace(/^\uFEFF/, "").trim();
-  if (!raw) return null;
-  if (raw === MORE_PONDS_MESSAGE || raw.startsWith("这几个都不合适")) {
-    return { kind: "more" };
-  }
-  if (!COMMIT_POND_PREFIX_RE.test(raw)) return null;
-  const match = COMMIT_POND_RE.exec(raw);
-  const title = match?.[1]?.trim();
-  return { kind: "commit", title: title || raw };
+  if (raw === MORE_PONDS_MESSAGE) return { kind: "more" };
+  return null;
 }
 
 export function isOpeningChoiceMessage(
