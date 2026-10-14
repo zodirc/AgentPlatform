@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |----|------|
-| 状态 | SDK 与两只接头已落地（A1–A10）。A11–A17 是单机壳开工的前提，全部合入后协议 1.0 冻结 |
+| 状态 | A1–A17 已合入，协议 1.0 已冻结。点选只认意图里的 id，不再生成或解析魔法句子 |
 | 定位 | 共用写作 SDK，加上给单机壳用的本地接头。Web 走服务器接头，不走本协议，但与本协议共用契约事件、意图与夹具 |
 | 所在仓库 | 本仓库，`services/runtime`；契约在 `packages/contracts` |
 | 壳 | 命令行已接本地接头。Android 壳与两端共用的客户端分层见 `docs/android-writing-client.md`。Web 壳在 `services/web`，经 `services/api` |
@@ -100,7 +100,7 @@ A1–A10 之后，对壳仍然可见的耦合如下，由 A11–A17 处理：
 | A10 | **内核包构建**。CI 按导入图选取模块，打出带清单与签名的内核包（第 8 节） | 包可在 A8 的环境中被加载运行 |
 | A11 | **契约事件与信封**。本地接头原样转发引擎的契约事件（含相位事件），不改名；每条包成 `events/envelope.json` 形状，`sequence` 为本回合事件日志的行号。接头扣住 `step.completed`，断点落盘后再发，并补上累计用量。终态由接头补发 `turn.completed` / `turn.failed` / `turn.cancelled`。删除 `step_committed`、`delivery`、`turn_finished`（第 5.2 节）。契约侧在 `payloads/step.completed.json` 增加可选 `usage`、`payloads/turn.failed.json` 增加可选 `error_kind`（两者现为 `additionalProperties: false`），同步 `packages/contracts/tests` | 每条事件通过 `packages/contracts` 的信封与载荷校验；`step.completed` 的到达晚于对应断点文件写入；A9 对照两只接头的事件类型序列一致（第 9 节所列除外） |
 | A12 | **壳生成 `turn_id`**。`start_turn` 接受可选 `turn_id`；接头先发 `turn.accepted`，再进引擎。同一 `turn_id` 重复调用返回 `Busy` 或原结果，不开第二个回合 | 第一步开始前调用 `cancel_turn` 能取消；重复提交不产生第二个回合 |
-| A13 | **结构化意图**。新增 `app/writing/intents.py`：把 `TurnIntent`（第 5.3 节）解析成本回合的用户消息与相位输入。本地接头的 `start_turn` 与契约 `commands/start_turn.json` 同时增加可选 `intent`，服务器接头调用同一函数。旧的魔法句子保留解析一个次版本，之后删除 | 同一意图经两只接头得到相同的组装结果；Web 改发意图后 `openingPonds.ts` 不再拼句子 |
+| A13 | **结构化意图**。新增 `app/writing/intents.py`：把 `TurnIntent`（第 5.3 节）解析成本回合的用户消息与相位输入。本地接头的 `start_turn` 与契约 `commands/start_turn.json` 同时增加可选 `intent`，服务器接头调用同一函数。点选按 id 写入已选作品，不再生成或解析「采用此开篇「…」」 | 同一意图经两只接头得到相同的组装结果；Web 与内核都不拼、不拆这句 |
 | A14 | **作品读写入口**。新增 `work_view`、`read_document`、`write_document`、`list_turn_history`、`revert_turn`、`export_work`、`import_work`（第 5.1 节）。回合开始前接头留快照（第 6 节） | 壳侧代码中不出现稿树路径常量；`revert_turn` 后 `work_view` 与回合开始前一致 |
 | A15 | **事件补齐**。新增 `read_events(work_root, turn_id, after_sequence)`，从事件日志读出已落盘事件 | 杀掉回调方后按 `after_sequence` 补齐，与不中断时收到的序列一致、无重复 |
 | A16 | **单回合约束**。接头在进程内同时只跑一个回合，第二个 `start_turn` 抛 `Busy`。随后把 `settings.workspace_root`、`settings.recordings_dir` 的写入改为经租户上下文传入，去掉进程级写入 | 并发调用得到 `Busy`；去掉全局写入后，`runner.py` 中无 `settings.* =` 赋值 |
@@ -243,7 +243,7 @@ def core_info() -> CoreInfo: ...                                # core_version, 
 - 新增可选字段、入口或事件：次版本号加一。
 - 删除或改变语义：主版本号加一。
 - 壳声明自己支持的协议主版本；内核主版本不匹配时拒绝加载（第 8 节的热更新依赖这条规则）。
-- A11–A17 合入后，1.0 冻结。
+- A11–A17 已合入，1.0 已冻结。
 
 ---
 

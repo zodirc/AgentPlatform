@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |----|------|
-| 状态 | 草案，未开工。SDK 文档的 A11–A17（本文第 3 节）合入、本地接头协议 1.0 冻结之后，才开始原型 |
+| 状态 | 草案，未开工。SDK 的 A11–A17 已合入，本地接头协议 1.0 已冻结，可以开始原型 |
 | 定位 | 单机写作 Agent APK。用户自带模型 key，直连用户的模型服务；不依赖本平台服务器 |
 | 现状 | 平台是服务器形态：Web（`services/web`）经 `services/api` 调 runtime；写作 SDK 与本地接头（`app/writing_host`）已落地，命令行壳已接 |
 | 上游 | `docs/writing-core-standalone.md`（写作 SDK、本地接头、内核包）、`packages/contracts`（事件、命令、投影） |
