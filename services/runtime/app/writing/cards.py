@@ -960,10 +960,17 @@ def prepare_writing_system_prompt(
             extras.append(
                 "## 点选之后\n已选的是作品简介，不是正文。不要把简介粘进稿。"
             )
-    from app.writing.revision import apply_revision_block, should_apply_revision
+    from app.writing.revision import (
+        apply_revision_block,
+        reject_revision_block,
+        should_apply_revision,
+        should_reject_revision,
+    )
 
     if should_apply_revision(message):
         extras.append(apply_revision_block())
+    elif should_reject_revision(message):
+        extras.append(reject_revision_block())
     from app.writing.reread import should_gate_editor_phase, should_gate_reread_phase
 
     reread_phase = should_gate_reread_phase(message)

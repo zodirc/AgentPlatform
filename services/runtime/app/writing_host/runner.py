@@ -183,7 +183,9 @@ async def _run(
             phase = state.plan_phase
         else:
             profile = ScenarioRegistry.get("writing")
-            text, phase = resolve_intent(intent, message=message or "")
+            text, phase = resolve_intent(
+                intent, message=message or "", workspace_root=root
+            )
             if plan_phase:
                 phase = plan_phase
             state = TurnState(
@@ -335,6 +337,9 @@ async def _run(
             raise
         raise error from exc
     finally:
+        from app.writing.intents import clear_turn_choice
+
+        clear_turn_choice()
         reset_model_envelope(envelope_token)
         reset_raw_snapshot(raw_token)
         reset_summary_store(summary_token)

@@ -501,11 +501,21 @@ async def start_turn(
         reject_when_full: inflight 已满时是否将 Turn 记为 ``budget_exceeded`` 失败。
     """
     if intent:
+        from pathlib import Path
+
         from app.writing.intents import resolve_intent
 
-        message, intent_phase = resolve_intent(intent, message=message)
+        message, intent_phase = resolve_intent(
+            intent,
+            message=message,
+            workspace_root=Path(work_root) if work_root else None,
+        )
         if intent_phase:
             plan_phase = intent_phase
+    else:
+        from app.writing.intents import clear_turn_choice
+
+        clear_turn_choice()
     if turn_id in _active_turns:
         return
     max_inflight = int(getattr(settings, "runtime_max_inflight_turns", 0) or 0)
@@ -900,6 +910,46 @@ async def deny_tool_call(
         _inflight_commands.discard(turn_id)
 
 
+def _event_payload(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, str):
+        loaded = json.loads(raw)
+        return loaded if isinstance(loaded, dict) else {}
+    return raw if isinstance(raw, dict) else {}
+
+
+async def _current_patch(turn_id: UUID, patch_id: str) -> tuple[dict[str, Any], int]:
+    """最近一条尚未采纳或放弃的 patch.proposed。id 对不上则拒绝，不改选更早的补丁。"""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT type, payload, step_index
+        FROM turn_events
+        WHERE turn_id = $1 AND type IN ('patch.proposed', 'patch.applied', 'patch.rejected')
+        ORDER BY sequence ASC
+        """,
+        turn_id,
+    )
+    open_ids: list[str] = []
+    payloads: dict[str, dict[str, Any]] = {}
+    steps: dict[str, int] = {}
+    for row in rows:
+        payload = _event_payload(row["payload"])
+        found = str(payload.get("patch_id") or "")
+        if not found:
+            continue
+        if row["type"] == "patch.proposed":
+            if found in open_ids:
+                open_ids.remove(found)
+            open_ids.append(found)
+            payloads[found] = payload
+            steps[found] = int(row["step_index"] or 0)
+        elif found in open_ids:
+            open_ids.remove(found)
+    if not open_ids or open_ids[-1] != patch_id:
+        raise ValueError(f"patch not found: {patch_id}")
+    return payloads[patch_id], steps[patch_id]
+
+
 async def accept_patch(
     *,
     turn_id: UUID,
@@ -914,28 +964,8 @@ async def accept_patch(
         patch_id: propose_patch 产出的补丁标识。
         trace_id: 观测关联 ID。
     """
+    patch_payload, step_index = await _current_patch(turn_id, patch_id)
     pool = await get_pool()
-    rows = await pool.fetch(
-        """
-        SELECT sequence, payload, step_index
-        FROM turn_events
-        WHERE turn_id = $1 AND type = 'patch.proposed'
-        ORDER BY sequence ASC
-        """,
-        turn_id,
-    )
-    patch_payload: dict | None = None
-    step_index = 0
-    for r in rows:
-        payload = r["payload"]
-        if isinstance(payload, str):
-            payload = json.loads(payload)
-        if payload.get("patch_id") == patch_id:
-            patch_payload = payload
-            step_index = r["step_index"]
-            break
-    if patch_payload is None:
-        raise ValueError(f"patch not found: {patch_id}")
 
     result = await core_tools.apply_patch(
         path=patch_payload["path"],
@@ -944,6 +974,9 @@ async def accept_patch(
     )
     if result.get("status") == "error":
         raise ValueError(str(result.get("error") or "apply_patch failed"))
+    from app.writing.candidates import drop_pending_patch
+
+    drop_pending_patch(patch_id=patch_id)
 
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -977,6 +1010,7 @@ async def reject_patch(
         turn_id / run_id / patch_id / trace_id: 同 accept_patch。
         reason: 拒绝原因，写入事件 payload。
     """
+    await _current_patch(turn_id, patch_id)
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -988,6 +1022,9 @@ async def reject_patch(
                 trace_id=trace_id,
                 payload={"patch_id": patch_id, "reason": reason, "status": "rejected"},
             )
+    from app.writing.candidates import drop_pending_patch
+
+    drop_pending_patch(patch_id=patch_id)
 
 
 async def _make_write_event(

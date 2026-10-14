@@ -1,0 +1,205 @@
+{
+  "name": "opening",
+  "events": [
+    {
+      "sequence": 1,
+      "type": "turn.accepted",
+      "payload": {
+        "scenario_id": "writing",
+        "user_input_preview": "给我两个开篇",
+        "model_name": "recorded"
+      }
+    },
+    {
+      "sequence": 2,
+      "type": "step.started",
+      "payload": {
+        "step_index": 0,
+        "label": "step-0"
+      }
+    },
+    {
+      "sequence": 3,
+      "type": "context.reported",
+      "payload": {
+        "step_index": 0,
+        "tokens_before": 7606,
+        "tokens_after": 7650,
+        "token_budget": 8000,
+        "system_tokens": 1247,
+        "tools_tokens": 5622,
+        "messages_tokens": 781,
+        "project_tokens": 0,
+        "runtime_tokens": 22,
+        "volatile_tokens": 593,
+        "reserve_tokens": 8744,
+        "fill_ratio": 1.249,
+        "assemble_ms": 11.245302000133961,
+        "breakdown": {
+          "system": 1247,
+          "tools": 5622,
+          "session": 0,
+          "user": 0,
+          "assistant": 0,
+          "tool_results": 0,
+          "compaction": 70,
+          "project": 0,
+          "runtime": 41,
+          "volatile": 664
+        },
+        "source": "estimated",
+        "strategies": [
+          "compact"
+        ],
+        "budget_truncated_n": 0,
+        "budget_truncated_by_tool": {},
+        "estimated_tokens": 7606,
+        "pointerized_n": 0,
+        "tool_result_tokens": 0
+      }
+    },
+    {
+      "sequence": 4,
+      "type": "turn.thinking",
+      "payload": {
+        "step_index": 0,
+        "label": "step-0"
+      }
+    },
+    {
+      "sequence": 5,
+      "type": "usage.reported",
+      "payload": {
+        "step_index": 0,
+        "input_tokens": 7650,
+        "output_tokens": 8,
+        "step_input_tokens": 7650,
+        "step_output_tokens": 8,
+        "source": "estimated",
+        "retry_count": 0,
+        "estimated_tokens": 7606,
+        "model_queue_wait_s": 0.0
+      }
+    },
+    {
+      "sequence": 6,
+      "type": "tool.started",
+      "payload": {
+        "tool_call_id": "call_0b1a12a8",
+        "tool_name": "propose_book_candidates",
+        "arguments": {
+          "items": [
+            {
+              "id": "pond-1",
+              "title": "余烬",
+              "pitch": "灾变之后，人类进入了一个新的时代。资源匮乏、军阀割据、势力林立，秦禹只想要活下去。但现实一步步把他推向了更大的舞台。他明天还得去领粮，也还得决定跟哪一路人站在一起。柜台上的账今晚必须对上，否则铺子开不了门。"
+            },
+            {
+              "id": "pond-2",
+              "title": "潮汐",
+              "pitch": "潮水每夜把码头的桩撞松一寸。她把船票攥在手里，货还堆在棚里，天亮前必须点清。岸上的人各算各的账，船老大只认定金。她还没决定人留在哪一岸，明天的班次却不会等。铺子里的灯火还亮着，她听得见账房在算今夜的损耗。"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "sequence": 7,
+      "type": "opening.ponds",
+      "payload": {
+        "ponds_id": "ponds-a2f7ff51",
+        "items": [
+          {
+            "id": "pond-1",
+            "title": "余烬",
+            "chapter_job": "灾变之后，人类进入了一个新的时代。资源匮乏、军阀割据、势力林立，秦禹只想要活下去。但现实一步步把他推向了更大的舞台。他明天还得去领粮，也还得决定跟哪一路人站在一起。柜台上的账今晚必须对上，否则铺子开不了门。",
+            "opening": "灾变之后，人类进入了一个新的时代。资源匮乏、军阀割据、势力林立，秦禹只想要活下去。但现实一步步把他推向了更大的舞台。他明天还得去领粮，也还得决定跟哪一路人站在一起。柜台上的账今晚必须对上，否则铺子开不了门。",
+            "summary": "灾变之后，人类进入了一个新的时代。资源匮乏、军阀割据、势力林立，秦禹只想要活下去。但现实一步步把他推向了更大的舞台。他明天还得去领粮，也还得决定跟哪一路人站在一起。柜台上的账今晚必须对上，否则铺子开不了门。"
+          },
+          {
+            "id": "pond-2",
+            "title": "潮汐",
+            "chapter_job": "潮水每夜把码头的桩撞松一寸。她把船票攥在手里，货还堆在棚里，天亮前必须点清。岸上的人各算各的账，船老大只认定金。她还没决定人留在哪一岸，明天的班次却不会等。铺子里的灯火还亮着，她听得见账房在算今夜的损耗。",
+            "opening": "潮水每夜把码头的桩撞松一寸。她把船票攥在手里，货还堆在棚里，天亮前必须点清。岸上的人各算各的账，船老大只认定金。她还没决定人留在哪一岸，明天的班次却不会等。铺子里的灯火还亮着，她听得见账房在算今夜的损耗。",
+            "summary": "潮水每夜把码头的桩撞松一寸。她把船票攥在手里，货还堆在棚里，天亮前必须点清。岸上的人各算各的账，船老大只认定金。她还没决定人留在哪一岸，明天的班次却不会等。铺子里的灯火还亮着，她听得见账房在算今夜的损耗。"
+          }
+        ],
+        "summary": "余烬、潮汐。余烬 ｜ 潮汐",
+        "awaiting_choice": true
+      }
+    },
+    {
+      "sequence": 8,
+      "type": "tool.completed",
+      "payload": {
+        "tool_call_id": "call_0b1a12a8",
+        "tool_name": "propose_book_candidates",
+        "status": "ok",
+        "summary": "余烬、潮汐。余烬 ｜ 潮汐"
+      }
+    },
+    {
+      "sequence": 9,
+      "type": "step.completed",
+      "payload": {
+        "step_index": 0,
+        "label": "step-0",
+        "outcome": "completed",
+        "duration_ms": 348,
+        "usage": {
+          "input_tokens": 7650,
+          "output_tokens": 8,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        }
+      }
+    },
+    {
+      "sequence": 10,
+      "type": "turn.completed",
+      "payload": {
+        "summary": "余烬、潮汐。余烬 ｜ 潮汐",
+        "termination_reason": "opening_ponds_awaiting_choice",
+        "step_count": 1,
+        "delivery_status": "ok",
+        "token_usage": {
+          "input_tokens": 7650,
+          "output_tokens": 8
+        },
+        "post_turn_jobs": []
+      }
+    }
+  ],
+  "view": {
+    "status": "completed",
+    "opening_ponds": {
+      "ponds_id": "ponds-a2f7ff51",
+      "items": [
+        {
+          "id": "pond-1",
+          "title": "余烬",
+          "chapter_job": "灾变之后，人类进入了一个新的时代。资源匮乏、军阀割据、势力林立，秦禹只想要活下去。但现实一步步把他推向了更大的舞台。他明天还得去领粮，也还得决定跟哪一路人站在一起。柜台上的账今晚必须对上，否则铺子开不了门。",
+          "opening": "灾变之后，人类进入了一个新的时代。资源匮乏、军阀割据、势力林立，秦禹只想要活下去。但现实一步步把他推向了更大的舞台。他明天还得去领粮，也还得决定跟哪一路人站在一起。柜台上的账今晚必须对上，否则铺子开不了门。",
+          "summary": "灾变之后，人类进入了一个新的时代。资源匮乏、军阀割据、势力林立，秦禹只想要活下去。但现实一步步把他推向了更大的舞台。他明天还得去领粮，也还得决定跟哪一路人站在一起。柜台上的账今晚必须对上，否则铺子开不了门。"
+        },
+        {
+          "id": "pond-2",
+          "title": "潮汐",
+          "chapter_job": "潮水每夜把码头的桩撞松一寸。她把船票攥在手里，货还堆在棚里，天亮前必须点清。岸上的人各算各的账，船老大只认定金。她还没决定人留在哪一岸，明天的班次却不会等。铺子里的灯火还亮着，她听得见账房在算今夜的损耗。",
+          "opening": "潮水每夜把码头的桩撞松一寸。她把船票攥在手里，货还堆在棚里，天亮前必须点清。岸上的人各算各的账，船老大只认定金。她还没决定人留在哪一岸，明天的班次却不会等。铺子里的灯火还亮着，她听得见账房在算今夜的损耗。",
+          "summary": "潮水每夜把码头的桩撞松一寸。她把船票攥在手里，货还堆在棚里，天亮前必须点清。岸上的人各算各的账，船老大只认定金。她还没决定人留在哪一岸，明天的班次却不会等。铺子里的灯火还亮着，她听得见账房在算今夜的损耗。"
+        }
+      ],
+      "summary": "余烬、潮汐。余烬 ｜ 潮汐",
+      "awaiting_choice": true
+    },
+    "plan": null,
+    "patch_candidates": [],
+    "pinned_cards": null,
+    "usage": {
+      "input_tokens": 7650,
+      "output_tokens": 8
+    },
+    "last_event_sequence": 10
+  }
+}

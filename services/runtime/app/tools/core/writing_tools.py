@@ -1249,6 +1249,9 @@ async def update_plan(
         if len(_LAST_PLAN_SIG) > 256:
             _LAST_PLAN_SIG.clear()
         _LAST_PLAN_SIG[key] = sig
+    from app.writing.candidates import save_turn_plan
+
+    save_turn_plan(result)
     return result
 
 
@@ -1299,7 +1302,9 @@ async def propose_book_candidates(
     turn_id = _kwargs.get("turn_id")
     supplied = list(items or [])
     message = str(_kwargs.get("turn_user_text") or "")
-    root = Path(settings.workspace_root)
+    from app.tenant_context import current_work_root_path
+
+    root = current_work_root_path()
     against: list[dict[str, Any]] = []
     if wants_more_ponds(message):
         prev = load_opening_ponds(workspace_root=root)

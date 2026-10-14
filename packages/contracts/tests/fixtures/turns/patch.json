@@ -1,0 +1,280 @@
+{
+  "name": "patch",
+  "events": [
+    {
+      "sequence": 1,
+      "type": "turn.accepted",
+      "payload": {
+        "scenario_id": "writing",
+        "user_input_preview": "改一下大纲标题",
+        "model_name": "recorded"
+      }
+    },
+    {
+      "sequence": 2,
+      "type": "step.started",
+      "payload": {
+        "step_index": 0,
+        "label": "step-0"
+      }
+    },
+    {
+      "sequence": 3,
+      "type": "context.reported",
+      "payload": {
+        "step_index": 0,
+        "tokens_before": 7513,
+        "tokens_after": 7558,
+        "token_budget": 8000,
+        "system_tokens": 1247,
+        "tools_tokens": 5622,
+        "messages_tokens": 689,
+        "project_tokens": 0,
+        "runtime_tokens": 22,
+        "volatile_tokens": 501,
+        "reserve_tokens": 8744,
+        "fill_ratio": 1.234,
+        "assemble_ms": 4.325775999859616,
+        "breakdown": {
+          "system": 1247,
+          "tools": 5622,
+          "session": 0,
+          "user": 0,
+          "assistant": 0,
+          "tool_results": 0,
+          "compaction": 72,
+          "project": 0,
+          "runtime": 41,
+          "volatile": 570
+        },
+        "source": "estimated",
+        "strategies": [
+          "compact"
+        ],
+        "budget_truncated_n": 0,
+        "budget_truncated_by_tool": {},
+        "estimated_tokens": 7513,
+        "pointerized_n": 0,
+        "tool_result_tokens": 0
+      }
+    },
+    {
+      "sequence": 4,
+      "type": "turn.thinking",
+      "payload": {
+        "step_index": 0,
+        "label": "step-0"
+      }
+    },
+    {
+      "sequence": 5,
+      "type": "usage.reported",
+      "payload": {
+        "step_index": 0,
+        "input_tokens": 7558,
+        "output_tokens": 8,
+        "step_input_tokens": 7558,
+        "step_output_tokens": 8,
+        "source": "estimated",
+        "retry_count": 0,
+        "estimated_tokens": 7513,
+        "model_queue_wait_s": 0.0
+      }
+    },
+    {
+      "sequence": 6,
+      "type": "tool.started",
+      "payload": {
+        "tool_call_id": "call_ea2a5738",
+        "tool_name": "propose_patch",
+        "arguments": {
+          "path": "outline.md",
+          "old_text": "# 旧题",
+          "new_text": "# 新题",
+          "summary": "改标题"
+        }
+      }
+    },
+    {
+      "sequence": 7,
+      "type": "patch.proposed",
+      "payload": {
+        "patch_id": "patch-fd7141e00186",
+        "path": "outline.md",
+        "status": "pending",
+        "old_text": "# 旧题",
+        "new_text": "# 新题",
+        "summary": "改标题"
+      }
+    },
+    {
+      "sequence": 8,
+      "type": "patch.applied",
+      "payload": {
+        "patch_id": "patch-fd7141e00186",
+        "path": "outline.md",
+        "status": "applied",
+        "auto_applied": true,
+        "bytes_written": 29
+      }
+    },
+    {
+      "sequence": 9,
+      "type": "tool.completed",
+      "payload": {
+        "tool_call_id": "call_ea2a5738",
+        "tool_name": "propose_patch",
+        "status": "ok",
+        "summary": "改标题",
+        "path": "outline.md",
+        "old_text": "# 旧题"
+      }
+    },
+    {
+      "sequence": 10,
+      "type": "step.completed",
+      "payload": {
+        "step_index": 0,
+        "label": "step-0",
+        "outcome": "completed",
+        "duration_ms": 29,
+        "usage": {
+          "input_tokens": 7558,
+          "output_tokens": 8,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        }
+      }
+    },
+    {
+      "sequence": 11,
+      "type": "step.started",
+      "payload": {
+        "step_index": 1,
+        "label": "step-1"
+      }
+    },
+    {
+      "sequence": 12,
+      "type": "context.reported",
+      "payload": {
+        "step_index": 1,
+        "tokens_before": 7722,
+        "tokens_after": 7572,
+        "token_budget": 8000,
+        "system_tokens": 1247,
+        "tools_tokens": 5622,
+        "messages_tokens": 703,
+        "project_tokens": 0,
+        "runtime_tokens": 22,
+        "volatile_tokens": 501,
+        "reserve_tokens": 8744,
+        "fill_ratio": 1.2362,
+        "assemble_ms": 3.7488530001610343,
+        "breakdown": {
+          "system": 1247,
+          "tools": 5622,
+          "session": 0,
+          "user": 0,
+          "assistant": 0,
+          "tool_results": 0,
+          "compaction": 84,
+          "project": 0,
+          "runtime": 41,
+          "volatile": 570
+        },
+        "source": "estimated",
+        "strategies": [
+          "compact"
+        ],
+        "budget_truncated_n": 0,
+        "budget_truncated_by_tool": {},
+        "estimated_tokens": 7722,
+        "pointerized_n": 0,
+        "tool_result_tokens": 0
+      }
+    },
+    {
+      "sequence": 13,
+      "type": "turn.thinking",
+      "payload": {
+        "step_index": 1,
+        "label": "step-1"
+      }
+    },
+    {
+      "sequence": 14,
+      "type": "turn.token",
+      "payload": {
+        "delta": "标题已提出"
+      }
+    },
+    {
+      "sequence": 15,
+      "type": "usage.reported",
+      "payload": {
+        "step_index": 1,
+        "input_tokens": 15130,
+        "output_tokens": 9,
+        "step_input_tokens": 7572,
+        "step_output_tokens": 1,
+        "source": "estimated",
+        "retry_count": 0,
+        "estimated_tokens": 7722,
+        "model_queue_wait_s": 0.0
+      }
+    },
+    {
+      "sequence": 16,
+      "type": "step.completed",
+      "payload": {
+        "step_index": 1,
+        "label": "step-1",
+        "outcome": "completed",
+        "duration_ms": 9,
+        "usage": {
+          "input_tokens": 15130,
+          "output_tokens": 9,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        }
+      }
+    },
+    {
+      "sequence": 17,
+      "type": "turn.completed",
+      "payload": {
+        "summary": "标题已提出",
+        "termination_reason": "final",
+        "step_count": 2,
+        "delivery_status": "ok",
+        "token_usage": {
+          "input_tokens": 15130,
+          "output_tokens": 9
+        },
+        "post_turn_jobs": []
+      }
+    }
+  ],
+  "view": {
+    "status": "completed",
+    "opening_ponds": null,
+    "plan": null,
+    "patch_candidates": [
+      {
+        "patch_id": "patch-fd7141e00186",
+        "path": "outline.md",
+        "status": "pending",
+        "old_text": "# 旧题",
+        "new_text": "# 新题",
+        "summary": "改标题"
+      }
+    ],
+    "pinned_cards": null,
+    "usage": {
+      "input_tokens": 15130,
+      "output_tokens": 9
+    },
+    "last_event_sequence": 17
+  }
+}

@@ -347,6 +347,9 @@ async def propose_patch(
     ):
         result["suggest_only"] = True
         result["repair_class"] = "aesthetic"
+    from app.writing.candidates import remember_pending_patch
+
+    remember_pending_patch(result)
     return result
 
 
@@ -554,6 +557,9 @@ async def apply_patch(
         final, collapsed = collapse_duplicate_paragraphs(final)
 
     target.write_text(final, encoding="utf-8")
+    from app.writing.candidates import drop_pending_patch
+
+    drop_pending_patch(path=path, old_text=old_text or "")
     if old and is_prose_writing_path(path) and turn_id is not None:
         note_prose_patch_applied(
             turn_id,

@@ -10,7 +10,7 @@ _REVISE = re.compile(
     re.I,
 )
 _APPLY = re.compile(
-    r"采用候选\s*[ABab]|用候选\s*[ABab]|就用候选\s*[ABab]|采用补丁「[^」]+」"
+    r"采用候选\s*[ABab]|用候选\s*[ABab]|就用候选\s*[ABab]"
 )
 _VAGUE = re.compile(r"去掉\s*AI\s*味|去\s*AI\s*味|不要\s*AI\s*味|太\s*AI")
 _CONCRETE = re.compile(
@@ -19,7 +19,21 @@ _CONCRETE = re.compile(
 
 
 def should_apply_revision(message: str) -> bool:
+    from app.writing.intents import turn_choice
+
+    choice = turn_choice()
+    if choice and choice.get("kind") == "accept_patch":
+        return True
+    if choice and choice.get("kind") == "reject_patch":
+        return False
     return _APPLY.search((message or "").strip()) is not None
+
+
+def should_reject_revision(message: str) -> bool:
+    from app.writing.intents import turn_choice
+
+    choice = turn_choice()
+    return bool(choice and choice.get("kind") == "reject_patch")
 
 
 def concrete_revision_request(message: str) -> bool:
@@ -54,11 +68,29 @@ def revision_phase_block() -> str:
 
 
 def apply_revision_block() -> str:
+    from app.writing.intents import turn_choice
+
+    choice = turn_choice() or {}
+    patch_id = str(choice.get("patch_id") or "").strip()
+    which = f"修订 {patch_id}" if patch_id else "一个候选"
     return (
         "## 修订落盘\n"
-        "用户已经选定一个候选。只用 propose_patch。"
+        f"用户已经选定{which}。只用 propose_patch 或 apply_patch 落这一处。"
         "old_text 必须是原稿里能唯一定位的原句，new_text 是选定的候选。"
         "不要 draft_section，不要再给新候选。"
+    )
+
+
+def reject_revision_block() -> str:
+    from app.writing.intents import turn_choice
+
+    choice = turn_choice() or {}
+    patch_id = str(choice.get("patch_id") or "").strip()
+    which = f"修订 {patch_id}" if patch_id else "这一处修订"
+    return (
+        "## 修订已放弃\n"
+        f"用户放弃了{which}。不要应用它，不要再交同一处修改。"
+        "按用户附言继续，没有附言就停下来问下一步。"
     )
 
 

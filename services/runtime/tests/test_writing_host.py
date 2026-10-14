@@ -527,49 +527,110 @@ def test_runner_does_not_assign_process_settings():
     assert "settings." not in source
 
 
-def test_resolve_intent_messages():
+def test_resolve_intent_messages(tmp_path: Path):
     from app.writing.intents import resolve_intent
+    from app.writing.opening_ponds import save_opening_ponds
     from app.writing_host.errors import InvalidIntent
 
-    text, phase = resolve_intent({"kind": "select_pond", "ponds_id": "p1", "item_id": "a"})
-    assert text == "采用此开篇「a」"
+    saved = save_opening_ponds(
+        [{"id": "a", "title": "余烬"}, {"id": "b", "title": "潮汐"}],
+        workspace_root=tmp_path,
+    )
+    ponds_id = saved["ponds_id"]
+    text, phase = resolve_intent(
+        {"kind": "select_pond", "ponds_id": ponds_id, "item_id": "a"},
+        workspace_root=tmp_path,
+    )
+    assert text == "就用这个开篇：余烬"
+    assert "采用此开篇" not in text
     assert phase is None
     noted, _phase = resolve_intent(
-        {"kind": "select_pond", "ponds_id": "p1", "item_id": "a"},
+        {"kind": "select_pond", "ponds_id": ponds_id, "item_id": "a"},
         message="更短一点",
+        workspace_root=tmp_path,
     )
     assert noted.endswith("更短一点")
-    more, _phase = resolve_intent({"kind": "more_ponds", "ponds_id": "p1"})
-    assert more == "我要其他的"
-    confirmed, executing = resolve_intent({"kind": "confirm_plan", "plan_id": "plan-1"}, message="附言")
+    assert "采用此开篇" not in noted
+    more, _phase = resolve_intent(
+        {"kind": "more_ponds", "ponds_id": ponds_id},
+        workspace_root=tmp_path,
+    )
+    assert more == "再给一组开篇"
+    from app.writing.candidates import remember_pending_patch, save_turn_plan
+
+    save_turn_plan({"plan_id": "plan-1", "items": [], "awaiting_consent": True}, workspace_root=tmp_path)
+    confirmed, executing = resolve_intent(
+        {"kind": "confirm_plan", "plan_id": "plan-1"},
+        message="附言",
+        workspace_root=tmp_path,
+    )
     assert confirmed == "附言"
     assert executing == "executing"
-    accepted, _phase = resolve_intent({"kind": "accept_patch", "patch_id": "patch-1"})
-    assert accepted == "采用补丁「patch-1」"
-    rejected, _phase = resolve_intent({"kind": "reject_patch", "patch_id": "patch-1"})
-    assert "不采用补丁" in rejected
+    remember_pending_patch(
+        {"patch_id": "patch-1", "path": "outline.md", "old_text": "旧", "status": "pending"},
+        workspace_root=tmp_path,
+    )
+    accepted, _phase = resolve_intent(
+        {"kind": "accept_patch", "patch_id": "patch-1"},
+        workspace_root=tmp_path,
+    )
+    assert accepted == "采用这个修订 patch-1"
+    assert "采用补丁「" not in accepted
+    rejected, _phase = resolve_intent(
+        {"kind": "reject_patch", "patch_id": "patch-1"},
+        workspace_root=tmp_path,
+    )
+    assert rejected == "不用这个修订 patch-1"
     with pytest.raises(InvalidIntent):
         resolve_intent({"kind": "select_pond", "ponds_id": "", "item_id": "a"})
     with pytest.raises(InvalidIntent):
+        resolve_intent(
+            {"kind": "select_pond", "ponds_id": "missing", "item_id": "a"},
+            workspace_root=tmp_path,
+        )
+    with pytest.raises(InvalidIntent):
         resolve_intent(None, message="  ")
+    with pytest.raises(InvalidIntent):
+        resolve_intent(
+            {"kind": "more_ponds", "ponds_id": "missing"},
+            workspace_root=tmp_path,
+        )
+    with pytest.raises(InvalidIntent):
+        resolve_intent(
+            {"kind": "confirm_plan", "plan_id": "plan-old"},
+            workspace_root=tmp_path,
+        )
+    with pytest.raises(InvalidIntent):
+        resolve_intent(
+            {"kind": "reject_patch", "patch_id": "patch-1"},
+            workspace_root=tmp_path,
+        )
 
 
 @pytest.mark.asyncio
 async def test_intent_reaches_turn_accepted(tmp_path: Path):
+    from app.writing.opening_ponds import save_opening_ponds
+
     work = tmp_path / "book"
+    saved = save_opening_ponds(
+        [{"id": "item-a", "title": "余烬"}, {"id": "item-b", "title": "潮汐"}],
+        workspace_root=work,
+    )
     model = _recording(tmp_path, "intent_finish", "收到开篇")
     events = []
     result = await start_turn(
         work_root=work,
         message="选择开篇",
-        intent={"kind": "select_pond", "ponds_id": "ponds-1", "item_id": "item-a"},
+        intent={"kind": "select_pond", "ponds_id": saved["ponds_id"], "item_id": "item-a"},
         model=model,
         budget=TurnBudget(max_steps=1),
         on_event=events.append,
         recording="intent_finish",
     )
     assert result.status == "ok"
-    assert events[0].payload["user_input_preview"].startswith("采用此开篇「item-a」")
+    preview = events[0].payload["user_input_preview"]
+    assert preview.startswith("就用这个开篇：余烬")
+    assert "采用此开篇" not in preview
 
 
 @pytest.mark.asyncio
@@ -879,6 +940,70 @@ async def test_fixtures_follow_host_replay(tmp_path: Path, monkeypatch: pytest.M
     )
     assert plan == [item["type"] for item in _turn_fixture("plan")["events"]]
     assert _turn_fixture("plan")["view"]["plan"]["items"][0]["title"] == "写开篇"
+
+    pitch_a = (
+        "灾变之后，人类进入了一个新的时代。资源匮乏、军阀割据、势力林立，"
+        "秦禹只想要活下去。但现实一步步把他推向了更大的舞台。"
+        "他明天还得去领粮，也还得决定跟哪一路人站在一起。柜台上的账今晚必须对上，否则铺子开不了门。"
+    )
+    pitch_b = (
+        "潮水每夜把码头的桩撞松一寸。她把船票攥在手里，货还堆在棚里，天亮前必须点清。"
+        "岸上的人各算各的账，船老大只认定金。她还没决定人留在哪一岸，明天的班次却不会等。"
+        "铺子里的灯火还亮着，她听得见账房在算今夜的损耗。"
+    )
+    opening = await replay(
+        "opening",
+        message="给我两个开篇",
+        budget=TurnBudget(max_steps=4),
+        steps=[
+            {
+                "tool_calls": [
+                    {
+                        "name": "propose_book_candidates",
+                        "input": {
+                            "items": [
+                                {"id": "pond-1", "title": "余烬", "pitch": pitch_a},
+                                {"id": "pond-2", "title": "潮汐", "pitch": pitch_b},
+                            ]
+                        },
+                    }
+                ]
+            },
+            {"text": "等你点选"},
+        ],
+    )
+    assert opening == [item["type"] for item in _turn_fixture("opening")["events"]]
+    assert [item["title"] for item in _turn_fixture("opening")["view"]["opening_ponds"]["items"]] == [
+        "余烬",
+        "潮汐",
+    ]
+
+    (tmp_path / "patch" / "outline.md").parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "patch" / "outline.md").write_text("# 旧题\n\n第一句还在。\n", encoding="utf-8")
+    patch = await replay(
+        "patch",
+        message="改一下大纲标题",
+        budget=TurnBudget(max_steps=4),
+        steps=[
+            {
+                "tool_calls": [
+                    {
+                        "name": "propose_patch",
+                        "input": {
+                            "path": "outline.md",
+                            "old_text": "# 旧题",
+                            "new_text": "# 新题",
+                            "summary": "改标题",
+                        },
+                    }
+                ]
+            },
+            {"text": "标题已提出"},
+        ],
+    )
+    assert patch == [item["type"] for item in _turn_fixture("patch")["events"]]
+    assert _turn_fixture("patch")["view"]["patch_candidates"][0]["path"] == "outline.md"
+    assert _turn_fixture("patch")["view"]["patch_candidates"][0]["summary"] == "改标题"
 
     duplicate = _turn_fixture("resume-duplicate")
     assert duplicate["events"][0]["sequence"] == duplicate["events"][1]["sequence"]
