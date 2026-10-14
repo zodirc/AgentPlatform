@@ -69,16 +69,16 @@ SDK         app/writing/  ·  app/engine/  ·  端口
 | 偏好结构按仓库路径加载 | `app/writing/signals/prefs_loader.py` → `packages/contracts/python/agent_contracts/writing_prefs.py` |
 | 跨回合拍晋升依赖评分表 | `app/writing/signals/beats.py: maybe_promote_local_beats` → `writing_fragment_evaluations` |
 
-A1–A10 之后，对壳仍然可见的耦合如下，由 A11–A17 处理：
+A1–A10 之后仍可见的耦合，已由 A11–A17 去掉：
 
-| 耦合 | 位置 |
+| 当时 | 现在 |
 |------|------|
-| 本地事件另起名字、不带 `turn_id`、不转发相位事件 | `app/writing_host/runner.py: _map_engine_event` 把 `step.started` 等改名为 `step_started`、`tool_finished`、`usage`；终态用私有名 `step_committed`、`delivery`、`turn_finished` |
-| `step.completed` 先于断点落盘 | `app/engine/agent_engine.py` 的步循环 `finally` 中，`_complete_step` 在 `_on_step_checkpoint` 之前 |
-| 终态事件不在引擎里 | `turn.completed` / `turn.failed` / `turn.cancelled` 由 `turn_controller.py` 发出，本地接头没有对应物 |
-| 用户点选靠魔法句子 | Web `shared/workbench/openingPonds.ts: formatSelectPondMessage` 拼「采用此开篇「…」」；`app/writing/opening_ponds.py`、`turn_phase.py`、`text_metrics.py` 用正则解析 |
-| 壳须知道稿树布局才能读稿、快照、撤销 | 协议没有作品读写入口 |
-| 宿主改进程级设置 | `runner._run` 写 `settings.workspace_root`、`settings.recordings_dir`；两个回合并发会互相覆盖 |
+| 本地事件另起名字 | 接头转发契约事件名；终态是 `turn.completed` / `turn.failed` / `turn.cancelled` |
+| `step.completed` 先于断点落盘 | 本地接头扣住这条，断点落盘后再写日志并回调 |
+| 本地接头没有终态 | 接头在回合结束时补发恰好一条终态 |
+| 用户点选靠魔法句子 | 意图按 id 解析；Web 与内核都不拼、不拆「采用此开篇」 |
+| 壳按稿树路径读写 | `work_view`、`read_document`、`write_document`、`revert_turn`、`export_work`、`import_work` |
+| 宿主写进程级设置 | 工作根经租户上下文传入；`runner.py` 无 `settings.* =` |
 
 ---
 
@@ -304,7 +304,7 @@ manifest.json.sig          # Ed25519 签名
 
 `manifest.json` 包含：`core_version`（来自 `app/writing/VERSION`）、`protocol_version`、`schema_versions`、`python`（主次版本）、`host_requires`（原生依赖及版本范围）、`contracts_version`、每个文件的 sha256、构建提交号。
 
-回放夹具随包发布，供命令行壳与 Android 壳对照同一回合，也供壳在内核热切换时自检。`scripts/build_writing_core.py` 目前尚未把夹具打进 zip，A17 一并补上。
+回放夹具随包发布，供命令行壳与 Android 壳对照同一回合，也供壳在内核热切换时自检。`scripts/build_writing_core.py` 把 `packages/contracts/tests/fixtures/turns/` 打进 zip 的 `fixtures/turns/`。
 
 ### 8.2 版本
 

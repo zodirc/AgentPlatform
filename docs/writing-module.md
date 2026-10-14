@@ -1,6 +1,6 @@
 # 写作模块：文件索引与空转
 
-导览里的解剖在 `docs/tour/pages/writing-module.html`。目标结构在 [`写作模块-执行方案.md`](写作模块-执行方案.md)：第 2 节是现行差距，第 3 节起是目标，不是第二份实现说明。运行时不读 `docs/writing-chain-snapshot/`。
+导览里的解剖在 `docs/tour/pages/writing-module.html`。目标结构在 [`写作模块-执行方案.md`](写作模块-执行方案.md)：第 2 节是现行差距，第 3 节起是目标，不是第二份实现说明。
 
 引擎不读 scenario 名字。写作差在 `scenarios/profiles/writing.yaml`、场景提示和 `app/writing/`。
 

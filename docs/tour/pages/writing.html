@@ -31,6 +31,8 @@ sources/cards              writing_cards_dir；风格卡 ≤1800 / 人物 ≤100
      短篇/单篇：纲可选，outline_phase=ready，不闸工具
      长篇：
        选书 → 只留 propose_book_candidates，交卡片后 TERMINATE
+       勾选发 select_pond（ponds_id、item_id），对上当前候选才写入已选书
+       换一组是 more_ponds，或用户原话「我要其他的」；不拼「采用此开篇」
        等纲 → 只留 update_outline 与 read_file；写入后本轮停，等「写第一章 / 改纲」
        否则写作工具仍在；没有当前章段时 draft_section 被拒绝
      章便条可见字 &lt; 80 且用户未要目录 → outline_thin（80 只表示便条还在，不是质量）
@@ -81,7 +83,7 @@ sources/cards              writing_cards_dir；风格卡 ≤1800 / 人物 ≤100
               作者档不注入 L0 receipt。work_mode 权重仍钉在工具里，不在设置页
   work_mode   经典文学 / 连载网文    金标分库；学拍不搬核
   fragment    评分切片，不是章职
-  focus / 这一场 / outline_phase     short/single=`ready` · 长篇未立定近池=`open`（propose_book_candidates，点选或「我要其他的」） · 已立=`continue`
+  focus / 这一场 / outline_phase     short/single=`ready` · 长篇未立定近池=`open`（propose_book_candidates；点选认 id，或原话「我要其他的」） · 已立=`continue`
   无纲时写「新篇另起人与事」
 <span class="pt">◆ 要点  风格写入规格，不作为开工条件。只给出题材或要求「看看」时，先提交 start_kind 不同的近池卡片。更换职业或地点不算另起一篇。</span></pre>
           <p class="figure-lead">下图中主链：意图 → 占用判定 → 长篇相位（选书 / 等纲 / 成章）→ 成稿（章稿 3000–5000）→ 仅 L0 同轮修补。交付门只看篇幅。回读、编辑、修订是侧向相位。评分环见下一页。</p>

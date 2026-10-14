@@ -47,13 +47,15 @@
 
 ## 点选只种书名，不生成章段
 
-用户勾选卡片后，下一回合的消息是令牌 `采用此开篇「书名」`（`format_select_pond_message`）。聊天不画这条气泡。
+用户勾选卡片后，壳发 `select_pond`（`ponds_id`、`item_id`）。`resolve_intent` 对上当前这组开篇才调用 `save_committed_pond`；id 对不上抛 `InvalidIntent`，不猜测。给模型的消息是「就用这个开篇：书名」，可另附用户附言。不再生成或解析「采用此开篇」。换一组是 `more_ponds`（`ponds_id` 须为当前这一组），或用户原话「我要其他的」。
 
-组窗时 `format_committed_pond_block` 调用 `find_committed_pond`。对上书名就 `save_committed_pond`，副作用三件：
+`save_committed_pond` 在回合开始前写入，副作用三件：
 
 1. 已选书写入 sidecar。
 2. `seed_identity_from_pond` 写入 `story_state`。
 3. `seed_outline_from_pond` 把 `## 这本书`、书名、简介写入 `outline.md`。文件本为空时再附一行 `## 主线一句话` 占位。不写世界入口，不写章段。
+
+组窗时 `format_committed_pond_block` 只读已选文件，不从消息里拆书名。
 
 同一块 volatile 告诉模型：简介不是正文；用 `update_outline` 的 `documents` 一次提交作品纲（核心处境、叙事承诺、长程边界，不抄简介）、卷问题，以及第一章便条；写完停。远处不排章节。discovery 可以不写卷内节点。
 
