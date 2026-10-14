@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from app.writing_host.errors import Busy, Conflict, ResumeIncompatible
-from app.writing_host.schema import SCHEMA_VERSIONS
+from app.writing_host.schema import EVENT_KEEP_TURNS, SCHEMA_VERSIONS
 
 _SKIP_PREFIXES = (
     ".agent/checkpoints/",
@@ -176,6 +176,7 @@ def snapshot_turn(work_root: Path, turn_id: str) -> None:
     dest = root / ".agent" / "snapshots" / "turns" / f"{turn_id}.json"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    retain_recent_turns(root)
 
 
 def list_turn_history(work_root: Path) -> list[TurnRecord]:
@@ -259,3 +260,61 @@ def import_work(src: Path, work_root: Path) -> WorkView:
 
 def _unlink(path: Path) -> None:
     path.unlink(missing_ok=True)
+
+
+def retain_recent_turns(work_root: Path) -> None:
+    """快照与事件只留最近 32 回合，丢掉的回合连同断点一起删。"""
+    root = Path(work_root)
+    ranked: dict[str, int] = {}
+    turns_dir = root / ".agent" / "snapshots" / "turns"
+    if turns_dir.is_dir():
+        for path in turns_dir.glob("*.json"):
+            turn_id, stamp = _turn_stamp(path, "turn_id")
+            ranked[turn_id] = max(ranked.get(turn_id, 0), stamp)
+    events_dir = root / ".agent" / "events"
+    if events_dir.is_dir():
+        for path in events_dir.glob("*.jsonl"):
+            turn_id, stamp = _turn_stamp(path, "turn_id")
+            ranked[turn_id] = max(ranked.get(turn_id, 0), stamp)
+    if len(ranked) <= EVENT_KEEP_TURNS:
+        return
+    ordered = sorted(ranked, key=lambda turn_id: (ranked[turn_id], turn_id))
+    for turn_id in ordered[: len(ordered) - EVENT_KEEP_TURNS]:
+        _unlink(turns_dir / f"{turn_id}.json")
+        _unlink(events_dir / f"{turn_id}.jsonl")
+        _unlink(root / ".agent" / "checkpoints" / f"{turn_id}.json")
+    _gc_snapshot_objects(root)
+
+
+def _turn_stamp(path: Path, id_key: str) -> tuple[str, int]:
+    turn_id = path.stem
+    if path.suffix == ".json":
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = None
+        if isinstance(data, dict):
+            turn_id = str(data.get(id_key) or path.stem)
+    return turn_id, path.stat().st_mtime_ns
+
+
+def _gc_snapshot_objects(root: Path) -> None:
+    objects = root / ".agent" / "snapshots" / "objects"
+    turns = root / ".agent" / "snapshots" / "turns"
+    if not objects.is_dir():
+        return
+    used: set[str] = set()
+    if turns.is_dir():
+        for path in turns.glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return
+            if not isinstance(data, dict):
+                return
+            for item in data.get("files") or []:
+                if isinstance(item, dict) and item.get("sha256"):
+                    used.add(str(item["sha256"]))
+    for path in objects.iterdir():
+        if path.is_file() and path.name not in used:
+            path.unlink(missing_ok=True)

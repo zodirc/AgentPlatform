@@ -12,7 +12,6 @@ from app.engine.state import TurnState
 from app.writing_host.schema import (
     CHECKPOINT_SCHEMA,
     EVAL_SCHEMA,
-    EVENT_KEEP_TURNS,
     EVENT_SCHEMA,
     SIDECAR_SCHEMA,
     migrate_checkpoint,
@@ -84,7 +83,9 @@ class FileEventLog:
         line.setdefault("schema_version", EVENT_SCHEMA)
         with self._path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(line, ensure_ascii=False) + "\n")
-        _prune_event_logs(self._path.parent)
+        from app.writing_host.works import retain_recent_turns
+
+        retain_recent_turns(self._path.parent.parent.parent)
 
 
 class FileEvaluationStore:
@@ -132,13 +133,6 @@ def ensure_sidecar_format(work_root: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.is_file() or int((current or {}).get("schema_version") or 0) != SIDECAR_SCHEMA:
         path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
-
-
-def _prune_event_logs(directory: Path) -> None:
-    files = sorted(directory.glob("*.jsonl"), key=lambda item: item.stat().st_mtime)
-    overflow = len(files) - EVENT_KEEP_TURNS
-    for path in files[: max(0, overflow)]:
-        path.unlink(missing_ok=True)
 
 
 def _jsonable(value: Any) -> Any:
