@@ -126,7 +126,7 @@ t1  发送（命令面，短连接）
              全局 unclaimed &lt; 32 且 本用户 unclaimed &lt; 2
              否则 429 + Retry-After:5   ← Turn 尚未 INSERT
            同一事务:
-             INSERT turns(pending) + runs(accepted, pull_eligible)
+             INSERT turns(pending, plan_phase, intent) + runs(accepted, pull_eligible)
                     + turn_views seed
              （TURN_DISPATCH_WAKE=postgres|both 时同事务 pg_notify turn_dispatch）
            COMMIT 后 PUBLISH turn.dispatch run_id（默认；失败只日志，靠 poll）
@@ -139,6 +139,7 @@ t2  领取（编排 runtime；与浏览器无 TCP）
              _active_turns &lt; 16 ? claim : 不领
              UPDATE runs SET running, lease_expires_at = now()+180s
                WHERE status='accepted'
+             领取行含 user_input、plan_phase、intent，交给 start_turn
              INSERT turn_events type=turn.accepted  sequence=1
              触发器 pg_notify('turn_events_channel', turn_id::text)（投影反熵）
     <span class="pt">◆ 要点  CAS 失败者 = 已被抢走，勿当回滚重试，否则双 runtime 跑同一 Turn。</span>

@@ -44,6 +44,15 @@ sources/cards              writing_cards_dir；风格卡 ≤1800 / 人物 ≤100
        /revise · 含糊「去掉 AI 味」→ 只留 read_file / grep / glob，点名原句后才改
      <span class="pt">◆ 要点  相位是开工时收白名单，不是 Engine 里新节点。回读、编辑、修订各是用户显式的下一次 Turn。</span>
 
+2b 点选穿过领取（默认 TURN_DISPATCH=pull）
+     工作台把 intent 放进 StartTurn。落库 turns.intent，领取时原样交给 start_turn
+     改作品之前先拍影子快照。放弃修订后，撤销本轮仍能找回候选
+     confirm_plan 的 executing 盖过壳上残留的 planning
+     id 对不上当前候选 → turn.failed，error_kind=invalid_intent
+     回合进行中工作台读 reduceTurn（夹具里的 view）。结束后服务器 TurnView 仍可覆盖
+     采纳 / 放弃是下一次 StartTurn 的 accept_patch / reject_patch，不走回合内补丁命令
+     <span class="pt">◆ 要点  意图写在回合行上，领取时交给 start_turn。</span>
+
 3  成稿 draft_section(fragment=…)
      冷起步无纲职 → fragment=mixed（不要发明章类型当评分切片）
      有纲职 → infer_fragment_from_duty（情节/质地/高潮/动作/对白）

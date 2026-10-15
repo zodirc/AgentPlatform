@@ -13,7 +13,7 @@
            未领取队列满 → 429 + Retry-After:5（Turn 未插入）
     <span class="pt">◆ 要点  429 时没有 turn_id。客户端不得拿「上一次失败的假 id」去挂 SSE。</span>
 
-t2  同一事务  INSERT turns(pending) + runs(accepted, pull_eligible)
+t2  同一事务  INSERT turns(pending, plan_phase, intent) + runs(accepted, pull_eligible)
               + turn_views seed
            COMMIT 后 PUBLISH turn.dispatch run_id（默认；可 both/postgres NOTIFY）
            响应 202 { turn_id, run_id, status: pending }
@@ -23,7 +23,7 @@ t2  同一事务  INSERT turns(pending) + runs(accepted, pull_eligible)
 t3  编排 runtime claim（与浏览器无 TCP）
            SUBSCRIBE turn.dispatch + poll 反熵 → 条件 UPDATE 抢到 accepted run
            写入 lease 180s
-           StartSpec：场景、计划相位；评测另带无人值守标记与模型密文
+           StartSpec：场景、计划相位、结构化意图；评测另带无人值守标记与模型密文
            INSERT turn.accepted（通常 sequence=1）→ NOTIFY turn_events_channel（投影）
     <span class="pt">◆ 要点  业务首事件在 claim 之后。TTFB 从 SSE 见到 accepted 起算，不是从 POST 返回起算。</span>
 

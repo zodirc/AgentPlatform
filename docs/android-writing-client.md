@@ -89,7 +89,7 @@ SDK 文档第 4 节的 A11–A17 已合入。定义与现状在那份文档里�
 | A16 | 单回合约束 | 全应用同一时刻一个回合（第 5.3 节） |
 | A17 | 契约夹具 | 门禁 G0：Web 与 Android 的 reducer 用同一批夹具验收 |
 
-这些项同时改变 Web 的接法：Web 改发意图（A13），并把事件折叠抽成纯函数以接入夹具（第 4.2 节）。
+这些项同时改变 Web 的接法：Web 已改发意图（A13）。事件折叠是纯函数 `reduceTurn`，工作台在回合进行中读它（第 4.2 节）。
 
 ---
 
@@ -134,14 +134,14 @@ TurnView = fold(reduce, TurnView.empty, events 按 sequence 排序去重)
 ```
 
 - `reduce(view, envelope) -> view` 是无副作用的纯函数。相位（开篇待选、Plan 待确认、修订候选、交付）从事件推出，不由界面自己判断。
-- 视图形状对齐契约 `projections/turn_view.json` 及其写作扩展字段（A17）。
+- 客户端投影就是夹具里的 `view`：`status`、`opening_ponds`、`plan`、`patch_candidates`、`pinned_cards`、`usage`、`last_event_sequence`。服务器的 `projections/turn_view.json` 另有会话、工具时间线等字段，不拿来生成这层视图。
 - 提交只认 `step.completed`；终态只认 `turn.completed` / `turn.failed` / `turn.cancelled`，每回合恰好一条。
 - 高频增量（`turn.token`、`turn.thinking.delta`、`section.draft.delta`）先进合并缓冲，按帧（约 50 ms）一次性折叠，与 Web 的 `streamDeltaBuffer.ts` 同理。
 - 进程重启、页面重进、断线：从最后一个已知 `sequence` 调 `events()` 补齐，再继续实时。无需另存 UI 状态。
 
 **共享的是夹具，不是代码。** 两端的 reducer 各自实现，都以 A17 的「事件日志 → 期望视图」夹具（`packages/contracts/tests/fixtures/turns/`）为单测输入。新增事件时先加夹具，再改两边 reducer。
 
-Web 侧对应的整理：现在的事件折叠写在 1300 多行的 `useWorkbench.ts` hook 里。先把其中 `ev.type` 分支抽成纯函数 `reduceTurn`，hook 只负责订阅和派发。这一步不改行为，但它是两端能对照同一批夹具的前提。
+Web 侧：`reduceTurn` 是事件日志到写作投影的纯函数，夹具单测走它。`useWorkbench` 订阅事件后把同一条日志交给 `reduceTurn`。回合进行中，Plan、开篇、用量、修订候选和钉住的卡片都以这份投影为准；回合结束后服务器返回的 TurnView 仍可覆盖。采纳和放弃修订发 `accept_patch` / `reject_patch` 意图，不开旧的补丁接口。流式增量仍进 `streamDeltaBuffer`。审批、失败提示、历史补丁留在 hook 里，不进折叠。
 
 ### 4.3 意图与命令
 

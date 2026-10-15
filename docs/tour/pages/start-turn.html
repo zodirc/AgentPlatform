@@ -8,7 +8,8 @@
 
           <h3>主链（默认 pull）</h3>
           <pre class="seq">Browser   POST /api/v1/sessions/{id}/turns
-          Cookie；body { message, client_request_id, scenario_id? }
+          Cookie；body { message, client_request_id, scenario_id?, plan_phase?, intent? }
+          intent：select_pond / more_ponds / confirm_plan / accept_patch / reject_patch
     │
     ▼
 api       鉴权 · assert_session_owner · 校验 work / scenario
@@ -17,7 +18,8 @@ api       鉴权 · assert_session_owner · 校验 work / scenario
             同用户未领取 ≥ 2 → 429 per_tenant_queue_full
             Retry-After: 5
             <span class="pt">◆ 要点  429 时 Turn 尚未 INSERT。把过载写成 failed，终态语义脏了，重试还会再插一行。</span>
-          同一事务 INSERT turns(pending) + runs(accepted, pull_eligible) + turn_views seed
+          同一事务 INSERT turns(pending, plan_phase, intent) + runs(accepted, pull_eligible) + turn_views seed
+          intent 为 JSONB；空或非法 kind 存 NULL。五种之外不入库
           COMMIT 后 PUBLISH turn.dispatch run_id（默认；门铃只有 UUID）
             TURN_DISPATCH_WAKE=postgres|both 时另发 pg_notify(turn_dispatch_channel)
           立即 202 { turn_id, run_id, status: pending }
@@ -26,6 +28,9 @@ api       鉴权 · assert_session_owner · 校验 work / scenario
     ▼
 runtime   SUBSCRIBE turn.dispatch + 2s poll 反熵 → 条件 UPDATE claim（CAS）
 （编排）  写入 lease_expires_at = now()+180s；心跳 10s
+          领取行含 user_input、plan_phase、intent，交给 start_turn
+          resolve_intent 在改作品之前拍影子快照；confirm_plan 的 executing 优先
+          对不上当前候选 → turn.failed，error_kind=invalid_intent
           turns.status pending→running；INSERT turn.accepted（业务首事件，通常 sequence=1）
           Intake → Engine
             live ──HTTP──► model-gateway
@@ -42,7 +47,9 @@ runtime   SUBSCRIBE turn.dispatch + 2s poll 反熵 → 条件 UPDATE claim（CAS
     <span class="pt">◆ 要点  claim 真源是 Postgres；门铃默认 Redis Pub/Sub。禁止用 Streams/XACK 表示领取。</span></pre>
 
           <h3>同族控制命令（持约副本）</h3>
-          <pre class="seq">Browser 短 POST  approve | deny | cancel | patch accept/reject
+          <pre class="seq">Browser 短 POST  approve | deny | cancel
+写作采纳 / 放弃不走这里：下一次 StartTurn，intent=accept_patch / reject_patch
+回合内 patch accept/reject 仍留给评测
     │
     ▼
 api      INSERT run_commands + pg_notify('run_commands_channel', …)
