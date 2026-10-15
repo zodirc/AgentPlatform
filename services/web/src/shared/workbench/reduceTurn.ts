@@ -1,6 +1,6 @@
 export type TurnEnvelope = {
   type?: string;
-  sequence?: number;
+  sequence?: number | null;
   payload?: Record<string, unknown>;
 };
 

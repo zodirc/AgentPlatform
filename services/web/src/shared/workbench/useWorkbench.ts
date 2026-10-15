@@ -3,10 +3,9 @@
  * 由 WorkbenchProvider 调用，UI 层应使用 useWorkbench()。
  */
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
-  acceptPatch,
   approveToolCall,
   cancelTurn,
   denyToolCall,
@@ -16,7 +15,6 @@ import {
   invalidateTurnViewCache,
   fetchWorkspaceFile,
   readPermissionMode,
-  rejectPatch,
   startTurn,
   warmupRetrieval,
   type TurnEvent,
@@ -28,6 +26,8 @@ import { TurnWebSocketClient } from "../realtime/TurnWebSocketClient";
 import { parentTimelineItems, resolveSubagents } from "./subagents";
 import type {
   ContextUsage,
+  PatchCandidate,
+  PinnedCards,
   ScenarioId,
   TimelineItem,
   TokenUsage,
@@ -71,6 +71,12 @@ import {
   upsertHistoryItem,
 } from "./workbenchHistory";
 import { useWorkbenchSession } from "./workbenchSession";
+import { reduceTurn } from "./reduceTurn";
+import {
+  patchCandidateFromPayload,
+  pinnedCardsFromPayload,
+  selectWhileRunning,
+} from "./writingSurface";
 import {
   useStreamDeltaBuffer,
   type SubagentDeltaBuffer,
@@ -159,6 +165,82 @@ export function useWorkbenchImpl(): WorkbenchState {
   const [activePlanPhase, setActivePlanPhase] = useState<PlanPhaseWire | null>(
     null,
   );
+  // 写作相位只从这一份投影来。回合进行中它优先于服务器 TurnView；
+  // 回合结束后 TurnView 仍可覆盖。审批、时间线、流式增量不在投影里。
+  const turnProjection = useMemo(() => reduceTurn(events), [events]);
+  const foldedPlan = turnProjection.plan
+    ? planFromEventPayload(turnProjection.plan)
+    : null;
+  const foldedPonds = turnProjection.opening_ponds
+    ? openingPondsFromEventPayload(turnProjection.opening_ponds)
+    : null;
+
+  function planFromServer(): PlanArtifact | null {
+    return (
+      livePlan ??
+      latestPlanFromArtifacts(
+        view?.artifacts as Record<string, unknown>[] | undefined,
+      )
+    );
+  }
+
+  function pondsFromServer(): OpeningPondsArtifact | null {
+    return (
+      liveOpeningPonds ??
+      latestOpeningPondsFromArtifacts(
+        view?.artifacts as Record<string, unknown>[] | undefined,
+      )
+    );
+  }
+
+  function resolvePlan(): PlanArtifact | null {
+    const fromServer = planFromServer();
+    if (busy && foldedPlan) return foldedPlan;
+    return fromServer ?? foldedPlan;
+  }
+
+  function resolveOpeningPonds(): OpeningPondsArtifact | null {
+    const fromServer = pondsFromServer();
+    const fromEvents = foldedPonds ?? latestOpeningPondsFromEvents(events);
+    if (busy && fromEvents) return fromEvents;
+    return fromServer ?? fromEvents;
+  }
+
+  function patchesFromServer(): PatchCandidate[] {
+    const rows = (view?.artifacts ?? []) as Record<string, unknown>[];
+    return rows
+      .map((row) => patchCandidateFromPayload(row))
+      .filter((row): row is PatchCandidate => row != null);
+  }
+
+  function resolvePatchCandidates(): PatchCandidate[] {
+    const fromEvents = turnProjection.patch_candidates
+      .map((row) => patchCandidateFromPayload(row))
+      .filter((row): row is PatchCandidate => row != null);
+    const chosen = selectWhileRunning(
+      busy,
+      fromEvents,
+      patchesFromServer(),
+      (rows) => rows.length === 0,
+    );
+    return chosen ?? [];
+  }
+
+  function pinnedFromServer(): PinnedCards | null {
+    const rows = (view?.artifacts ?? []) as Record<string, unknown>[];
+    const found = [...rows].reverse().find((row) => row.type === "writing_cards");
+    return pinnedCardsFromPayload(found);
+  }
+
+  function resolvePinnedCards(): PinnedCards | null {
+    return selectWhileRunning(
+      busy,
+      pinnedCardsFromPayload(turnProjection.pinned_cards),
+      pinnedFromServer(),
+      (row) => !row?.cards?.length && row?.available_count == null,
+    );
+  }
+
   const planWrapSentRef = useRef(false);
   const streamRef = useRef<StreamClient | null>(null);
   const draftBeforeRef = useRef<string | null>(null);
@@ -520,7 +602,6 @@ export function useWorkbenchImpl(): WorkbenchState {
             const nextPlan = planFromEventPayload(
               ev.payload as Record<string, unknown>,
             );
-            setLivePlan(nextPlan);
             setTurnHistory((prev) => patchHistoryPlan(prev, id, nextPlan));
             if (planIsProposedOnly(nextPlan) && planWrapSentRef.current) {
               setPlanAwaitingConfirm(true);
@@ -535,24 +616,9 @@ export function useWorkbenchImpl(): WorkbenchState {
               ev.payload as Record<string, unknown>,
             );
             if (nextPonds) {
-              setLiveOpeningPonds(nextPonds);
               setTurnHistory((prev) =>
                 patchHistoryOpeningPonds(prev, id, nextPonds),
               );
-            }
-          }
-          if (ev.type === "usage.reported" || ev.type === "turn.completed") {
-            // Backend payload.input/output_tokens are turn cumulatives;
-            // step_* fields are per-step deltas (used only when rebuilding from events).
-            const usage = (
-              ev.type === "usage.reported" ? ev.payload : ev.payload.token_usage
-            ) as TokenUsage | undefined;
-            if (usage && typeof usage === "object") {
-              setLiveTokenUsage({
-                input_tokens: Number(usage.input_tokens ?? 0),
-                output_tokens: Number(usage.output_tokens ?? 0),
-                source: usage.source,
-              });
             }
           }
           if (ev.type === "turn.failed") {
@@ -561,6 +627,7 @@ export function useWorkbenchImpl(): WorkbenchState {
             const msg = turnFailureUserMessage(
               ev.payload.termination_reason,
               ev.payload.message,
+              ev.payload.error_kind,
             );
             reportError("任务失败", msg);
           }
@@ -957,13 +1024,9 @@ export function useWorkbenchImpl(): WorkbenchState {
 
   /** 用户确认 Plan 清单后，以 confirm_plan 意图进入 executing。 */
   async function handleExecutePlan() {
-    const snapshot =
-      livePlan ??
-      latestPlanFromArtifacts(
-        view?.artifacts as Record<string, unknown>[] | undefined,
-      );
+    const snapshot = resolvePlan();
     // Only allow the CTA path for proposed-only checklists from Plan mode.
-    if (!planAwaitingConfirm || !planIsProposedOnly(snapshot)) {
+    if (!snapshot || !planAwaitingConfirm || !planIsProposedOnly(snapshot)) {
       return;
     }
     planWrapSentRef.current = false;
@@ -982,7 +1045,8 @@ export function useWorkbenchImpl(): WorkbenchState {
   }
 
   async function handleSelectOpeningPond(item: OpeningPondItem) {
-    const snapshot = turnHistory.at(-1)?.openingPonds ?? liveOpeningPonds;
+    const snapshot =
+      turnHistory.at(-1)?.openingPonds ?? resolveOpeningPonds();
     if (
       busy ||
       pendingApproval ||
@@ -1002,7 +1066,8 @@ export function useWorkbenchImpl(): WorkbenchState {
   }
 
   async function handleMoreOpeningPonds() {
-    const snapshot = turnHistory.at(-1)?.openingPonds ?? liveOpeningPonds;
+    const snapshot =
+      turnHistory.at(-1)?.openingPonds ?? resolveOpeningPonds();
     if (busy || pendingApproval || !snapshot?.items?.length) {
       return;
     }
@@ -1102,36 +1167,22 @@ export function useWorkbenchImpl(): WorkbenchState {
     }
   }
 
-  /** 接受 writing patch 并续流。 */
+  /** 采纳修订：下一回合带 accept_patch 意图，不在本回合里直接落盘。 */
   async function handleAcceptPatch(patchId: string) {
-    if (!turnId) return;
-    setActionBusy(true);
-    setError(null);
-    try {
-      await acceptPatch(turnId, patchId);
-      setBusy(true);
-      connectStream(turnId, lastSequenceRef.current);
-    } catch (err) {
-      setActionBusy(false);
-      reportError("接受补丁失败", err);
-      await refreshView();
-    }
+    await handleSendText("采用这个修订", {
+      planModeSend: false,
+      hideUserInput: true,
+      intent: { kind: "accept_patch", patch_id: patchId },
+    });
   }
 
-  /** 拒绝 writing patch 并续流。 */
+  /** 放弃修订：下一回合带 reject_patch 意图。 */
   async function handleRejectPatch(patchId: string) {
-    if (!turnId) return;
-    setActionBusy(true);
-    setError(null);
-    try {
-      await rejectPatch(turnId, patchId);
-      setBusy(true);
-      connectStream(turnId, lastSequenceRef.current);
-    } catch (err) {
-      setActionBusy(false);
-      reportError("拒绝补丁失败", err);
-      await refreshView();
-    }
+    await handleSendText("不用这个修订", {
+      planModeSend: false,
+      hideUserInput: true,
+      intent: { kind: "reject_patch", patch_id: patchId },
+    });
   }
 
   /**
@@ -1259,22 +1310,25 @@ export function useWorkbenchImpl(): WorkbenchState {
     liveContextUsage ??
     (view?.context_usage as ContextUsage | null | undefined) ??
     null;
-  const tokenUsage =
+  const eventUsage = tokenUsageFromEvents(events);
+  const foldedUsage = turnProjection.usage
+    ? {
+        input_tokens: turnProjection.usage.input_tokens,
+        output_tokens: turnProjection.usage.output_tokens,
+        source: eventUsage?.source,
+      }
+    : null;
+  const serverUsage =
     liveTokenUsage ??
-    tokenUsageFromEvents(events) ??
     (view?.token_usage as TokenUsage | null | undefined) ??
     null;
-  const plan =
-    livePlan ??
-    latestPlanFromArtifacts(
-      view?.artifacts as Record<string, unknown>[] | undefined,
-    );
-  const openingPonds =
-    liveOpeningPonds ??
-    latestOpeningPondsFromArtifacts(
-      view?.artifacts as Record<string, unknown>[] | undefined,
-    ) ??
-    latestOpeningPondsFromEvents(events);
+  const tokenUsage = busy
+    ? (foldedUsage ?? eventUsage ?? serverUsage)
+    : (serverUsage ?? eventUsage ?? foldedUsage);
+  const plan = resolvePlan();
+  const openingPonds = resolveOpeningPonds();
+  const patchCandidates = resolvePatchCandidates();
+  const pinnedCards = resolvePinnedCards();
 
   const canExecutePlan =
     planAwaitingConfirm &&
@@ -1336,6 +1390,8 @@ export function useWorkbenchImpl(): WorkbenchState {
     tokenUsage,
     plan,
     openingPonds,
+    patchCandidates,
+    pinnedCards,
     planMode,
     setPlanMode: setPlanModeAndClearSuggest,
     planPhase,

@@ -259,15 +259,9 @@ export function AgentActivityPanel({
       : null;
   const style = PHASE_STYLES[activity.phase];
   const planStep = livePlanStep(wb.plan, wb.displayStatus);
-  const pinnedCards = [...(wb.view?.artifacts ?? [])]
-    .reverse()
-    .find((a) => a.type === "writing_cards") as
-    | {
-        cards?: Array<{ title?: string; kind?: string }>;
-      }
-    | undefined;
-  const cardTitles = Array.isArray(pinnedCards?.cards)
-    ? pinnedCards.cards
+  const pinned = wb.pinnedCards;
+  const cardTitles = Array.isArray(pinned?.cards)
+    ? pinned.cards
         .map((c) => String(c.title ?? "").trim())
         .filter(Boolean)
         .slice(0, 4)

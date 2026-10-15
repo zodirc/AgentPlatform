@@ -13,6 +13,16 @@ describe("turnFailureUserMessage", () => {
     expect(turnFailureUserMessage("runner_lost")).toMatch(/断开|重试/);
   });
 
+  it("shows the invalid intent explanation", () => {
+    expect(
+      turnFailureUserMessage(
+        "fatal_error",
+        "这个选择已经失效，请重新点选。",
+        "invalid_intent",
+      ),
+    ).toBe("这个选择已经失效，请重新点选。");
+  });
+
   it("prefers mapped reason over raw message", () => {
     expect(turnFailureUserMessage("start_timeout", "no runtime claimed")).toMatch(
       /执行器/,

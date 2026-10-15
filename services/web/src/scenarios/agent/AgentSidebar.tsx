@@ -11,10 +11,7 @@ import {
 } from "../../shared/api/client";
 import { isSeedCorpusPath } from "../../shared/workspace/seedPath";
 import { isWorkSurfaceHiddenPath } from "../../shared/workspace/harnessPath";
-import {
-  PatchDiffPanel,
-  type PatchArtifact,
-} from "../../components/PatchDiffPanel";
+import { PatchDiffPanel } from "../../components/PatchDiffPanel";
 import { WriteFileDiffPanel } from "../../components/WriteFileDiffPanel";
 import {
   artifactToWritePreview,
@@ -58,10 +55,6 @@ type Props = {
   /** 写作模式：用作品清单替换文件树。 */
   bookSurface?: boolean;
 };
-
-function isPatchArtifact(a: Record<string, unknown>): a is PatchArtifact {
-  return typeof a.patch_id === "string" && typeof a.old_text === "string";
-}
 
 function toolLabel(item: TimelineItem, events: TurnEvent[]): string {
   const name = String(item.tool_name ?? "tool");
@@ -406,9 +399,7 @@ export function AgentSidebar({
     }
   };
 
-  const patches = artifacts.filter(
-    isPatchArtifact,
-  ) as unknown as PatchArtifact[];
+  const patches = wb.patchCandidates;
   const fileWrites = artifacts
     .filter((a) => a.type === "file_write" && typeof a.path === "string")
     .filter((a) => String(a.status ?? "") === "applied");
@@ -731,7 +722,7 @@ export function AgentSidebar({
 
         <div className="min-w-0 space-y-3 overflow-hidden p-3">
           {scenarioExtras}
-          <WritingCardsView artifacts={artifacts} />
+          <WritingCardsView artifacts={artifacts} pinned={wb.pinnedCards} />
           <RetrievalView artifacts={artifacts} />
           <ArtifactView artifacts={artifacts} />
         </div>

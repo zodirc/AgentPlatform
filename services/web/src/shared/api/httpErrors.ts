@@ -102,9 +102,14 @@ export async function throwIfNotOk(
 export function turnFailureUserMessage(
   terminationReason: unknown,
   message?: unknown,
+  errorKind?: unknown,
 ): string {
   const reason = String(terminationReason ?? "").trim();
   const msg = String(message ?? "").trim();
+  const kind = String(errorKind ?? "").trim();
+  if (kind === "invalid_intent") {
+    return msg || "这个选择已经失效，请重新点选。";
+  }
   if (reason && TERMINATION_COPY[reason]) {
     return TERMINATION_COPY[reason];
   }

@@ -1,8 +1,5 @@
 import type { ReactNode } from "react";
-import {
-  PatchDiffPanel,
-  type PatchArtifact,
-} from "../../components/PatchDiffPanel";
+import { PatchDiffPanel } from "../../components/PatchDiffPanel";
 import { WriteFileDiffPanel } from "../../components/WriteFileDiffPanel";
 import { Button } from "../../components/ui/button";
 import { Card, CardTitle } from "../../components/ui/card";
@@ -20,18 +17,12 @@ type Props = {
   layout?: "default" | "agent";
 };
 
-function isPatchArtifact(a: Record<string, unknown>): a is PatchArtifact {
-  return typeof a.patch_id === "string" && typeof a.old_text === "string";
-}
-
 function isFileWriteArtifact(a: Record<string, unknown>): boolean {
   return a.type === "file_write" && typeof a.path === "string";
 }
 
 export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
-  const patches = (wb.view?.artifacts ?? []).filter(
-    isPatchArtifact,
-  ) as unknown as PatchArtifact[];
+  const patches = wb.patchCandidates;
   const fileWrites = (wb.view?.artifacts ?? [])
     .filter(isFileWriteArtifact)
     .filter((a) => String(a.status ?? "") === "applied");

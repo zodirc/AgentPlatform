@@ -1,22 +1,12 @@
 import { Badge } from "../../components/ui/badge";
 import { Card, CardTitle } from "../../components/ui/card";
+import type { PinnedCards } from "../../shared/workbench/types";
 
-type WritingCardMeta = {
-  path?: string;
-  kind?: string;
-  title?: string;
-};
-
-type WritingCardsArtifact = {
-  type?: string;
-  cards?: WritingCardMeta[];
-  chars?: number;
-  available_count?: number;
-  summary?: string;
-};
+type WritingCardsArtifact = PinnedCards;
 
 type Props = {
   artifacts: Array<Record<string, unknown>>;
+  pinned?: PinnedCards | null;
 };
 
 const KIND_LABEL: Record<string, string> = {
@@ -26,10 +16,14 @@ const KIND_LABEL: Record<string, string> = {
   general: "通用",
 };
 
-export function WritingCardsView({ artifacts }: Props) {
-  const item = [...artifacts]
-    .reverse()
-    .find((a) => a.type === "writing_cards") as WritingCardsArtifact | undefined;
+export function WritingCardsView({ artifacts, pinned }: Props) {
+  const item =
+    pinned ??
+    ([...artifacts]
+      .reverse()
+      .find((a) => a.type === "writing_cards") as
+      | WritingCardsArtifact
+      | undefined);
   if (!item) return null;
 
   const cards = Array.isArray(item.cards) ? item.cards : [];

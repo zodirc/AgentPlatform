@@ -70,6 +70,30 @@ export type TokenUsage = {
   source?: "provider" | "estimated" | "mixed";
 };
 
+/** 待审修订。字段与 patch.proposed 载荷一致。 */
+export type PatchCandidate = {
+  patch_id: string;
+  path: string;
+  old_text: string;
+  new_text: string;
+  summary?: string;
+  status?: string;
+};
+
+/** cards.pinned 载荷，界面按写作卡片展示。 */
+export type PinnedCards = {
+  type?: string;
+  cards?: Array<{
+    path?: string;
+    kind?: string;
+    title?: string;
+    truncated?: boolean;
+  }>;
+  chars?: number;
+  available_count?: number;
+  summary?: string;
+};
+
 /** 会话历史列表中的一条回合摘要。 */
 export type TurnHistoryItem = {
   id: string;
@@ -116,6 +140,10 @@ export type WorkbenchState = {
   plan: PlanArtifact | null;
   /** 最新开篇近池制品（live 事件或 turn view），聊天内点选像 Plan。 */
   openingPonds: OpeningPondsArtifact | null;
+  /** 修订候选。回合进行中来自 reduceTurn，结束后服务器制品可覆盖。 */
+  patchCandidates: PatchCandidate[];
+  /** 本回合钉住的素材卡。来源规则同 patchCandidates。 */
+  pinnedCards: PinnedCards | null;
   /** 用户显式开启的 Plan 模式，下一次发送会带 plan_phase（docs/25）。 */
   planMode: boolean;
   setPlanMode: (value: boolean) => void;
