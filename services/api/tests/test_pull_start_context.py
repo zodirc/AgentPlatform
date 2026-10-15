@@ -19,6 +19,17 @@ def test_normalize_plan_phase() -> None:
     assert _normalize_plan_phase("ready") is None
 
 
+def test_normalize_intent() -> None:
+    from app.services.resource.turns import _normalize_intent
+
+    assert _normalize_intent(None) is None
+    assert _normalize_intent({"kind": "nope"}) is None
+    assert _normalize_intent({"kind": "reject_patch", "patch_id": " p1 "}) == {
+        "kind": "reject_patch",
+        "patch_id": "p1",
+    }
+
+
 def test_normalize_model_mode() -> None:
     from app.services.resource.turns import _normalize_model_mode
 

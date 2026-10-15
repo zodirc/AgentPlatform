@@ -57,6 +57,30 @@ async def find_existing_turn(
     return await _find_existing_turn(pool, session_id, client_request_id)
 
 
+_INTENT_KINDS = {
+    "select_pond",
+    "more_ponds",
+    "confirm_plan",
+    "accept_patch",
+    "reject_patch",
+}
+
+
+def _normalize_intent(intent: dict | None) -> dict | None:
+    """只留下已知点选。非法 kind 不当成意图存。"""
+    if not isinstance(intent, dict):
+        return None
+    kind = str(intent.get("kind") or "").strip()
+    if kind not in _INTENT_KINDS:
+        return None
+    kept: dict[str, str] = {"kind": kind}
+    for key in ("ponds_id", "item_id", "plan_id", "patch_id"):
+        value = intent.get(key)
+        if isinstance(value, str) and value.strip():
+            kept[key] = value.strip()
+    return kept
+
+
 def _normalize_plan_phase(plan_phase: str | None) -> str | None:
     if plan_phase is None:
         return None
@@ -107,6 +131,7 @@ async def create_turn(
     dispatch_notify: bool = True,
     pull_eligible: bool | None = None,
     plan_phase: str | None = None,
+    intent: dict | None = None,
     ops_eval: bool = False,
     clear_context: bool = False,
     model_mode: str | None = None,
@@ -122,6 +147,7 @@ async def create_turn(
         dispatch_notify: 是否 pg_notify 唤醒 pull runtime。
         pull_eligible: 覆盖是否可 claim。
         plan_phase: planning/executing 或 None。
+        intent: 结构化点选（开篇、Plan、修订）。pull 领取时原样交给 runtime。
         ops_eval: Ops 评测 run 标记。
         model_mode: stub/live/recorded。
         model_override: 含 api_key 时 Fernet 写入 turn_model_secrets。
@@ -137,6 +163,7 @@ async def create_turn(
         pull_eligible=pull_eligible,
     )
     phase = _normalize_plan_phase(plan_phase)
+    stored_intent = _normalize_intent(intent)
     mode = _normalize_model_mode(model_mode)
     want_ops = bool(ops_eval)
     override = model_override if isinstance(model_override, dict) else None
@@ -166,12 +193,12 @@ async def create_turn(
                 """
                 INSERT INTO turns (
                     id, session_id, scenario_id, status, user_input,
-                    client_request_id, plan_phase
+                    client_request_id, plan_phase, intent
                 )
-                VALUES ($1, $2, $3, 'pending', $4, $5, $6)
+                VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7::jsonb)
                 ON CONFLICT (session_id, client_request_id) DO NOTHING
                 RETURNING id, session_id, scenario_id, status, user_input,
-                          created_at, plan_phase
+                          created_at, plan_phase, intent
                 """,
                 turn_id,
                 session_id,
@@ -179,6 +206,7 @@ async def create_turn(
                 message,
                 client_request_id,
                 phase,
+                json.dumps(stored_intent) if stored_intent else None,
             )
             run_row = None
             if turn_row is not None:

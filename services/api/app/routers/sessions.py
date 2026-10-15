@@ -291,6 +291,7 @@ async def create_turn(
         message=body.message,
         client_request_id=body.client_request_id,
         plan_phase=body.plan_phase,
+        intent=body.intent,
         clear_context=bool(body.clear_context),
     )
     await session_svc.touch_session(session_id)
