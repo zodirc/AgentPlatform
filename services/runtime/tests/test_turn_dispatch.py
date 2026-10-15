@@ -62,8 +62,44 @@ async def test_try_claim_passes_plan_phase(monkeypatch: pytest.MonkeyPatch) -> N
     with patch("app.controller.turn_controller.start_turn", new=_fake_start_turn):
         assert await td.try_claim_and_start(run_id) is True
     assert started.get("plan_phase") == "planning"
+    assert started.get("intent") is None
     assert started.get("already_claimed") is True
     assert started.get("ops_eval") is False
+
+
+@pytest.mark.asyncio
+async def test_try_claim_passes_intent(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.controller import turn_dispatch as td
+
+    run_id = uuid4()
+    turn_id = uuid4()
+    session_id = uuid4()
+    started: dict = {}
+
+    async def _fake_load(_run_id=None):
+        return {
+            "run_id": run_id,
+            "turn_id": turn_id,
+            "session_id": session_id,
+            "scenario_id": "agent",
+            "user_input": "不用这个修订",
+            "plan_phase": None,
+            "intent": '{"kind": "reject_patch", "patch_id": "patch-1"}',
+            "ops_eval": False,
+            "model_mode": None,
+        }
+
+    async def _fake_start_turn(**kwargs):
+        started.update(kwargs)
+
+    monkeypatch.setattr(td.settings, "turn_dispatch", "pull")
+    monkeypatch.setattr(td.settings, "runtime_max_inflight_turns", 0)
+    monkeypatch.setattr(td, "_load_accepted", _fake_load)
+    monkeypatch.setattr(td, "ensure_run_owned_by_runner", AsyncMock(return_value=True))
+    monkeypatch.setattr(td, "load_session_work", AsyncMock(return_value=(None, None, None, True)))
+    with patch("app.controller.turn_controller.start_turn", new=_fake_start_turn):
+        assert await td.try_claim_and_start(run_id) is True
+    assert started.get("intent") == {"kind": "reject_patch", "patch_id": "patch-1"}
 
 
 @pytest.mark.asyncio
@@ -128,6 +164,7 @@ async def test_load_accepted_requires_pull_eligible(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(td, "get_pool", AsyncMock(return_value=_Pool()))
     assert await td._load_accepted() is None
     assert any("pull_eligible" in s for s in seen_sql)
+    assert any("t.intent" in s for s in seen_sql)
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,7 @@ Claim 所有权永远在 Postgres；Redis 消息可丢，靠 poll 反熵。
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from uuid import UUID, uuid4
 
@@ -45,6 +46,41 @@ def _wake_mode() -> str:
     return "redis"
 
 
+_INTENT_KINDS = {
+    "select_pond",
+    "more_ponds",
+    "confirm_plan",
+    "accept_patch",
+    "reject_patch",
+}
+
+
+def _intent_from_row(row) -> dict | None:
+    """把 turns.intent 还原成 start_turn 认得的点选。缺列或非法 kind 当作没有。"""
+    keys = row.keys() if hasattr(row, "keys") else ()
+    if "intent" not in keys:
+        return None
+    raw = row["intent"]
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(raw, dict):
+        return None
+    kind = str(raw.get("kind") or "").strip()
+    if kind not in _INTENT_KINDS:
+        return None
+    kept: dict[str, str] = {"kind": kind}
+    for key in ("ponds_id", "item_id", "plan_id", "patch_id"):
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            kept[key] = value.strip()
+    return kept
+
+
 def _has_capacity() -> bool:
     """本进程 inflight 是否未达 ``RUNTIME_MAX_INFLIGHT_TURNS``。"""
     from app.controller.turn_controller import _active_turns
@@ -62,7 +98,7 @@ async def _load_accepted(run_id: UUID | None = None) -> dict | None:
         return await pool.fetchrow(
             """
             SELECT r.id AS run_id, r.turn_id, r.ops_eval, r.model_mode,
-                   t.session_id, t.scenario_id, t.user_input, t.plan_phase
+                   t.session_id, t.scenario_id, t.user_input, t.plan_phase, t.intent
             FROM runs r
             JOIN turns t ON t.id = r.turn_id
             WHERE r.id = $1
@@ -74,7 +110,7 @@ async def _load_accepted(run_id: UUID | None = None) -> dict | None:
     return await pool.fetchrow(
         """
         SELECT r.id AS run_id, r.turn_id, r.ops_eval, r.model_mode,
-               t.session_id, t.scenario_id, t.user_input, t.plan_phase
+               t.session_id, t.scenario_id, t.user_input, t.plan_phase, t.intent
         FROM runs r
         JOIN turns t ON t.id = r.turn_id
         WHERE r.status = 'accepted'
@@ -141,6 +177,7 @@ async def try_claim_and_start(run_id: UUID | None = None) -> bool:
         message=str(row["user_input"] or ""),
         trace_id=uuid4(),
         plan_phase=plan_phase,
+        intent=_intent_from_row(row),
         work_id=work_id,
         work_root=work_root,
         owner_user_id=owner_user_id,
