@@ -183,11 +183,18 @@ async def _run(
             phase = state.plan_phase
         else:
             profile = ScenarioRegistry.get("writing")
-            text, phase = resolve_intent(
-                intent, message=message or "", workspace_root=root
+            if not turn_id:
+                raise RuntimeError("start_turn missing turn_id")
+            snapshot_id = turn_id
+            from app.writing.intents import preferred_plan_phase
+
+            text, intent_phase = resolve_intent(
+                intent,
+                message=message or "",
+                workspace_root=root,
+                before_apply=lambda: snapshot_turn(root, snapshot_id),
             )
-            if plan_phase:
-                phase = plan_phase
+            phase = preferred_plan_phase(intent_phase, plan_phase)
             state = TurnState(
                 turn_id=UUID(turn_id),
                 session_id=uuid4(),
@@ -213,7 +220,6 @@ async def _run(
         )
         if resume_turn_id is None:
             state.volatile_context = assembly.volatile_context
-            snapshot_turn(root, str(state.turn_id))
         log = TurnEventLog(root, str(state.turn_id))
         ids = {
             "turn_id": str(state.turn_id),

@@ -18,6 +18,11 @@ def shadow_dir(work_root: Path) -> Path:
     return root.parent / ".agent-shadow" / root.name
 
 
+def intent_baseline(work_root: Path, turn_id: str) -> None:
+    """意图写入作品之前记下工作区。放弃修订后，撤销本回合仍能找回候选。"""
+    ensure_turn_baseline(Path(work_root), turn_id=str(turn_id))
+
+
 def ensure_turn_baseline(work_root: Path, *, turn_id: str) -> str | None:
     """Turn 开始时记下工作区当前文件，供回退和 auto_edit 判断快照是否存在。"""
     try:

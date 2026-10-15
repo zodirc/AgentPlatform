@@ -527,6 +527,13 @@ def test_runner_does_not_assign_process_settings():
     assert "settings." not in source
 
 
+def test_preferred_plan_phase_keeps_confirm():
+    from app.writing.intents import preferred_plan_phase
+
+    assert preferred_plan_phase("executing", "planning") == "executing"
+    assert preferred_plan_phase(None, "planning") == "planning"
+
+
 def test_resolve_intent_messages(tmp_path: Path):
     from app.writing.intents import resolve_intent
     from app.writing.opening_ponds import save_opening_ponds
@@ -631,6 +638,40 @@ async def test_intent_reaches_turn_accepted(tmp_path: Path):
     preview = events[0].payload["user_input_preview"]
     assert preview.startswith("就用这个开篇：余烬")
     assert "采用此开篇" not in preview
+
+
+@pytest.mark.asyncio
+async def test_reject_snapshot_restores_pending_patch(tmp_path: Path):
+    from app.writing.candidates import latest_pending_patch, remember_pending_patch
+    from app.writing_host.protocol import revert_turn
+
+    work = tmp_path / "book"
+    work.mkdir()
+    (work / "outline.md").write_text("# 旧题\n", encoding="utf-8")
+    remember_pending_patch(
+        {
+            "patch_id": "patch-1",
+            "path": "outline.md",
+            "old_text": "旧",
+            "new_text": "新",
+            "status": "pending",
+        },
+        workspace_root=work,
+    )
+    model = _recording(tmp_path, "reject_patch", "已放下")
+    result = await start_turn(
+        work_root=work,
+        message="不用这个修订",
+        intent={"kind": "reject_patch", "patch_id": "patch-1"},
+        model=model,
+        budget=TurnBudget(max_steps=1),
+        recording="reject_patch",
+    )
+    assert latest_pending_patch(workspace_root=work) is None
+    revert_turn(work, result.turn_id)
+    restored = latest_pending_patch(workspace_root=work)
+    assert restored is not None
+    assert restored["patch_id"] == "patch-1"
 
 
 @pytest.mark.asyncio

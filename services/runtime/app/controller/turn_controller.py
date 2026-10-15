@@ -450,6 +450,24 @@ async def _check_cancel_flag(turn_id: UUID) -> tuple[bool, bool]:
     return await read_cancel_state(turn_id=turn_id)
 
 
+def _intent_baseline(work_root: str | None, turn_id: UUID):
+    """意图改文件之前拍影子快照。git 失败不阻断回合。"""
+    if not work_root:
+        return None
+
+    def _snap() -> None:
+        try:
+            from pathlib import Path
+
+            from app.policy.shadow_git import intent_baseline
+
+            intent_baseline(Path(work_root), str(turn_id))
+        except Exception:
+            logger.exception("intent baseline failed turn_id=%s", turn_id)
+
+    return _snap
+
+
 async def start_turn(
     *,
     turn_id: UUID,
@@ -500,22 +518,6 @@ async def start_turn(
         already_claimed: ``True`` 表示 pull 路径已占有 runner 租约，跳过再次 claim。
         reject_when_full: inflight 已满时是否将 Turn 记为 ``budget_exceeded`` 失败。
     """
-    if intent:
-        from pathlib import Path
-
-        from app.writing.intents import resolve_intent
-
-        message, intent_phase = resolve_intent(
-            intent,
-            message=message,
-            workspace_root=Path(work_root) if work_root else None,
-        )
-        if intent_phase:
-            plan_phase = intent_phase
-    else:
-        from app.writing.intents import clear_turn_choice
-
-        clear_turn_choice()
     if turn_id in _active_turns:
         return
     max_inflight = int(getattr(settings, "runtime_max_inflight_turns", 0) or 0)
@@ -588,6 +590,35 @@ async def start_turn(
     model_tokens = bind_turn_model(mode=effective_mode, override=override_config)
     _track_turn_started(turn_id)
     try:
+        if intent:
+            from pathlib import Path
+
+            from app.writing.intents import preferred_plan_phase, resolve_intent
+            from app.writing_host.errors import InvalidIntent
+
+            try:
+                message, intent_phase = resolve_intent(
+                    intent,
+                    message=message,
+                    workspace_root=Path(work_root) if work_root else None,
+                    before_apply=_intent_baseline(work_root, turn_id),
+                )
+            except InvalidIntent as exc:
+                await _fail_turn(
+                    turn_id=turn_id,
+                    run_id=run_id,
+                    trace_id=trace_id,
+                    termination_reason="fatal_error",
+                    message=exc.user_message,
+                    scenario_id=scenario_id,
+                    error_kind=exc.code,
+                )
+                return
+            plan_phase = preferred_plan_phase(intent_phase, plan_phase)
+        else:
+            from app.writing.intents import clear_turn_choice
+
+            clear_turn_choice()
         ensure_work_root_exists()
         await _run_turn(
             turn_id=turn_id,
@@ -1150,6 +1181,7 @@ async def _fail_turn(
     termination_reason: str,
     message: str | None = None,
     scenario_id: str = "",
+    error_kind: str | None = None,
     steps: int = 0,
     duration_seconds: float = 0.0,
 ) -> None:
@@ -1170,6 +1202,8 @@ async def _fail_turn(
     payload: dict[str, Any] = {"termination_reason": termination_reason}
     if message:
         payload["message"] = message[:1024]
+    if error_kind:
+        payload["error_kind"] = str(error_kind)[:64]
     payload.update(_post_turn_jobs_payload(scenario_id))
     pool = await get_pool()
     async with pool.acquire() as conn:
