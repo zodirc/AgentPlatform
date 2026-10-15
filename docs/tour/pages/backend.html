@@ -139,7 +139,7 @@ t2  领取（编排 runtime；与浏览器无 TCP）
              _active_turns &lt; 16 ? claim : 不领
              UPDATE runs SET running, lease_expires_at = now()+180s
                WHERE status='accepted'
-             领取行含 user_input、plan_phase、intent，交给 start_turn
+             _load_accepted 带出 t.intent，_intent_from_row 后传给 start_turn
              INSERT turn_events type=turn.accepted  sequence=1
              触发器 pg_notify('turn_events_channel', turn_id::text)（投影反熵）
     <span class="pt">◆ 要点  CAS 失败者 = 已被抢走，勿当回滚重试，否则双 runtime 跑同一 Turn。</span>

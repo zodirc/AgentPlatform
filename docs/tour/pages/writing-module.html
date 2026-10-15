@@ -18,7 +18,8 @@
            点选是 select_pond 的 ponds_id / item_id；对不上当前候选则拒绝。不拼句子
 ⑧ 检索特化 排除 seed/intel 与 archive；texture prior 1.4 / 0.35；每 Turn ≤3
 ⑨ 工作台   作品面板 / RAG 是否生效 / signals 弹层可钉档位；一键清空走 discard
-           回合进行中读 reduceTurn；采纳和放弃发意图，不开旧的补丁接口
+           busy 时 useWorkbench 用 reduceTurn 的 plan、开篇、用量、修订候选、钉住卡片
+           采纳、放弃走 handleAcceptPatch / handleRejectPatch，body.intent 再开一回合
 ⑩ 作品状态 story_state.json + editor_notes/ + author_notes.md + author_state + surface/
 <span class="pt">◆ 要点  外围 L2 narrative 与 Ops /ops/writing 只打分。C0 发散块恒 False。账户 writing_account_prefs 产品无入口、评分不读。</span></pre>
 

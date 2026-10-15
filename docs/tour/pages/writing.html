@@ -44,14 +44,69 @@ sources/cards              writing_cards_dir；风格卡 ≤1800 / 人物 ≤100
        /revise · 含糊「去掉 AI 味」→ 只留 read_file / grep / glob，点名原句后才改
      <span class="pt">◆ 要点  相位是开工时收白名单，不是 Engine 里新节点。回读、编辑、修订各是用户显式的下一次 Turn。</span>
 
-2b 点选穿过领取（默认 TURN_DISPATCH=pull）
-     工作台把 intent 放进 StartTurn。落库 turns.intent，领取时原样交给 start_turn
-     改作品之前先拍影子快照。放弃修订后，撤销本轮仍能找回候选
-     confirm_plan 的 executing 盖过壳上残留的 planning
-     id 对不上当前候选 → turn.failed，error_kind=invalid_intent
-     回合进行中工作台读 reduceTurn（夹具里的 view）。结束后服务器 TurnView 仍可覆盖
-     采纳 / 放弃是下一次 StartTurn 的 accept_patch / reject_patch，不走回合内补丁命令
-     <span class="pt">◆ 要点  意图写在回合行上，领取时交给 start_turn。</span>
+2b 点选进下一回合。默认 TURN_DISPATCH=pull，意图写在 turns.intent，领取时读出来。
+
+     工作台 useWorkbench.ts
+       handleSelectOpeningPond  intent.kind=select_pond    ponds_id、item_id
+       handleMoreOpeningPonds   intent.kind=more_ponds     ponds_id
+       handleExecutePlan        intent.kind=confirm_plan   plan_id；同时 plan_phase=executing
+       handleAcceptPatch        intent.kind=accept_patch   patch_id；message=「采用这个修订」
+       handleRejectPatch        intent.kind=reject_patch   patch_id；message=「不用这个修订」
+       都进 handleSendText → startTurn（shared/api/client.ts）
+       POST /api/v1/sessions/{id}/turns
+       body：message、scenario_id、plan_phase（可空）、intent（可空）
+
+     api  routers/sessions.py create_turn
+          → services/resource/turns.py create_turn
+          _normalize_intent：kind 不是上面五种，或 body 不是对象 → 该列 NULL
+          通过则 json.dumps 写入 turns.intent（JSONB）
+          列来自 alembic 0034_turn_intent，DDL phase2_turn_intent.sql
+          user_input 仍是界面那句短消息
+
+     runtime  controller/turn_dispatch.py
+          _load_accepted 的 SELECT 带 t.user_input、t.plan_phase、t.intent
+          _intent_from_row 把 jsonb 还原成 dict（库里可能是对象，也可能是字符串）
+          try_claim_and_start 调用 start_turn(..., intent=)
+
+     start_turn  controller/turn_controller.py
+          租约拿到之后、_run_turn 之前调用 resolve_intent（app/writing/intents.py）
+
+          resolve_intent
+            ├─ select_pond
+            │    _lookup_pond(ponds_id, item_id)；对不上抛 InvalidIntent
+            │    before_apply 先拍影子快照
+            │    save_committed_pond
+            │    交给模型的消息改为「就用这个开篇：{title}」
+            │    原 message 和这句不同时，接在后面
+            ├─ more_ponds
+            │    load_opening_ponds 的 ponds_id 必须是这一组
+            ├─ confirm_plan
+            │    load_turn_plan 的 plan_id 必须是当前计划
+            │    返回相位 executing
+            │    preferred_plan_phase：用这个 executing，不用调用方带来的 planning
+            ├─ accept_patch / reject_patch
+            │    latest_pending_patch 的 patch_id 必须相同
+            │    放弃：快照写完再 drop_pending_patch
+            │    文件 .agent/work/pending_patches.json
+            └─ InvalidIntent
+                 _fail_turn
+                 termination_reason=fatal_error
+                 error_kind=invalid_intent
+                 message=「这个选择已经失效，请重新点选。」
+                 工作台 httpErrors.ts 的 turnFailureUserMessage 见到这个 error_kind 就显示这句
+
+     快照  before_apply → _intent_baseline → policy/shadow_git.py intent_baseline
+           → ensure_turn_baseline，tag 名 turn/{turn_id}
+           tag 已经有就返回，Engine 里后一次 ensure_turn_baseline 不会覆盖
+           本地接头 writing_host/runner.py 用 snapshot_turn，同样在 resolve_intent 写入之前
+
+     折叠  useWorkbench 把事件列表交给 reduceTurn（shared/workbench/reduceTurn.ts）
+           busy 时界面上的 plan、开篇、用量、修订候选、钉住卡片用这份结果
+           回合结束且 GET TurnView 的 artifacts 非空，改用 artifacts
+           turn.token、turn.thinking.delta、section.draft.delta 进 streamDeltaBuffer，不进 reduceTurn
+           单测输入是 packages/contracts/tests/fixtures/turns/ 的 events，期望是同文件的 view
+
+     注: client.ts 里的 acceptPatch、rejectPatch 还在。工作台按钮不调用。评测仍走回合内那条命令。
 
 3  成稿 draft_section(fragment=…)
      冷起步无纲职 → fragment=mixed（不要发明章类型当评分切片）

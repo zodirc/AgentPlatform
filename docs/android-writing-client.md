@@ -89,7 +89,7 @@ SDK 文档第 4 节的 A11–A17 已合入。定义与现状在那份文档里�
 | A16 | 单回合约束 | 全应用同一时刻一个回合（第 5.3 节） |
 | A17 | 契约夹具 | 门禁 G0：Web 与 Android 的 reducer 用同一批夹具验收 |
 
-这些项同时改变 Web 的接法：Web 已改发意图（A13）。事件折叠是纯函数 `reduceTurn`，工作台在回合进行中读它（第 4.2 节）。
+Web 已按 A13 在 StartTurn 里带 `intent`。折叠函数是 `reduceTurn`，`useWorkbench` 在 `busy` 期间读它。见第 4.2 节。
 
 ---
 
@@ -141,7 +141,7 @@ TurnView = fold(reduce, TurnView.empty, events 按 sequence 排序去重)
 
 **共享的是夹具，不是代码。** 两端的 reducer 各自实现，都以 A17 的「事件日志 → 期望视图」夹具（`packages/contracts/tests/fixtures/turns/`）为单测输入。新增事件时先加夹具，再改两边 reducer。
 
-Web 侧：`reduceTurn` 是事件日志到写作投影的纯函数，夹具单测走它。`useWorkbench` 订阅事件后把同一条日志交给 `reduceTurn`。回合进行中，Plan、开篇、用量、修订候选和钉住的卡片都以这份投影为准；回合结束后服务器返回的 TurnView 仍可覆盖。采纳和放弃修订发 `accept_patch` / `reject_patch` 意图，不开旧的补丁接口。流式增量仍进 `streamDeltaBuffer`。审批、失败提示、历史补丁留在 hook 里，不进折叠。
+Web 上的函数是 `services/web/src/shared/workbench/reduceTurn.ts` 的 `reduceTurn`。单测读 `packages/contracts/tests/fixtures/turns/`，输入 `events`，期望同文件的 `view`。`useWorkbench` 把订阅到的事件列表交给它。`busy` 为真时，界面上的 Plan、开篇、用量、修订候选、钉住卡片用这份结果。回合结束后，GET TurnView 的 `artifacts` 非空则改用 `artifacts`。`turn.token`、`turn.thinking.delta`、`section.draft.delta` 进 `streamDeltaBuffer.ts`。审批、失败文案、历史补丁留在 `useWorkbench`。采纳和放弃调用 `handleAcceptPatch` / `handleRejectPatch`，请求体带 `intent`，不调用 `client.ts` 里的 `acceptPatch` / `rejectPatch`。
 
 ### 4.3 意图与命令
 
