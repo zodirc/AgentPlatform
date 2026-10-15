@@ -659,6 +659,9 @@ async def test_agent_engine_injects_verify_receipt_once(
     monkeypatch.setattr(
         "app.engine.agent_engine.settings.verify_receipt_reserve_steps", 2
     )
+    # Product mode auto-runs related tests and clears verify_pending before the
+    # receipt. This test covers the receipt path, so keep that hook off.
+    monkeypatch.setattr("app.settings.settings.product_post_edit_hook", False)
     engine = AgentEngine(
         gateway=FakeGateway(),
         tools=[spec],

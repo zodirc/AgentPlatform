@@ -387,7 +387,9 @@ export interface components {
              * @enum {string}
              */
             plan_phase?: "planning" | "executing";
+            /** @description Structured pick. When set, message is only an optional note. */
             intent?: {
+                /** @enum {string} */
                 kind: "select_pond" | "more_ponds" | "confirm_plan" | "accept_patch" | "reject_patch";
                 ponds_id?: string;
                 item_id?: string;
