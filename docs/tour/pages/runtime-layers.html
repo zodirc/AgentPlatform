@@ -1,91 +1,139 @@
-<section class="page" data-id="runtime-layers" data-group="Runtime" data-title="Controller 与 Engine">
+<section class="page page-mark" data-id="runtime-layers" data-group="Runtime" data-title="Controller 与 Engine">
         <div class="card">
-          <h2>TurnController 与 AgentEngine</h2>
-          <p class="lede">一次 Turn 的写主权在 Controller；反复「组窗 → 问模型 → 跑工具」的 while 在 Engine——二者都在编排 runtime 容器。Guard（取消、分层超时、Stall Watchdog、租约心跳）旁挂全程。live 模型 / embed / exec 是编排的 HTTP 依赖（model-gateway · sources-retrieval · sandbox），不是 while 里新菱形。Engine 返回三种东西：终稿字符串、<code>"waiting_approval"</code>、或 <code>None</code>（取消/预算由 Controller 根据 <code>state</code> 收尾）。</p>
-          <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 终态由 Controller 写入。waiting_approval 不是终态，仍然占用 inflight。</li>
-          </ul>
+          <h2>Runtime 分层：职责边界与执行平面</h2>
+          <p class="lede">Agent 执行一项任务时，通常由模型推理与工具执行交替完成。模型根据用户目标和当前上下文决定下一步动作，运行时调用相应工具，再把结果加入后续推理所使用的上下文。任务可能经历多轮模型请求和工具调用，也可能在执行中等待审批、接收取消请求，或因模型服务、数据库和执行环境故障而中断。运行时必须在这些状态变化之间保持任务记录的一致性，同时限制每一步的执行时间和资源消耗。</p>
+          <p>AgentPlatform 将这些职责划分为运行时编排层和执行平面。编排层负责 Turn 的生命周期与推理循环；模型网关、检索服务和沙箱分别承接模型请求、Embedding 与资料索引、隔离命令执行。<span class="hl">这个边界将任务状态管理留在编排层，把长连接、模型计算和操作系统级隔离放在独立服务中，使下游服务的耗时与故障不会直接改变 Turn 的状态机。</span><span class="hl">本节中的执行平面专指默认 Compose 部署下由独立容器提供的能力；测试或兼容部署可以将其中部分能力保留在同一进程内。</span></p>
 
-          <h3>写主权</h3>
-          <pre class="seq">TurnController（一次 Turn 的外壳，不进 while）
-  claim CAS + 写入 runner lease（TTL 180s，心跳 10s，touch 最小间隔 5s）
-  加载 ScenarioProfile → 组装 ToolScope / 系统提示 / GenerationParams
-  Intake：斜杠、@path、拼接 session transcript（或旧会话的 context_summary）
-  turns.status: pending → running；发出 turn.accepted（payload 含 scenario、模型名、输入预览）
-  收尾：turn.completed / turn.failed / cancelled；runs.succeeded|failed
-  审批挂起：checkpoint + PendingTurn，不写终态事件
+          <h3>1. 运行时的职责划分</h3>
+          <h4>1.1 Controller、Engine 与场景配置</h4>
+          <p>运行时编排层将 Turn 生命周期管理与推理循环分开，由 <code>TurnController</code> 和 <code>AgentEngine</code> 分别承担。场景配置与外部执行服务位于这条主路径的两侧：前者决定本次 Turn 使用哪些能力，后者承接需要独立资源或执行隔离的操作。各组成部分的职责如下。</p>
+          <table>
+            <thead>
+              <tr><th>组成部分</th><th>主要职责</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>TurnController</code></td>
+                <td>领取 Run，建立本次 Turn 的执行上下文，处理取消和审批续跑，并写入终态。</td>
+              </tr>
+              <tr>
+                <td><code>AgentEngine</code></td>
+                <td>在循环中组装上下文、请求模型、解析输出并调度工具；维护 <code>TurnState</code> 并追加过程事件。</td>
+              </tr>
+              <tr>
+                <td><code>ScenarioProfile</code></td>
+                <td>声明场景可用工具、系统提示、步数预算、生成参数和审批覆盖，由 Controller 在启动时加载。</td>
+              </tr>
+              <tr>
+                <td>独立执行服务</td>
+                <td><code>model-gateway</code> 承接 live 模型请求，<code>sources-retrieval</code> 承担 Embedding 与资料索引，<code>sandbox</code> 执行受操作系统隔离的命令。默认 Compose 部署通过内部 HTTP 调用这些服务。</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>这一边界同时约束状态写入权：<span class="hl-warn">Controller 管理 Turn 生命周期并写入终态，Engine 推进执行过程并追加过程事件。Engine 不领取 Run，也不管理执行租约。</span>发生审批挂起时，Controller 保存 Engine 的当前状态，待用户批准或拒绝后恢复同一次执行；<span class="hl-warn">如果 Engine 在循环中自行写入完成状态，续跑就可能失去原有 checkpoint、Run 身份和验证追踪。</span></p>
 
-AgentEngine
-  只变异 TurnState：messages、step_count、usage、verify_* / issue_repro_*、delivery
-  经 EventWriter 追加 step.* / context.reported / turn.token / tool.* / usage.reported
-  不 UPDATE turns.status，不碰 lease，不发 turn.accepted
+          <h4>1.2 一次 Turn 的执行路径</h4>
+          <p>API 接收请求后，将 Turn 与对应的 Run 写入 PostgreSQL，再通过分发通知唤醒运行时。默认配置使用 Redis Pub/Sub 发送 <code>turn.dispatch</code> 通知；<span class="hl">该通知只用于唤醒执行器，不代表执行权已经转移。真正的领取由 PostgreSQL 中的条件更新决定，只有状态为 <code>accepted</code> 的 Run 可以被领取。</span>领取成功后，运行时记录持有该 Run 的租约，并通过心跳维持执行权。</p>
+          <p>Controller 随后加载对应的 <code>ScenarioProfile</code>，由 <code>InputCompiler</code> 处理斜杠指令、<code>@path</code> 预读和会话历史。<code>/help</code>、<code>/compact</code>、<code>/verify</code> 等可以在本地处理的请求，不必进入模型推理循环；需要模型处理时，Controller 才会进一步组装工具范围、模型网关和 <code>TurnState</code>，并把执行交给 Engine。</p>
+          <p>Engine 每一步先检查取消状态和预算，再组装当前上下文并请求模型。模型可以直接返回面向用户的文本，也可以提出工具调用；运行时解析返回内容后执行相应工具，并将结果加入后续上下文。循环受到 Profile 中 <code>max_steps</code> 的限制，同时受 Engine 单步超时和 Turn 级预算约束。<span class="hl">若任务仍有未完成的验证义务，Engine 可以通过 <code>verify_receipt</code> 的续跑逻辑继续处理，而不是把验证工作另建成一个新 Turn。</span></p>
+          <p><span class="hl">普通工具由 runtime 中注册的 handler 执行；需要独立资源或操作系统级隔离的操作才会转交相应服务。</span>live 模型请求通过 <code>model-gateway</code> 以 HTTP NDJSON 流式返回，Embedding 和资料索引工作由 <code>sources-retrieval</code> 承担，命令执行则在默认 Compose 部署中进入 <code>sandbox</code>，由 <code>bwrap</code> 和 Landlock 提供操作系统级隔离。</p>
+          <p>Engine 通过事件写入器记录步骤、工具调用、用量和上下文报告，Controller 在任务完成、失败或取消时写入终态。<span class="hl">PostgreSQL 保存 Turn 的权威状态和耐久事件；默认 checkpoint 持久化模式下，高频 token 与 thinking 增量可通过 Redis live 通道发送，不必把每个增量都写入耐久事件表。</span>API 将耐久状态与 live 事件投影到工作台的 SSE 流，供界面展示执行进度并在断线后恢复状态。</p>
+        </div>
 
-api
-  投影 turn_views；对外 SSE；sessions.context_summary 常异步
-  可 enqueue Redis agent.jobs（索引等）；无分布式事务：领域表短暂落后用 sequence reconcile
+        <div class="card">
+          <h3>2. 场景差异通过 Profile 配置</h3>
+          <p>写作、编码、情报和多助手协作在工具能力、提示词和生成参数上有不同需求，但这些差异不要求各自维护一套推理循环。<code>ScenarioRegistry</code> 从 <code>profiles/*.yaml</code> 加载不可变的 <code>ScenarioProfile</code>，Controller 在启动 Turn 时选择相应配置，再组装工具表、提示词和生成参数。<span class="hl">新增场景能力时，应先判断差异能否通过 Profile 表达；只有执行机制本身确实不同，才有必要修改 Engine 主循环。</span></p>
+          <table>
+            <thead>
+              <tr><th>场景</th><th style="text-align:right"><code>max_steps</code></th><th>Profile 配置侧重点</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>agent</code>（编码）</td>
+                <td style="text-align:right">150</td>
+                <td>仓库导航、文件修改、命令与测试工具，以及结构化导航预热。</td>
+              </tr>
+              <tr>
+                <td><code>writing</code>（写作）</td>
+                <td style="text-align:right">40</td>
+                <td>章节草稿、大纲、资料检索、引用检查和写作状态管理。</td>
+              </tr>
+              <tr>
+                <td><code>intel</code>（情报）</td>
+                <td style="text-align:right">40</td>
+                <td>情报资料检索与 IOC 相关工具。</td>
+              </tr>
+              <tr>
+                <td><code>collab</code>（协作）</td>
+                <td style="text-align:right">50</td>
+                <td>通过指定的子代理类型和工具集合分配任务。</td>
+              </tr>
+              <tr>
+                <td>未指定场景上限</td>
+                <td style="text-align:right">40</td>
+                <td>使用默认步数预算。</td>
+              </tr>
+            </tbody>
+          </table>
+          <p><span class="hl"><code>max_steps</code> 是执行预算，不意味着不同场景拥有不同的主循环。</span>Engine 仍以 <code>state.step_count &lt; state.max_steps</code> 控制常规循环；如果验证状态要求继续执行，则由 <code>verify_receipt</code> 的续跑逻辑推进。<span class="hl-warn">通过 <code>delegate</code> 启动的子 Agent 默认拥有独立的 12 步上限，但其执行仍计入父 Turn 的步数预算，因而不能通过委派绕开父任务的整体限制。</span></p>
+          <p>生成参数也由 Profile 提供。例如，<code>writing</code> 的默认 temperature 为 <code>0.8</code>；<code>agent</code> 可以不显式设置 temperature，沿用模型提供方的默认行为。结构化导航能力同样通过 <code>tool_names</code> 声明，而不是独立的 feature flag。<span class="hl-warn">任务开始后，不应再把这些工具从工具表中临时裁掉，否则同一 Turn 的能力边界就会随执行过程发生变化。</span></p>
+        </div>
 
-平面（独立容器 · HTTP · 不占编排 inflight 计数器本身）
-  model-gateway       live LLM NDJSON
-  sources-retrieval   唯一 ST/hash；query/index embed；sync/watch
-  sandbox             bwrap/landlock exec
-<span class="pt">◆ 要点  Engine 写事件，Controller 写终态。把 status=completed 放进 while 末尾，审批续跑会丢 checkpoint。</span>
-<span class="pt">◆ 要点  「执行面」= 编排 + 平面。租约只钉住编排副本；权重 OOM 面在 retrieval。</span></pre>
+        <div class="card">
+          <h3>3. 租约、超时与停滞检测</h3>
+          <p>运行时需要处理几种性质不同的故障：执行器可能失去对 Run 的所有权，模型请求可能迟迟没有响应，单步执行可能超过预算，任务也可能在没有新事件的情况下挂起。<span class="hl">租约、请求超时、Engine 单步超时和停滞看门狗分别观察不同对象，不能用其中一项代替其他项。</span></p>
+          <table>
+            <thead>
+              <tr><th>机制</th><th>当前默认值</th><th>作用范围</th></tr>
+            </thead>
+            <tbody>
+              <tr class="pin-high">
+                <td>Run 租约</td>
+                <td>TTL 180 秒；心跳 10 秒；事件路径上的机会续租最小间隔 5 秒</td>
+                <td>记录哪个 runtime 副本持有 Run 的执行权。</td>
+              </tr>
+              <tr>
+                <td>模型请求</td>
+                <td>连接 10 秒；首字节 60 秒；整段流 600 秒；最多重试 2 次</td>
+                <td>限制建立连接、等待模型开始响应及消费完整流的时间。</td>
+              </tr>
+              <tr>
+                <td>Engine 单步</td>
+                <td>720 秒</td>
+                <td>限制一次推理循环中组窗、模型请求与工具调度的总执行时间。</td>
+              </tr>
+              <tr>
+                <td>一般工具</td>
+                <td>默认 60 秒</td>
+                <td>限制单个工具调用的执行时间。结构导航默认 15 秒，结构诊断 60 秒，编辑后的增量检查 30 秒。</td>
+              </tr>
+              <tr class="pin">
+                <td>停滞看门狗</td>
+                <td>每 30 秒扫描；180 秒没有新耐久事件时判定停滞；默认自动失败</td>
+                <td>检查耐久事件是否持续更新，并收尾无进展的执行。</td>
+              </tr>
+              <tr>
+                <td>审批等待</td>
+                <td>600 秒</td>
+                <td>限制 Turn 处于 <code>waiting_approval</code> 的最长等待时间。</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>Run 租约用于避免多个 runtime 副本重复执行同一任务。<span class="hl-warn">只有 <code>accepted</code> 状态的 Run 可以被领取；已经进入 <code>running</code> 的 Run 不会被另一个副本重新领取，否则可能导致相同工具调用执行两次，并生成重复的事件流。</span>编码任务在并行读取和模型请求负载下常持续 60 至 160 秒，因此租约不能沿用早期的 60 秒 TTL：<span class="hl-warn">事件写入发生竞争时，过短的租约会把仍在执行的 Turn 错误回收。</span>当前租约参数见上表。</p>
+          <p>模型请求和 Engine 单步具有各自的时间上限。模型请求分别限制建立连接、等待首字节和消费完整响应流的时间；重试只适用于尚未向用户输出内容、且失败类型允许安全重试的情况。<span class="hl-warn">已经输出部分内容后，运行时不会从头回放整条响应。</span><span class="hl">Engine 单步的上限略高于完整模型流的上限，以免合法的长请求先被单步超时截断。</span>单个工具另有独立时限，避免某次工具执行无限占用当前 step 的预算。</p>
+          <p><span class="hl">停滞看门狗检查 <code>turn_events</code> 是否仍在产生新的耐久记录，而不是判断模型流是否仍有 token 到达。</span><span class="hl-warn">处于 <code>waiting_approval</code> 的 Turn 会被跳过</span>，因为等待用户操作本身可能持续数分钟；已经请求取消但处于 orphan 清理路径中的任务也不会按普通停滞处理。没有新耐久事件并不必然表示推理停止，判断是否停滞还要考虑流式数据采用哪种持久化方式。</p>
+          <p>默认 checkpoint 模式下，高频流式增量可以只经 Redis live 通道发送，因此运行时还会每 45 秒写入耐久的流存活事件，供看门狗判断长时间模型流是否仍在推进。Ops eval 将 thinking 内容转移到 sidecar 时，另有 15 秒的数据库心跳机制。<span class="hl-warn">若只把流式内容移出事件表，却没有保留耐久存活记录，正常运行的长请求也可能被看门狗当作停滞任务终止。</span></p>
+          <p>取消请求先写入 PostgreSQL，使其他 runtime 副本也能读取取消意图。Engine 会在步骤边界检查取消状态；模型流进行期间，独立的取消监视任务还会中断正在进行的流和相应 HTTP 请求。<span class="hl-warn">用户主动取消的 Turn 以 <code>cancelled</code> 收尾，不应归类为一般执行失败</span>；强制取消走 <code>cancel_force</code> 路径。Run 领取等待超过 15 秒而尚未进入 Engine 时，则按 <code>start_timeout</code> 处理。</p>
+          <p>进程级 Turn 上限并不等同于系统实际可同时处理的模型请求数。<span class="hl"><code>RUNTIME_MAX_INFLIGHT_TURNS=16</code> 是单个 runtime 进程正在执行的 Turn 软上限；转交为审批挂起的 Turn 会从该进程的 active 集合移除，因此该值既不代表所有非终态 Turn 的总数，也不能保证 16 个模型请求同时运行。</span>模型调度器默认提供全局 4 个并发槽位、每租户 2 个槽位，运行时数据库连接池默认最大 5 个连接；高负载下，这两类资源都可能先于 Turn 上限饱和。</p>
+        </div>
 
-          <h3>Profile 注入，而不是场景开关</h3>
-          <pre class="seq">max_steps     agent.yaml = 150；writing/intel = 40；collab = 50；缺省 40
-子代理        delegate_runner DEFAULT_SUBAGENT_MAX_STEPS = 12（独立上限，吃父 Turn 步数墙）
-temperature   writing 默认 0.8；agent 可空（跟供应商默认）；来自 Profile.generation
-tool_names    结构导航能力在 Profile 里，不是 feature flag，开工后不 strip
-Engine        不读取 scenario_id 做分支；测试里用假 Profile 即可复现 while
-<span class="pt">◆ 要点  「给写作加一步特殊循环」会让编码/情报分叉。正确做法是换工具表与终局 receipt 追踪器。</span></pre>
-
-          <h3>三道超时 + 两道存活，互不替代</h3>
-          <pre class="seq">模型层（Gateway）
-  connect 10s · first-byte 60s（仅此可重试）· 整段流 600s
-  首字节 15s 曾在排队型 API 上把 3 次重试烧光；故默认 60s，总帽仍是 600s
-
-步层（Engine）
-  step_timeout 720s &gt; model 600s
-  单工具默认 60s；结构 checks 30s / nav 15s
-  StepTimeoutError → Controller 标失败，termination_reason 与 stall auto-fail 共用 step_timeout 字面
-
-租约（编排副本占位）
-  lease 180s + heartbeat 10s
-  编码一步常 60–160s（并行只读 + 模型经 gateway）。旧 60s TTL 会在 thinking.delta 刷盘争用时把活 Turn 回收成 runner_lost
-  waiting_approval 仍计入 RUNTIME_MAX_INFLIGHT_TURNS=16
-  <span class="pt">◆ 要点  软件 16 ≠ 物理 16。热连接池 5 往往先饱和；编排 4g 上满窗大约 2–4 颗；ST 不在这 4g 里。</span>
-
-Stall Watchdog（事件新鲜度，30s 扫一次）
-  阈值 180s 无新 turn_events，且非 waiting_approval、非已请求 cancel 的 orphan
-  默认 stall_auto_fail=True → _fail_turn(step_timeout)
-  跳过审批挂起：用户可能几分钟不点
-  <span class="pt">◆ 要点  stall ≠ 租约。租约回答「这颗 Turn 还有没有 runner」；stall 回答「事件表还在动吗」。thinking 若 divert 出库，必须另写 15s 心跳，否则 watchdog 误杀。</span>
-
-取消
-  request_cancel 写库；Engine 约 50ms 读标志并 abort 流
-  cancelled ≠ failed；force 标志走 cancel_force
-  claim 超时 15s → start_timeout（还没进 while）</pre>
-
-          <h3>审批挂起不是终态</h3>
-          <pre class="seq">Engine 见 approval_required
-  写 approval.requested（write_file 带全文件旧文截断；edit_file 只带 span）
-  return "waiting_approval" —— 注意这是返回值哨兵，会被 _CONTROL_OUTCOMES 拦截
-  delegate 子代理若把同名字符串当 summary 回传，必须编码成 step 可识别前缀，以免父循环误挂起
-
-Controller
-  序列化 TurnState → checkpoint_store（含 max_steps、verify_* 追踪器）
-  不发 turn.completed；runs 保持执行中
-  approve/deny 走 run_commands（仅 runner_id 匹配本进程）
-  续跑同一 run_id、同一 step_count，从 checkpoint 恢复欠验证标志
-<span class="pt">◆ 要点  把 waiting_approval 画成 turn.completed 的一种，续跑会变成新 Turn，receipt 计数与 read_registry 全部清零。</span></pre>
-
-          <h3>while 五格（细节在「Engine 单循环」）</h3>
-          <pre class="seq">1  assemble     压缩的是本步窗，不是磁盘稿；系统提示求稳定，tools[] 字节默认不变
-2  stream       经 model-gateway（live）；取消必须打断 backoff 与 HTTP；仅首字节前重试
-3  解析         thinking.delta 默认只走 SSE
-4  tool_use     只读 gather + 变更串行；embed→retrieval；exec→sandbox；改道在 handler
-5  终局         欠验证 → receipt continue；否则 break 交 Controller 写终态
-<span class="pt">◆ 要点  把 Guard 画进 while 菱形，取消/超时会变成「又一步工具」，形状就改了。</span></pre>
-          <div class="src"><code>controller/turn_controller.py</code> · <code>engine/agent_engine.py</code> · <code>model/remote_provider.py</code> · <code>deploy/compose/planes.yml</code></div>
+        <div class="card">
+          <h3>4. 审批挂起与同一次执行的恢复</h3>
+          <p>工具调用需要用户批准时，Engine 不会把它当作普通工具失败，也不会将 Turn 标记为完成。Engine 记录待审批的工具调用，写入 <code>approval.requested</code> 事件，并返回控制结果 <code>waiting_approval</code>。<span class="hl-warn">该值是运行时用于暂停推理循环的控制信号，不是面向用户的普通文本</span>；如果子代理需要把完全相同的字符串作为摘要返回，必须使用可识别的编码前缀，以免父循环将摘要误判为审批挂起。</p>
+          <p>Controller 接管挂起状态后，将当前 <code>TurnState</code> 序列化到 checkpoint，其中包括消息、步数上限、验证追踪和其他续跑所需状态，并保存待执行调用的 Profile、工具表与模型配置。Turn 状态变为 <code>waiting_approval</code>，Run 进入 <code>interrupted</code>；<span class="hl-warn">此时不会写入 <code>turn.completed</code>，因为任务尚未完成。</span>等待审批的 Turn 不再占用该进程的 active 执行集合，用户的等待时间也不会消耗 Engine 的执行循环。</p>
+          <p>用户批准或拒绝后，runtime 从内存中的 <code>PendingTurn</code> 或持久化 checkpoint 恢复状态，<span class="hl">在同一个 <code>run_id</code>、同一个 <code>step_count</code> 上继续执行。</span>批准时，运行时执行原先挂起的工具调用；拒绝时，则把拒绝结果写回工具消息，再由 Engine 继续推理。恢复原状态可以保留此前累积的上下文和验证义务，避免审批续跑被误建成新 Turn 后重置 <code>verify_*</code> 追踪或重复执行已经完成的步骤。</p>
+          <p><code>write_file</code> 的审批记录会包含截断后的全文件旧文，<code>edit_file</code> 则只保留相关修改区间。<span class="hl-warn">批准或拒绝命令还必须由持有对应 Run 的 runner 处理，并防止并发命令同时恢复同一个 checkpoint，否则重复点击或 HTTP 重试可能造成同一工具调用被执行两次。</span></p>
+          <p>进一步阅读：<a href="#engine-loop">Engine 单循环</a> 介绍组窗、模型流和工具调用在一个 step 内的具体顺序；<a href="#request-path">请求主路径</a> 介绍请求如何从 API 进入 PostgreSQL、由 runtime 领取，再通过 SSE 返回工作台。</p>
+          <p class="src">源码定位：<a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/controller/turn_controller.py"><code>turn_controller.py</code></a>、<a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/engine/agent_engine.py"><code>agent_engine.py</code></a>、<a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/controller/run_lock.py"><code>run_lock.py</code></a>、<a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/controller/stall_watchdog.py"><code>stall_watchdog.py</code></a>、<a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/model/gateway.py"><code>gateway.py</code></a>、<a href="https://github.com/zodirc/AgentPlatform/blob/master/deploy/compose/planes.yml"><code>planes.yml</code></a> 及 <a href="https://github.com/zodirc/AgentPlatform/tree/master/services/runtime/app/scenarios/profiles"><code>ScenarioProfile</code> 配置</a>。</p>
         </div>
       </section>
