@@ -1,66 +1,43 @@
-<section class="page" data-id="request-path" data-group="领域" data-title="请求主路径">
+<section class="page page-mark" data-id="request-path" data-group="领域" data-title="请求主路径">
         <div class="card">
-          <h2>请求主路径（端到端）</h2>
-          <p class="lede">客户端提交 Turn 之后，业务首事件不是 HTTP 202，而是编排 runtime claim 后发出的 <code>turn.accepted</code>。Turn <strong>claim 仍在 Postgres</strong>；分发门铃默认 Redis <code>turn.dispatch</code>。进 Engine 后 live 模型 / query embed / shell exec 分别 HTTP 打到独立容器；高频 delta 默认走 <code>turn.live.*</code>（不写 PG）。闸与容量见「时序 · 并发 · 负载」；本页只串端到端。</p>
-          <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> HTTP 202 表示已入队。业务上的第一件事是 claim 之后的 turn.accepted。</li>
-          </ul>
+          <h2>请求主路径：从提交到 SSE 返回</h2>
+          <p class="lede">工作台提交一条消息后，后端需要完成的不只是一次模型请求。API 先验证调用者的身份与 Session 归属，再把 Turn 和 Run 写入数据库；运行时取得 Run 的执行权后，才进入输入编译和模型推理；在执行过程中，耐久事件与高频实时增量通过不同通道返回工作台。<span class="hl-warn">将这些阶段区分开，可以避免把 HTTP 接受请求、运行时开始执行和浏览器收到首个 token 当成同一个时间点。</span></p>
+          <p>本页聚焦单次请求的端到端路径。后端各进程的职责、数据归属和容量限制见<a href="#backend">后端架构</a>，组窗、模型流、工具批处理和终局续跑见<a href="#engine-loop">Engine 单循环</a>。</p>
 
-          <h3>逐步经过</h3>
-          <pre class="seq">t1  工作台 POST /sessions/{sid}/turns   Cookie + JSON
-    Caddy  /api/* → api:8000；HTTP/1.1 短请求，无流式语义，不验 Cookie
-    api    鉴权 · assert_session_owner · 校验 work/scenario
-           未领取队列满 → 429 + Retry-After:5（Turn 未插入）
-    <span class="pt">◆ 要点  429 时没有 turn_id。客户端不得拿「上一次失败的假 id」去挂 SSE。</span>
+          <h3>1. 提交请求与创建任务</h3>
+          <p>工作台向 <code>POST /api/v1/sessions/{sid}/turns</code> 发送消息，并携带会话 Cookie 与 JSON 请求体。Caddy 将 <code>/api/*</code> 转发给 API，但不代替 API 进行认证。API 验证用户身份、检查该 Session 的所有者，并确定本次请求使用的场景及执行参数。</p>
+          <p>默认 pull 调度模式会在创建任务前执行准入检查。检查依据是仍处于 <code>accepted</code>、尚未被 runtime 领取且对应 Turn 仍为 <code>pending</code> 的 Run 数量；全局默认上限为 32，同一用户默认上限为 2。<span class="hl-warn">达到上限时，API 返回 <code>429 Too Many Requests</code> 和 <code>Retry-After: 5</code>，不会先写入一个稍后需要清理的失败 Turn。</span>若请求带有已存在的 <code>client_request_id</code>，API 先查找原请求并按幂等重放处理。</p>
+          <p>准入通过后，API 在同一 PostgreSQL 事务中创建 Turn、Run 及初始 <code>turn_views</code> 投影。提交事务之后，API 发布 <code>turn.dispatch</code> 唤醒信号，并返回 <code>202 Accepted</code>，响应中包含 <code>turn_id</code>、<code>run_id</code> 与 <code>pending</code> 状态。<span class="hl-warn"><code>202</code> 说明请求已进入调度流程，不能用于判断 runtime 是否已经开工；任务的第一条耐久业务事件 <code>turn.accepted</code> 要等到 runtime 真正领取 Run 后才会写入。</span></p>
 
-t2  同一事务  INSERT turns(pending, plan_phase, intent) + runs(accepted, pull_eligible)
-              + turn_views seed
-           COMMIT 后 PUBLISH turn.dispatch run_id（默认；可 both/postgres NOTIFY）
-           响应 202 { turn_id, run_id, status: pending }
-           浏览器此时可开 SSE；流上还没有 turn.accepted，只有空闲 ping
-    <span class="pt">◆ 要点  202 = 已入队。把 202 当「runtime 已开工」，排队会被算进推理时延。</span>
+          <h3>2. Runtime 领取执行权</h3>
+          <p>默认 pull 模式下，runtime 订阅 Redis Pub/Sub 的 <code>turn.dispatch</code>，并以约 2 秒为周期轮询数据库，避免通知丢失时任务一直留在队列中。<span class="hl">唤醒只触发一次候选查询，是否获得执行权由 PostgreSQL 中针对 <code>accepted</code> Run 的条件更新决定。</span><span class="hl-warn">即使多个 runtime 实例同时看到同一个通知，也只有一个实例能成功完成 claim；Redis 不是任务锁，不能用消费通知的结果判断谁拥有执行权。</span></p>
+          <p>领取成功后，runtime 更新 Run 状态、记录持有者与执行租约，并写入 <code>turn.accepted</code>。默认租约 TTL 为 180 秒，心跳间隔为 10 秒。<span class="hl">租约记录执行者是否仍有权推进该 Run，与模型请求超时、Engine 单步超时属于不同约束；它的作用是识别失联执行者，避免在正常长请求期间被过早回收。</span></p>
+        </div>
 
-t3  编排 runtime claim（与浏览器无 TCP）
-           SUBSCRIBE turn.dispatch + poll 反熵 → 条件 UPDATE 抢到 accepted run
-           写入 lease 180s
-           领取行：scenario_id、plan_phase、turns.intent；评测另带 ops_eval 与模型密文
-           INSERT turn.accepted（通常 sequence=1）→ NOTIFY turn_events_channel（投影）
-    <span class="pt">◆ 要点  业务首事件在 claim 之后。TTFB 从 SSE 见到 accepted 起算，不是从 POST 返回起算。</span>
+        <div class="card">
+          <h3>3. Intake 与 Engine</h3>
+          <p>Controller 在调用 Engine 前执行确定性的输入处理。<code>InputCompiler</code> 处理斜杠指令、<code>@path</code> 预读及会话历史；<span class="hl"><code>/help</code>、<code>/compact</code>、<code>/verify</code> 等请求可能在本地完成并直接结束 Turn，不需要进入模型循环。</span>需要模型推理时，Controller 根据请求选择 <code>ScenarioProfile</code>，组装系统提示、可用工具和 <code>TurnState</code>，再调用 <code>AgentEngine</code>。</p>
+          <p>Engine 每一步组装模型上下文，发起模型请求，并根据模型响应执行工具调用或判断是否可以结束。默认 Compose 部署将 live 模型流通过 HTTP NDJSON 交给 <code>model-gateway</code>，将 query Embedding 交给 <code>sources-retrieval</code>，将命令执行交给 <code>sandbox</code>。<span class="hl">这些调用是同步执行路径，需要等当前调用结果回到 runtime 后再进入相应的后续逻辑；资料索引等可延迟工作则通过单独的异步任务通道运行，不应阻塞普通 Turn 的实时查询。</span></p>
 
-t4  Intake（确定性；零或一次 compact 模型）
-           InputCompiler：斜杠、@path prereread（≤3 文件、各 1.2k 字、0.4s）
-           拼接 session transcript；无 transcript 的旧会话才塞 context_summary
-           should_query=否（/help /compact /verify）→ 直接 turn.completed(local_response)
-           需要模型 → 首轮由模型决定直答或 tool_use；scenario_id 不由模型推断
-    <span class="pt">◆ 要点  斜杠短接在 Controller。把 /help 送进 Engine while 会占 inflight 16 里的一颗。</span>
+          <h3>4. 耐久事件和实时增量</h3>
+          <p>运行时把步骤开始、工具执行边界、审批和终态等状态变化写入 PostgreSQL 的 <code>turn_events</code>。每个 Turn 的事件具有耐久 <code>sequence</code>，使事件回放能够按照既定顺序进行。默认 <code>EVENT_DURABILITY=checkpoint</code> 模式下，高频 token、thinking 与工具增量优先发布到 Redis <code>turn.live.*</code>，不逐条写入耐久事件表；启用 <code>EVENT_DURABILITY=all</code> 时，这些增量也会进入 <code>turn_events</code>，并使用批写窗口减少单条事件造成的数据库往返。</p>
+          <p>这种区分决定了断线恢复的能力。<span class="hl-warn">耐久事件有可回放的 <code>sequence</code>，live 增量没有 PostgreSQL 耐久游标，因此客户端重连时能够追赶状态事件，但不保证补回所有已经错过的 token。</span><span class="hl">若 Redis live 发布失败，运行时事件写入器会回退到 PostgreSQL，避免将已经生成的增量只留在一个可能丢失的实时通道中。</span></p>
+        </div>
 
-t5  Engine while（编排进程）
-           assemble → ModelGateway.stream → 解析 → tools / 终局
-           live 模型  ──HTTP NDJSON──► model-gateway ──► 上游 Provider
-           query embed──HTTP──────► sources-retrieval（唯一权重池；不上 Streams）
-           shell/tests──HTTP──────► sandbox（bwrap/landlock；可回退本进程）
-           耐久：tool.* / 审批 / 终态 → turn_events（占 sequence）
-           活流：token / thinking.delta / tool.delta → turn.live.*（默认 checkpoint）
-           api：订 live + SELECT 耐久 → SSE；UPSERT turn_views（仅耐久）
-    <span class="pt">◆ 要点  while 形状仍在编排；重活已拆到平面容器。claim 不进 Redis Streams。</span>
+        <div class="card">
+          <h3>5. API 如何向工作台提供 SSE</h3>
+          <p>工作台通常在拿到 <code>202</code> 后立即调用 <code>GET /api/v1/turns/{tid}/stream</code>。<span class="hl">该请求会再次校验会话身份和 Turn 归属，因为 SSE 是另一条独立 HTTP 请求。</span>API 通过 Redis 订阅获取 live 增量，并利用 PostgreSQL 通知及短间隔轮询读取 <code>turn_events</code> 中游标之后的耐久事件；耐久事件携带 SSE <code>id</code>，live 事件不提供耐久续传 ID。API 还会根据耐久事件更新 <code>turn_views</code>，而投影不包含全部高频 token/thinking 增量。</p>
+          <p><span class="hl-warn">SSE 只是事件传输通道，不控制 Turn 的生命周期。关闭页面或中断流连接不会取消后台执行</span>；浏览器重新连接时带上 <code>Last-Event-ID</code> 或 <code>since_sequence</code>，API 根据耐久游标恢复事件。空闲期间 API 发送注释型 ping，客户端若长时间没有任何字节到达，会重新建立连接。审批请求属于一个暂停点：API 等投影状态更新后结束当前 SSE，由工作台重新读取 <code>/view</code> 显示审批界面，用户的批准操作另走短 POST。</p>
 
-t6  工作台只消费 SSE 与 GET /view
-           UI 不推断阶段；断线 Last-Event-ID / since_sequence 只续耐久游标
-           不保证逐 token 续播；approval.requested 关 SSE；批准走短 POST
-    <span class="pt">◆ 要点  runtime 不对浏览器开流。真源在 PG；门铃/活流在 Redis；平面热路径是 HTTP。</span>
-
-旁路（不在用户提问主链）
-────
-  sources.index_sync  可经 api enqueue Redis agent.jobs，由 sources-retrieval 消费
-  或 HTTP POST sources-retrieval /internal/commands/sync-sources-index
-  不等于 run_commands，也不经 Turn 分发门铃</pre>
-          <p class="figure-lead">下图中间箭头链即 POST → 落库 → Redis 门铃 → claim → Intake → Engine（扇出平面 HTTP）→ 耐久/活流 → SSE。海报若仍画「全量写 turn_events」，以本页 ASCII / 代码为准。</p>
-          <div class="src"><code>services/api/app/routers/sessions.py</code> · <code>turn_dispatch.py</code> · <code>platform_bus/pubsub.py</code> · <code>deploy/compose/planes.yml</code></div>
+          <h3>6. 审批、取消与异步旁路</h3>
+          <p>审批与取消请求使用独立短 POST 提交。API 将命令写入 <code>run_commands</code> 并发出通知，持有目标 Run 租约的 runtime 副本负责执行。<span class="hl">审批批准后，运行时恢复原来的 checkpoint，执行待审批工具，并在同一 <code>run_id</code> 和步数状态下继续 Engine</span>；拒绝则把拒绝结果写入工具结果，再让 Engine 继续决定后续动作。<span class="hl-warn">等待审批期间 Turn 处于 <code>waiting_approval</code>，但当前实现会将其从本进程的 active 执行集合移除，因此等待人数不直接占用 runtime 的 inflight 上限。</span></p>
+          <p>资料索引不走普通 Turn 的分发流程。API 或其他生产者可以把 <code>sources.index_sync</code> 等任务提交到 Redis Streams 的 <code>agent.jobs</code>，由 <code>sources-retrieval</code> 异步消费；也存在直接调用检索服务同步接口的路径。<span class="hl-warn">这些工作不会因为某条用户消息获得了 <code>202</code> 就自动与该 Turn 绑定，也不会把索引任务误记成 <code>run_commands</code>。</span></p>
+          <p class="src">实现定位：<a href="https://github.com/zodirc/AgentPlatform/blob/master/services/api/app/routers/sessions.py">Turn 创建路由</a>、<a href="https://github.com/zodirc/AgentPlatform/blob/master/services/api/app/services/command/admission.py">准入检查</a>、<a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/controller/turn_controller.py">Controller 的领取与续跑</a>、<a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/controller/event_writer.py">事件写入器</a>、<a href="https://github.com/zodirc/AgentPlatform/blob/master/deploy/compose/planes.yml">执行平面配置</a>。</p>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">
             <img src="../assets/architecture/request-path-zh.png" alt="请求主路径详流" />
           </div>
-          <figcaption>请求主路径详流 · 点击放大</figcaption>
+          <figcaption>点击放大</figcaption>
         </figure>
       </section>

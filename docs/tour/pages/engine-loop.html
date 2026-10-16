@@ -1,159 +1,175 @@
-<section class="page" data-id="engine-loop" data-group="Runtime" data-title="Engine 单循环">
+<section class="page page-mark" data-id="engine-loop" data-group="Runtime" data-title="Engine 单循环">
         <div class="card">
-          <h2>AgentEngine 单循环</h2>
-          <p class="lede">循环条件是 <code>while step_count &lt; max_steps</code>。<code>max_steps</code> 来自 ScenarioProfile：编码 150，写作和情报 40，协作 50，未写则 40。Engine 在编排 runtime 中运行，不读取场景名；工具表和系统提示由 Controller 注入。live 推理经 <code>MODEL_GATEWAY_URL</code> 以 HTTP NDJSON 调用；query embed 与 shell 分别经过 retrieval 和 sandbox。新增能力时扩展工具或结果契约，while 的形状保持不变。</p>
-          <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 超时按层分开。连续只读工具并行时，各自使用一份 state 副本。</li>
+          <h2>AgentEngine 单循环：一次推理步如何完成</h2>
+          <p class="lede">AgentPlatform 的一次 Turn 通常包含多轮模型请求和工具执行。模型根据当前上下文返回文本或提出工具调用，运行时将工具结果并入消息历史，再把更新后的上下文交给模型。<code>AgentEngine</code> 负责这段循环：组织每一步的上下文、消费模型流、执行工具，并根据响应决定继续推理还是进入终局处理。</p>
+          <p>这条循环运行在 <code>TurnController</code> 管理的 Turn 生命周期之内。Controller 负责领取 Run、编译用户输入、注入场景对应的提示词与工具集合，并在任务完成、失败、取消或等待审批时维护外层状态；<span class="hl-warn">Engine 不领取 Run，也不直接写入 Turn 的最终状态。</span><span class="hl">模型请求结束并不意味着 Turn 已完成：工具结果、审批中断和终局前的验证要求都可能使 Engine 继续执行下一步。</span></p>
+
+          <h3>1. 从请求进入 Engine</h3>
+          <p>Controller 领取 Run 并写入 <code>turn.accepted</code> 后，先由 <code>InputCompiler</code> 处理输入。除了解析斜杠指令，它还会预读用户通过 <code>@path</code> 指定的文件；单文件预读上限为 1,200 字符，超时 0.4 秒，一次最多处理 3 个文件。随后 <code>should_query</code> 判断当前请求是否需要调用模型。<span class="hl"><code>/help</code>、<code>/compact</code>、<code>/verify</code> 等可以走本地处理的路径不会进入 Engine 的循环</span>；<code>/compact</code> 使用独立的摘要请求，超时为 20 秒、输出上限为 1,024 tokens，失败时回退到确定性摘要。<span class="hl">此类本地结束记录 <code>termination_reason=local_response</code>，不占用 Engine 步数。</span></p>
+          <p>需要模型处理时，Controller 根据 <code>ScenarioProfile</code> 生成工具范围、系统提示和生成参数，再创建 <code>TurnState</code> 与 <code>ModelGateway</code>，随后调用 <code>AgentEngine.run(state)</code>。<span class="hl">Engine 不根据场景名称分支；场景差异通过 Controller 注入的工具集合、提示词和步数预算体现。</span>当前默认步数上限如下，未单独配置的场景使用 40 步。</p>
+          <table>
+            <thead>
+              <tr><th>场景</th><th style="text-align:right"><code>max_steps</code></th><th>配置侧重点</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>agent</code>（编码）</td>
+                <td style="text-align:right">150</td>
+                <td>仓库导航、文件修改、命令执行和测试工具。</td>
+              </tr>
+              <tr>
+                <td><code>writing</code>（写作）</td>
+                <td style="text-align:right">40</td>
+                <td>草稿、大纲、资料检索、引用检查与写作状态管理。</td>
+              </tr>
+              <tr>
+                <td><code>intel</code>（情报）</td>
+                <td style="text-align:right">40</td>
+                <td>情报资料检索及 IOC 相关工具。</td>
+              </tr>
+              <tr>
+                <td><code>collab</code>（协作）</td>
+                <td style="text-align:right">50</td>
+                <td>通过指定的子代理类型与工具集合分配任务。</td>
+              </tr>
+              <tr>
+                <td>其他或未设置上限</td>
+                <td style="text-align:right">40</td>
+                <td>使用通用默认值。</td>
+              </tr>
+            </tbody>
+          </table>
+          <p><span class="hl-warn">通过 <code>delegate</code> 启动的子 Agent 默认最多执行 12 步，但子代理的工作仍计入父 Turn 的总步数预算。因此，委派可以把任务交给不同能力的执行单元处理，却不能扩张父任务允许的整体执行量。</span></p>
+        </div>
+
+        <div class="card">
+          <h3>2. 一步模型循环的执行顺序</h3>
+          <p>Engine 以 <code>state.step_count &lt; state.max_steps</code> 控制常规迭代。每一轮开始前先检查累计 token 预算和取消状态；<span class="hl">累计用量参数 <code>turn_token_budget</code> 默认值为 0，表示不设置本 Turn 的总 token 上限</span>；如果单独配置了输入或输出 token 限额，仍会按对应限额终止执行。通过检查后，Engine 才递增 <code>step_count</code> 并写入 <code>step.started</code>。<span class="hl">单步计时使用 monotonic 时钟，从这时开始计算，涵盖后续组窗、模型流和工具调度，不仅是模型供应商的响应时间。</span></p>
+
+          <h4>2.1 组装当前上下文</h4>
+          <p>Engine 根据本步可用工具生成工具描述，再由 <code>ContextEngine.assemble_async</code> 整理消息历史。组窗过程会执行上下文卫生和压缩策略：普通工具结果默认截断到 4,000 字符；刚刚成功读取的文件内容可保留到 32,000 字符。对于默认 128K token 的上下文窗口，系统约留出 30K tokens 作为输出空间，<span class="hl">因此组窗填充率以可用输入预算而不是整个窗口作为分母。</span></p>
+          <p>当填充率达到 0.80 时，系统先折叠较早的上下文组，并保留热尾约 35% 的内容；达到 0.90 时，再裁去最旧的上下文组；达到 0.95 时，触发自动压缩。具体采取了哪些策略、填充率以及工具结果截断情况会写入 <code>context.reported</code>，便于定位模型输入为何发生变化。原始消息快照和 envelope 哈希则以后台任务方式记录，不会并入送给模型的上下文。</p>
+          <p>工具表默认保持稳定。即使进入交付末段或剩余步数较少，<span class="hl-warn">运行时也优先在 handler 入口拒绝晚期不应再用的 <code>search_sources</code>、<code>delegate</code>、<code>remember</code> 和 <code>recall</code>，而不是从 <code>tools[]</code> 中删除其 schema。</span>触发条件是交付状态已为 <code>ok</code> 或 <code>warning</code>，或 <code>step_count</code> 至少为 8 且剩余步数不超过 6。<span class="hl-warn">保持工具 schema 字节稳定，是为了避免无必要地改变发送给模型的前缀，破坏供应商的 prefix cache。</span></p>
+
+          <h4>2.2 请求模型并消费流式响应</h4>
+          <p><code>ModelGateway</code> 提供统一的模型流接口。默认 Compose 部署中的 live 请求由 <code>RemoteModelProvider</code> 通过 HTTP NDJSON 发送到 <code>model-gateway</code> 的 <code>/internal/v1/complete</code>；stub 和 recorded 模式则在编排进程内运行，不经过独立网关。查询 Embedding 和资料索引走 retrieval 服务，命令执行走 sandbox 平面，这些调用不属于模型网关的同一条请求链。</p>
+          <p>模型侧存在三层时间约束：连接建立默认 10 秒，首字节等待默认 60 秒，整段响应流最长 600 秒；Engine 的单步墙钟上限是 720 秒。首字节超时、连接失败、429 或 5xx 等可重试错误只有在还没有向用户输出响应内容时才允许重新请求，最多重试 2 次，退避间隔从 0.5 秒逐步增加到 8 秒。<span class="hl-warn">响应已经开始输出后，如果流中途断开，运行时不会从头重放已经送出的 token，否则已发送给用户的文本可能被重放。</span></p>
+          <p>取消请求会由独立的 asyncio 任务持续检查，轮询间隔约为 50 毫秒。<span class="hl-warn">检测到取消后，Engine 会中止模型网关的 HTTP 请求并关闭异步生成器，避免用户取消后上游模型仍继续生成并消耗资源。</span>流中的取消检测不在每个 token 到达时另做一次数据库往返；取消监视器负责触发中断，chunk 循环只读取已经更新的状态。</p>
+          <p>流式数据进入不同的事件通道。可见文本增量写为 <code>turn.token</code>；<span class="hl">在默认 <code>EVENT_DURABILITY=checkpoint</code> 模式下，高频增量通过 Redis live 通道发布，<code>EVENT_DURABILITY=all</code> 时才将其批量写入 PostgreSQL 的耐久事件表。</span>模型的 thinking / liveness 增量使用 <code>turn.thinking.delta</code>，默认不进入 <code>turn_views</code>；Ops 评测可以将其转存到 sidecar。<span class="hl">工具调用虽然在响应流中逐步解析，但不会在模型还没结束输出时执行。</span>Engine 收完一段响应后先记录 <code>usage.reported</code>，再根据本步实际 token 用量重新检查预算，避免单次响应跨过预算上限后仍被当成普通终稿。</p>
+        </div>
+
+        <div class="card">
+          <h3>3. 工具批处理与结果合并</h3>
+          <p>模型给出 <code>tool_use</code> 后，Engine 先将这批调用按模型返回的顺序保存，再交给 <code>_run_tool_batch</code>。<span class="hl">连续出现的只读调用可以并行执行，写文件、编辑文件、命令执行和其他有状态变更的操作则串行处理。</span>可并行的读取工具包括 <code>list_dir</code>、<code>glob</code>、<code>grep</code>、<code>read_file</code>、<code>search_sources</code>、<code>enrich_ioc</code> 和 <code>lookup_indicator</code>；声明为只读的 <code>delegate</code> 也可根据 <code>agent_type</code> 进入并行批次。</p>
+          <p><span class="hl-warn">并行只读调用不能共享同一份可变的 <code>state.messages</code> 和 <code>read_registry</code>。</span>Engine 为每个调用建立隔离副本，并在所有调用返回后按原始 <code>tool_use</code> 顺序合并工具消息和读取登记结果。<span class="hl-warn">实际 I/O 的完成顺序不固定，合并后的顺序却必须稳定</span>，因为消息中的工具结果需要与模型发出的调用逐项对应；如果让并发任务直接修改同一份状态，完成顺序就可能改变对话结构或造成竞态。</p>
+          <p>本 Turn 内还维护了读取缓存和调用预算。对相同参数的可缓存读取，重复调用会复用已取得的结果并附带提示，要求模型不要继续重复请求同一内容；失败结果不进入缓存。<span class="hl"><code>read_file</code> 每 Turn 默认最多执行 16 次，<code>search_sources</code> 最多执行 3 次。超出预算时，Engine 把跳过或失败信息作为工具结果返回给模型，并记录相应事件。</span></p>
+          <p>工具执行结果仍由 Engine 统一收口。每次调用都有 <code>tool.started</code> 和 <code>tool.completed</code> 事件，结果再作为 tool message 加入后续上下文。<code>search_sources</code> 的向量检索、关键字回退等逻辑通过 retrieval / embedding 服务完成；<code>run_command</code> 和 <code>run_tests</code> 默认发往 sandbox 平面，部署未配置独立平面 URL 时才回退到编排进程内的 Landlock / bubblewrap 隔离路径。评测场景中的 pytest 与环境探针命令会路由到对应题目的 Docker 环境，而不是直接执行宿主 shell。</p>
+          <p>少数工具会在 handler 层改道，以保持模型可见的工具 schema 稳定。例如，<code>grep</code> 的参数表现为符号定位请求时，执行会转到 <code>search_codebase</code> 的 Locate 路径。<span class="hl">模型仍以 <code>grep</code> 发起调用，实际执行路径则通过 <code>redirected_from=grep</code> 记录</span>，调用记录与执行行为可以对应起来。</p>
+
+          <h4>工具超时与审批中断</h4>
+          <p>单个工具的默认墙钟超时为 60 秒；结构导航默认为 15 秒，结构诊断为 60 秒，编辑后单文件增量检查为 30 秒。工具超时会以 <code>tool.completed(status=timeout)</code> 记录，超时结果同时写回消息历史，让模型可以判断是否调整策略；<span class="hl">它本身不会直接把整条 Turn 标记为失败。工具墙钟与 Engine 单步的 720 秒上限独立计算</span>，一步中包含模型响应、多个并行读取和串行工具时，不能用工具的 60 秒默认值来推断整步的最长耗时。</p>
+          <p>如果 handler 返回 <code>approval_required</code>，Engine 会生成 <code>approval.requested</code> 事件，保存待审批工具调用，并以 <code>waiting_approval</code> 返回给 Controller。Controller 将 <code>TurnState</code> 和中断信息持久化为 checkpoint，<span class="hl-warn">Turn 转入审批等待状态，而不写入 <code>turn.completed</code>。</span>此时该 Turn 已从当前进程的 active 执行集合移除；用户批准或拒绝后，系统恢复原 checkpoint，<span class="hl">在相同 <code>run_id</code> 和 <code>step_count</code> 上继续执行，不另开一条 Turn。</span></p>
+          <p>审批界面所需的差异内容也会随调用类型变化。<code>write_file</code> 会附上最多 32,000 字符的旧文件内容和新内容，供界面展示整体差异；<code>edit_file</code> 只附上修改区间的 old/new 文本。<span class="hl">审批期间等待的是用户决策，不是 Engine 正在运行的一个 step</span>，因此它受独立审批超时约束，也不应被当作常规的无进展执行处理。</p>
+        </div>
+
+        <div class="card">
+          <h3>4. 终局判断与验证续跑</h3>
+          <p>当一批工具执行完毕且没有触发取消、审批挂起、子任务等待或明确终止信号时，Engine 会把工具结果保留在消息历史中，再进入下一次迭代。只有模型没有提出 <code>tool_use</code>、而是返回了终稿文本时，流程才进入终局判断。终局判断仍可能要求继续一轮，<span class="hl-warn">因此“模型已经写出正文”并不等于当前 Turn 一定完成。</span></p>
+          <p><span class="hl">编码任务的验证收据由工具结果维护的状态触发，而不是从终稿文本推断。</span>第一类情况是最近一次代码编辑成功后尚未执行测试类命令；第二类情况是仓库测试已经通过，但 <code>problem.md</code>、<code>PROBLEM.md</code> 或 <code>issue.md</code> 中提取出的复现义务尚未在最近编辑之后得到满足。收据只在剩余步数足够时注入，默认需要保留 10 步；同一类别每 Turn 最多发送一次，用户取消或 token 预算已经耗尽时不注入。</p>
+          <p>命中时，平台向消息历史追加一条 user message，明确要求补充验证或完成问题复现，同时写入 <code>tool.completed</code> 事件，标记 <code>tool_name=verify_receipt</code> 与 <code>verify_receipt=true</code>。<span class="hl-warn">这不是注册给模型调用的普通工具，也不显示在工具菜单中；Engine 通过 <code>continue</code> 回到同一个 <code>while</code></span>，重新组装上下文并请求模型。验证因此仍属于当前 Turn 的终局边，而不是额外增加一个图节点或创建新的 Turn。</p>
+          <p>写作场景另有交付门检查。若当前场景为 <code>writing</code>，Turn 尚未取消或耗尽预算、仍至少保留一步，并且持久化的交付 manifest 还有阻塞项，Engine 会注入交付提示并继续循环；用户明确发起的同 Turn 交付收据抑制条件也会参与判断。<span class="hl">这个路径与编码任务的测试收据不同：前者核对写作交付状态，后者依据文件编辑和测试结果维护验证义务。</span></p>
+        </div>
+
+        <div class="card">
+          <h3>5. 时间预算与停滞判定</h3>
+          <p>不同时间限制观察的是不同对象。模型超时限制供应商请求，工具超时限制单次 handler，Engine 单步时限涵盖整轮的组窗、推理和工具调度；Run 租约则决定哪个 runtime 副本拥有执行权。<span class="hl">停滞看门狗观察的是耐久事件是否继续更新，不能用这些时限中的任意一个取代其余机制。</span></p>
+          <table>
+            <thead>
+              <tr><th>机制</th><th>默认值</th><th>超时或异常后的处理</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>连接建立</td>
+                <td>10 秒</td>
+                <td>归类为请求异常；在允许重试且未开始输出时可重试。</td>
+              </tr>
+              <tr>
+                <td>等待模型首字节</td>
+                <td>60 秒</td>
+                <td>作为 transient 错误处理；最多重试 2 次，退避 0.5–8 秒。</td>
+              </tr>
+              <tr>
+                <td>模型整段流</td>
+                <td>600 秒</td>
+                <td>以模型供应商超时结束本次请求。</td>
+              </tr>
+              <tr class="pin">
+                <td>Engine 单步</td>
+                <td>720 秒</td>
+                <td><code>StepTimeoutError</code>，最终以 <code>step_timeout</code> 失败。</td>
+              </tr>
+              <tr>
+                <td>一般工具</td>
+                <td>60 秒</td>
+                <td>写入 <code>tool.completed(status=timeout)</code> 并把结果交回模型。</td>
+              </tr>
+              <tr>
+                <td>结构导航 / 诊断 / 编辑后检查</td>
+                <td>15 / 60 / 30 秒</td>
+                <td>按工具超时返回结果，不等同于 Turn 超时。</td>
+              </tr>
+              <tr>
+                <td><code>/compact</code> 摘要</td>
+                <td>20 秒，输出最多 1,024 tokens</td>
+                <td>失败后使用确定性摘要。</td>
+              </tr>
+              <tr class="pin-high">
+                <td>Run 租约</td>
+                <td>TTL 180 秒；心跳 10 秒</td>
+                <td>维护执行所有权，避免长时间运行时被误回收。</td>
+              </tr>
+              <tr class="pin">
+                <td>停滞看门狗</td>
+                <td>每 30 秒扫描；180 秒无新耐久事件</td>
+                <td>默认自动以 <code>step_timeout</code> 结束停滞 Turn。</td>
+              </tr>
+              <tr>
+                <td>审批等待</td>
+                <td>600 秒</td>
+                <td>等待超时按审批失败处理；不作为正常 Engine step 执行。</td>
+              </tr>
+              <tr>
+                <td>进入 Engine 前的领取等待</td>
+                <td>15 秒</td>
+                <td>未能开始执行时记为 <code>start_timeout</code>。</td>
+              </tr>
+            </tbody>
+          </table>
+          <p><span class="hl">720 秒的单步上限高于 600 秒的模型流上限，是为了让模型层先报告自身请求超时，并给组窗及工具调度留出时间。</span>Run 租约 TTL 设为 180 秒，是因为编码任务的一步在并行读取和模型请求负载下常持续 60–160 秒；过短租约可能在事件写入竞争时回收仍在运行的 Turn。<span class="hl-warn">它们解决的是不同层面的生命周期问题，不能合并成一个统一的超时值。</span></p>
+          <p>停滞看门狗查询 <code>turn_events</code> 的最新耐久事件时间，而不是判断前端是否仍收到 live token。默认 checkpoint 模式下，高频文本增量可以只经 Redis live 通道发送，因此 Engine 在长模型流期间每约 45 秒写入一次耐久的 <code>turn.thinking</code> 存活事件，保持看门狗可观察到执行仍在推进。Ops eval 将 thinking 内容转存到 sidecar 时，会用 15 秒的数据库心跳维持存活信号。<span class="hl-warn">若把流式增量移出耐久事件表，却不再保留心跳，正常运行的长请求就可能被误判为停滞。</span></p>
+          <p>看门狗默认跳过 <code>waiting_child</code>；<code>waiting_approval</code> 则使用独立的 600 秒审批期限。取消请求也有单独的收尾路径：<span class="hl-warn">正常取消以 <code>cancelled</code> 结束，不应被归类为一般失败</span>；若取消标志已写入但执行器已经丢失，Watchdog 会尝试完成 orphan cancel，而不是再把它当作普通停滞报警。</p>
+        </div>
+
+        <div class="card">
+          <h3>6. Engine 的职责边界</h3>
+          <p><code>AgentEngine</code> 管理一次 Turn 内的推理步骤、上下文组装、模型流、工具调度、工具结果登记和终局前的继续条件。Run 领取与租约、斜杠指令编译、审批 checkpoint 的持久化以及最终 <code>turn.completed</code>、<code>turn.failed</code> 或 <code>turn.cancelled</code> 等终态由 <code>TurnController</code> 负责；具体工具行为位于 <code>tools.*</code>，上下文填充率和压缩阈值由 <code>context.policy</code> 管理，停滞扫描运行在旁挂的 <code>Stall Watchdog</code> 中。</p>
+          <p>这条主链可以概括为：<code>assemble → model stream → parse output → tool batch or final-edge check</code>。工具调用会把控制权带回循环，终局收据也通过同一循环的 <code>continue</code> 续跑；耐久状态则由 <code>step.started</code>、工具事件、用量报告和最终状态事件形成边界。<span class="hl-warn">事件投影、live 增量和耐久记录承担不同职责，不应把它们画成互相独立的第二套推理流程。</span></p>
+
+          <h3>参考实现</h3>
+          <ul>
+            <li><a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/engine/agent_engine.py"><code>agent_engine.py</code></a>：单步循环、工具批处理、晚期工具 gate 与终局续跑。</li>
+            <li><a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/model/gateway.py"><code>gateway.py</code></a> 与 <a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/model/remote_provider.py"><code>remote_provider.py</code></a>：模型流、超时、重试、取消与 HTTP NDJSON。</li>
+            <li><a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/controller/input_compiler.py"><code>input_compiler.py</code></a>：斜杠指令与 <code>@path</code> 预读。</li>
+            <li><a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/controller/turn_controller.py"><code>turn_controller.py</code></a>：Turn 生命周期、审批 checkpoint 和续跑。</li>
+            <li><a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/engine/verify_receipt.py"><code>verify_receipt.py</code></a>：编码验证收据与写作交付门。</li>
+            <li><a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/controller/stall_watchdog.py"><code>stall_watchdog.py</code></a> 与 <a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/settings.py"><code>settings.py</code></a>：停滞判定和运行时默认值。</li>
           </ul>
-
-          <h3>循环外：Intake 决定要不要进 while</h3>
-          <pre class="seq">TurnController 已 claim、已写 turn.accepted 之后：
-  InputCompiler 处理斜杠与 @path prereread（单文件 ≤1.2k 字、超时 0.4s、最多 3 个文件）
-  should_query：/help · /compact · /verify 等可零模型结束
-    /compact 走独立 compact gateway（超时 20s、max_output 1024；失败回退确定性摘要）
-    终态 termination_reason = local_response，不占 Engine 步
-  需要模型 → AgentEngine.run(state)
-<span class="pt">◆ 要点  /help 进 while 会白白占 inflight。零模型路径在 Controller，不在第 1 步 assemble。</span></pre>
-
-          <h3>一步之内：门闩顺序</h3>
-          <pre class="seq">进入迭代前（尚未 step_count += 1）
-  1  turn_token_budget   默认 0 = 不限制；累计 input+output ≥ 预算 → budget_exceeded，break
-  2  cancel 协作检查     读库标志；命中 → state.cancelled，break（cancelled ≠ failed）
-
-step_count += 1；写 step.started
-  墙钟从本步 monotonic 起算，上限 step_timeout_seconds = 720
-  <span class="pt">◆ 要点  720 必须大于 model_timeout 600。否则一次长 think 会先被 step 墙钟杀掉，供应商超时层永远轮不到。</span>
-
-  可选收缩 tools[]：默认关闭。晚期拦截走运行时闸，不改 schema 字节
-    条件：delivery_status ∈ {ok, warning}  或  (step_count≥8 且 剩余≤6)
-    闸住 search_sources / delegate / remember / recall
-    <span class="pt">◆ 要点  改 tools[] 字节会打掉供应商 prefix cache。所以晚期禁工具是 handler 拒绝，不是删 schema。</span>
-
-  组窗 assemble_async（见「组窗阶梯」页）
-    卫生每步都做：tool_result 默认 4 000 字；刚成功读完的文件可至 32 000
-    fill = assembled / usable；usable ≈ 128k − 30k 输出预留
-    0.80 collapse（热尾 35%）→ 0.90 snip 最旧组 → 0.95 autocompact
-    写 context.reported（fill_ratio、strategies、budget_truncated_by_tool）
-    原始快照与 envelope 哈希 fire-and-forget，不进模型窗
-
-  ModelGateway.stream（编排内入口）
-    live：RemoteModelProvider ──HTTP NDJSON──► model-gateway /internal/v1/complete
-          → 上游 Provider（stub/recorded 仍在编排本地，不经 gateway）
-    首字节 60s（可重试）；连接 10s；整段流 600s；本步墙钟 720s
-    取消：独立 asyncio Task 约 50ms 轮询；命中则 abort 供应商/HTTP，并 aclose 生成器
-    仅尚未吐出首字节时允许重试（max_retries=2，backoff 0.5–8s）
-    429/5xx/连接失败/首字节超时 → transient；流中途断开不回放已发出的 token
-    <span class="pt">◆ 要点  取消若不断 HTTP，用户点取消后仍在烧供应商。chunk 循环里不再每 token 打一次库。</span>
-    <span class="pt">◆ 要点  默认 compose 下模型出口在独立容器；不要画成编排进程直连供应商。</span>
-
-  解析三类增量 → 分事件
-    text            turn.token（默认 PUBLISH turn.live；EVENT_DURABILITY=all 时才批写 PG）
-    thinking        turn.thinking.delta（默认 live；不进 turn_views；Ops 可 sidecar）
-    tool_use        本步结束后成批执行，不在流中途跑 handler
-    流结束后写 usage.reported，再查一次预算（避免超预算响应被当成正常终稿）
-    <span class="pt">◆ 要点  checkpoint 下 delta 不是 turn_events 行；stall/投影看的是耐久事件新鲜度。</span>
-
-  有 tool_use
-    _run_tool_batch：连续只读可并行，变更类串行（见下）
-    search_sources → query embed HTTP → sources-retrieval（权重不在编排）
-    run_command / run_tests → 默认 HTTP → sandbox 平面（SANDBOX_PLANE_URL）
-      未配置平面 URL 时回退编排本进程 landlock/bwrap（monolith / 测试）
-    approval_required → pending_approval，return "waiting_approval"
-      Controller 落 checkpoint；本进程 inflight 仍计这颗 Turn
-    CANCELLED / state.cancelled → break
-    TERMINATE（stub）→ 立即终稿
-    否则 continue 下一 iteration（不再走终局判定）
-
-  无 tool_use
-    若有 response_text → 暂记为终稿
-    终局边：should_inject_verify_receipt / writing delivery hold
-      命中 → 注入一条用户口吻消息（菜单不可见）+ tool.completed(verify_receipt=true) → continue
-      不命中 → break → Controller 写 turn.completed
-    step_count 撞墙 → termination_reason=max_steps</pre>
-
-          <h3>工具批：只读并行、写串行、结果保序</h3>
-          <pre class="seq">可缓存只读集合（连续一段才 gather）
-  list_dir · glob · grep · read_file · search_sources · enrich_ioc · lookup_indicator
-  多枚：copy(state) 隔离 messages / read_registry，asyncio.gather 后按模型给出的 tool_use 顺序合并
-  单枚：不走 gather
-  变更类（edit_file / write_file / run_command / run_tests …）一律串行
-<span class="pt">◆ 要点  I/O 完成顺序不定，但 tool_result 必须跟供应商 tool_use 顺序。共享一份 state.messages 会竞态。</span>
-
-同参只读命中进程内缓存
-  第二次起附 _note：不要再用同一参数调用；换路径或交卷
-  失败结果不入缓存
-
-本 Turn 配额（Engine 计数器，不是 PG）
-  read_file ≤ 16      search_sources ≤ 3
-  超限由 handler 拒绝，while 形状不变
-
-工具墙钟（与 step 720 / model 600 独立）
-  默认 tool_default_timeout = 60s
-  结构导航 15s · 诊断 60s · 单文件 checks 30s
-  timeout 写成 tool.completed(status=timeout)，不是把 Turn 标 failed
-  编码一步常 60–160s（并行只读 + 模型），这是 runner lease 做成 180s 而不是 60s 的原因
-
-handler 改道（工具名不变）
-  grep 符号形 pattern → search_codebase（Locate）；结果带 redirected_from=grep
-  评测 pytest / 环境探针 → 该题 Docker，而不是宿主 shell
-  <span class="pt">◆ 要点  改道在 handler。靠 prompt 劝模型换工具名，前缀缓存与审计都会漂。</span>
-
-审批
-  write_file / edit_file 等 requires_approval 时写 approval.requested
-  write_file 附旧文（截 32 000 字）供 UI diff；edit_file 只附 span 的 old/new
-  Engine 返回后由 Controller 持 checkpoint；approve 在同一 run_id 续跑，不新开 Turn</pre>
-
-          <h3>终局边：receipt 是 continue，不是第六个图节点</h3>
-          <pre class="seq">触发源只有工具结果维护的追踪器，不解析终稿自然语言。
-
-编码两类（剩余步数须 ≥ verify_receipt_reserve_steps，默认 10）
-  1  成功 edit/write 之后未跑 testish 命令          verify_pending
-  2  工作区根有 problem.md / PROBLEM.md / issue.md，且已抽出义务
-     仓库测试已绿，但这些例子未在最新编辑后被成功命令覆盖
-     issue_repro_armed 且未 satisfied
-     文件不在则这条不武装。日常编码只走上面的经典收据
-  每类每 Turn 至多一次（verify_receipt_sent / issue_repro_receipt_sent）
-  cancel / budget_exceeded 不注入
-
-写作 L0（staccato / hinge / opening / lore）
-  预留更紧：min(reserve, 3)；四类共用「本 Turn 已发过一张 writing receipt」互斥
-
-注入形态
-  平台写入一条 user 消息（口吻像用户催验证）
-  另写 tool.completed：tool_name=verify_receipt，schema 不允许 verify_receipt_kind 字段，kind 只进 summary
-  然后 continue 同一 while → 再 assemble → 再 stream
-<span class="pt">◆ 要点  禁止为「再验一轮」加第六个节点。那是终局边的 continue。receipt 也不是 tool_result，工具菜单看不见。</span></pre>
-
-          <h3>超时栈（互不替代）</h3>
-          <pre class="seq">层            默认        失败形态
-connect       10s         可重试（尚未首字节）
-first-byte    60s         transient；max_retries=2，backoff 0.5–8s
-model 整段    600s        ModelProviderTimeout
-step 墙钟     720s        StepTimeoutError → failed(step_timeout)
-tool 默认     60s         tool.completed(status=timeout)，Turn 继续
-结构 nav/diag 15s / 60s   同上
-compact       20s/1024tok 回退确定性摘要
-lease         180s/10s    runner_lost（编码一步常 60–160s）
-stall         180s/30s扫  auto-fail → step_timeout（跳过 waiting_approval）
-claim         15s         start_timeout（还没进 while）
-<span class="pt">◆ 要点  把所有超时收成一个数字，取消/租约/供应商/stall 会互相误杀。</span></pre>
-
-          <h3>本类明确不管</h3>
-          <pre class="seq">claim / 租约 / 终态事件      → TurnController
-工具 handler 实现            → tools.*
-fill 阶梯阈值细节            → context.policy
-斜杠编译                     → InputCompiler
-Stall Watchdog               → 旁挂循环（180s 无新事件且非 waiting_approval；默认 auto-fail → step_timeout）
-  stall 看的是耐久 turn_events 新鲜度（含 stream-live 心跳），不是 live 是否仍在推 token
-    <span class="pt">◆ 要点  checkpoint 下 delta 不进 PG；Engine 开流后每 ~45s 写 turn.thinking(stream-live) 喂 stall。</span>
-  thinking.delta 若 divert 出库，必须另有心跳，否则 watchdog 会把活 Turn 当死</pre>
-          <p class="figure-lead">海报中间自上而下的箭头链即 assemble → stream（经 model-gateway）→ 解析（delta 默认 <code>turn.live.*</code>）→ 工具（经 sandbox / retrieval）或终局。verify 是第 5 步旁路；耐久边界见 <code>step.started</code> / tool / 终态，左右不是第二套主链。</p>
-          <div class="src"><code>engine/agent_engine.py</code> · <code>model/gateway.py</code> · <code>model/remote_provider.py</code> · <code>tools/core/remote_sandbox.py</code> · <code>retrieval/remote_embedder.py</code></div>
+          <p class="figure-lead">图示：</p>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">
             <img src="../assets/harness/agent-engine-loop-zh.png" alt="AgentEngine 单循环详流" />
           </div>
-          <figcaption>AgentEngine 单循环详流 · 点击放大</figcaption>
+          <figcaption>AgentEngine 单循环详流。</figcaption>
         </figure>
       </section>

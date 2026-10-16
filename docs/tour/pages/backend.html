@@ -1,441 +1,224 @@
-<section class="page" data-id="backend" data-group="总览" data-title="时序 · 并发 · 负载">
+<section class="page page-mark" data-id="backend" data-group="总览" data-title="时序 · 并发 · 负载">
         <div class="card">
-          <h2>后端：进程、表与负载</h2>
-          <p class="lede">先看宏观：哪些<strong>容器进程</strong>在跑、各自碰哪些<strong>表</strong>、谁写耐久 <code>turn_events</code>。浏览器不直连编排。Turn <strong>真源与 claim</strong>在 Postgres；分发门铃与活流默认走 Redis Pub/Sub（<code>TURN_DISPATCH_WAKE=redis</code> · <code>EVENT_DURABILITY=checkpoint</code>）；live 模型 / embed / exec 是编排对平面的 HTTP；异步索引走 Redis Streams。默认 <code>TURN_DISPATCH=pull</code>。下文按同一次 Turn 写时序和容量。页底 PNG 与 ASCII 不一致时，以 ASCII 和代码为准。</p>
-          <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> Turn 的领取在 Postgres。Redis 负责门铃和活流，不负责领取。</li>
-          </ul>
+          <h2>后端架构：进程、状态与负载</h2>
+          <p class="lede">AgentPlatform 的一次请求会经过工作台、API 和运行时编排，再由模型网关、检索服务或沙箱完成具体操作。请求进入系统时，API 负责身份校验、准入和任务记录；运行时取得任务执行权后，才开始推理循环；执行期间产生的状态变化写入 PostgreSQL，并由 API 整理成工作台可以消费的事件流。独立执行服务通过内部 HTTP 与运行时通信，不直接向浏览器提供事件流，也不负责决定一个 Turn 是否已被领取或完成。</p>
+          <p>这套架构需要把三类职责分开。<strong>任务状态与执行权以 PostgreSQL 为准，Redis 负责唤醒和实时分发，模型、检索与命令执行由各自的执行服务承接。</strong> <span class="hl-warn">三者不能相互替代：分发通知丢失不能导致任务遗失，实时 token 丢失不能改变已经提交的任务状态，执行服务返回结果也不能绕过运行时写入 Turn 事件的流程。</span></p>
+          <p>本文从部署进程、数据归属和资源边界解释后端架构。一次请求经过哪些步骤见<a href="#request-path">请求主路径</a>；模型调用、上下文组装和工具调度的循环内部细节见<a href="#engine-loop">Engine 单循环</a>。</p>
 
-          <h3>宏观：进程谁在</h3>
-          <pre class="seq">产品热路径上的进程（compose + planes.yml）
-────────────────────────────────────────
-  Caddy            L7；/ → web，/api|/health → api；无业务状态
-  web              工作台；只消费 SSE 与 GET /view
-  api              鉴权·准入·落库·SSE·投影；PUBLISH turn.dispatch；订 turn.live.*
-  postgres         Turn 业务真源 + pgvector 向量表（claim / 耐久事件）
-  runtime          编排：claim / Engine；写耐久事件；PUBLISH turn.live；默认无 ST
-  model-gateway    live LLM NDJSON 出口（slim）
-  sources-retrieval 唯一 embedding 池 · sync/watch · 可消费 agent.jobs
-  sandbox          bwrap/landlock exec（slim）
-  redis            Pub/Sub：turn.dispatch · turn.live.* ；Streams：agent.jobs
+          <h3>1. 部署分层与职责边界</h3>
+          <p>默认 Compose 部署将后端拆成多个进程。拆分的目的不是把每个函数都变成服务，而是把生命周期管理、外部请求、重计算和操作系统隔离分别放在适合的执行环境中。</p>
+          <table>
+            <thead>
+              <tr><th>进程或服务</th><th>职责与边界</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>Caddy</code></td>
+                <td>对外提供 HTTP/HTTPS 入口，将 <code>/api/*</code> 与健康检查路径转发给 API，其余路径交给 Web。它不校验用户会话、不保存 Turn 状态，也不解析 SSE 事件。</td>
+              </tr>
+              <tr>
+                <td><code>web</code></td>
+                <td>提供工作台页面，通过 API 获取视图，并订阅 Turn 的 SSE 事件。<span class="hl">浏览器不直接连接编排进程或执行平面。</span></td>
+              </tr>
+              <tr>
+                <td><code>api</code></td>
+                <td>负责用户身份与会话归属检查、请求准入、创建 Turn/Run、提供视图查询、接收审批和取消命令，并将后端事件整理为 SSE。它不承担 Agent 推理循环。</td>
+              </tr>
+              <tr>
+                <td><code>postgres</code></td>
+                <td>保存 Turn、Run、耐久事件与界面投影等业务状态；Run 的领取通过数据库条件更新完成。检索也会使用 PostgreSQL/pgvector，但检索请求由检索服务负责。</td>
+              </tr>
+              <tr>
+                <td><code>runtime</code></td>
+                <td>执行编排逻辑：领取 Run、持有租约、建立 <code>TurnState</code>、运行 Engine、处理审批续跑，并写入过程事件和终态。运行时不直接向浏览器提供 SSE。</td>
+              </tr>
+              <tr>
+                <td><code>model-gateway</code></td>
+                <td>转发 live 模型请求，并以 HTTP NDJSON 流返回上游响应。模型流的网络连接由网关承接，<code>runtime</code> 保留推理循环和任务状态。</td>
+              </tr>
+              <tr>
+                <td><code>sources-retrieval</code></td>
+                <td>负责资料同步、索引维护、Embedding，以及 ANN/FTS 检索。默认执行平面部署将 Embedding 模型权重集中在此服务，运行时通过 HTTP 请求查询向量。</td>
+              </tr>
+              <tr>
+                <td><code>sandbox</code></td>
+                <td>执行需要操作系统级隔离的命令。默认部署通过独立服务调用 <code>bwrap</code> / Landlock 等隔离机制；测试或兼容模式可以回退到运行时进程内的实现。</td>
+              </tr>
+              <tr class="pin-high">
+                <td><code>redis</code></td>
+                <td>提供 <code>turn.dispatch</code>、<code>turn.live.*</code> 等 Pub/Sub 通道，并通过 Streams 承载可延迟处理的索引任务。<span class="hl-warn">Redis 不决定 Run 的所有权，也不是耐久事件的权威存储。</span></td>
+              </tr>
+              <tr>
+                <td>旁路进程</td>
+                <td><code>ast-indexer</code>、评测服务及发布台承担结构索引、评测和运维任务，不属于每次普通提问都必须经过的主链。</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>这些职责划分同时限定了状态写入权。API 创建任务并提供面向浏览器的访问入口，运行时负责推进任务状态和写入执行过程，执行平面只返回模型、Embedding 或命令执行结果。<span class="hl-warn">检索服务可以写入资料索引，但不写 Turn 的耐久事件；模型网关与沙箱不应直接更新任务状态。</span>这样，某个平面的失败可以作为运行时处理的调用失败，而不需要让每个服务分别维护一套 Turn 状态机。</p>
+        </div>
 
-旁路（不进日常提问主链）
-  ast-indexer · bench(+bench-postgres) · 发布台 :9090
+        <div class="card">
+          <h3>2. 业务状态、耐久事件与分发通道</h3>
+          <p>理解后端最重要的区别，是把业务记录、耐久事件和通知通道分开。它们经常在同一个执行阶段出现，但承担的职责并不相同。</p>
+          <table>
+            <thead>
+              <tr><th>数据或通道</th><th>写入方与读取方</th><th>用途和保证</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>turns</code>、<code>runs</code></td>
+                <td>API 创建初始记录；运行时领取 Run，并更新执行中或终态状态</td>
+                <td>保存任务生命周期与执行权相关状态，是调度和状态查询的依据。</td>
+              </tr>
+              <tr>
+                <td><code>turn_views</code></td>
+                <td>API 创建初始投影，并根据耐久事件更新</td>
+                <td>为列表、首屏和审批界面提供读取视图。它是投影，不替代 <code>turn_events</code> 中的耐久记录。</td>
+              </tr>
+              <tr>
+                <td><code>turn_events</code></td>
+                <td>运行时写入；API 读取并向 SSE 回放</td>
+                <td>保存步骤、工具调用、审批和终态等耐久事件。事件 <code>sequence</code> 用于排序与断线后的追赶。</td>
+              </tr>
+              <tr>
+                <td><code>run_commands</code></td>
+                <td>API 写入审批、取消等控制命令；持有对应 Run 的运行时消费</td>
+                <td>把用户控制动作交给当前执行者处理，避免浏览器直接操作运行时内存状态。</td>
+              </tr>
+              <tr class="pin-high">
+                <td><code>turn.dispatch</code>（Redis Pub/Sub）</td>
+                <td>API 在事务提交后发布；运行时订阅</td>
+                <td>作为待领取任务的唤醒信号。通知可能丢失，因此运行时仍会轮询数据库；实际领取权由 PostgreSQL 中的条件更新决定。</td>
+              </tr>
+              <tr>
+                <td><code>turn.live.*</code>（Redis Pub/Sub）</td>
+                <td>运行时发布 token、thinking 和工具增量；API 订阅并转发</td>
+                <td>承载高频实时内容，不提供 PostgreSQL 的耐久 <code>sequence</code>，也不作为断线恢复的完整日志。</td>
+              </tr>
+              <tr>
+                <td>PostgreSQL <code>NOTIFY</code></td>
+                <td>事件写入或命令提交后通知监听进程</td>
+                <td>用于唤醒投影、事件回放或命令消费。通知本身不包含完整耐久事件，也不承担任务所有权仲裁。</td>
+              </tr>
+              <tr>
+                <td><code>agent.jobs</code>（Redis Streams）</td>
+                <td>API 或旁路任务生产者写入；检索服务消费</td>
+                <td>承载资料索引等可延后完成的任务，不用于领取 Turn。</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>默认配置使用 PostgreSQL 保存业务状态和耐久事件，Redis Pub/Sub 用于分发唤醒和实时内容。两种路径不能混为一谈。<code>turn.dispatch</code> 在任务记录提交后发布；若通知丢失，运行时可以通过周期性轮询发现仍处于 <code>accepted</code> 且符合领取条件的 Run。多个运行时副本竞争同一 Run 时，数据库条件更新（CAS）决定哪个副本获得执行权；<span class="hl-warn">不能把 Redis 消费成功当作 claim 成功。</span></p>
+          <p><code>turn_events</code> 与 <code>turn.live.*</code> 采用不同的恢复语义。耐久事件带有 PostgreSQL 分配的 <code>sequence</code>，客户端重连时可以依据 <code>Last-Event-ID</code> 或 <code>since_sequence</code> 重新读取缺失的耐久事件。默认 <code>EVENT_DURABILITY=checkpoint</code> 模式下，高频 token、thinking 和工具增量优先通过 <code>turn.live.*</code> 传输，不必逐条写入 <code>turn_events</code>；耐久状态和工具边界事件仍然落库。<span class="hl-warn">因而重连可以恢复权威状态与耐久事件，但不保证逐 token 重播此前所有实时增量。</span>若启用 <code>EVENT_DURABILITY=all</code>，增量事件会进入耐久事件表，并通过约 40 毫秒的批写窗口合并写入；<span class="hl">Redis 实时发布失败时，写入器会回退到 PostgreSQL。</span></p>
+        </div>
 
-<span class="pt">◆ 要点  「执行面」= 编排 + 三个平面容器。lease/inflight 只钉住编排副本。</span></pre>
+        <div class="card">
+          <h3>3. 一次 Turn 如何经过后端</h3>
+          <p>请求主路径可以分成提交、领取、执行、事件返回和控制命令五个阶段。它们使用不同的连接和资源，不能仅凭 HTTP 响应时间推断任务已经开始推理。</p>
 
-          <h3>宏观：表谁写、谁读</h3>
-          <pre class="seq">表 / 通道              写者                         读者 / 用途
-─────────────────────  ──────────────────────────  ────────────────────────────
-works / sessions       api                         全栈领域锚点
-turns                  api INSERT(pending)         编排 claim 后 UPDATE running
-                       编排 UPDATE 终态
-runs                   api INSERT(accepted)        编排 CAS claim · lease 心跳
-                       编排 UPDATE running/终态
-turn_views             api seed + 投影 UPSERT      列表 / 首屏 / 审批 UI（无 thinking.delta）
-turn_events            仅编排 INSERT 耐久事件       api SELECT → SSE 追赶；投影读
-                       （状态机·tool边界·终态；占 sequence）
-run_commands           api INSERT                  持约编排 LISTEN 消费
-runners / lease 列     编排                        编排心跳；丢失 → runner_lost
-source_files/chunks/docs  sources-retrieval        编排 remote 查询 / ANN·FTS
-turn.dispatch (Redis)  api COMMIT 后 PUBLISH       编排 SUBSCRIBE → SELECT/claim
-turn.live.* (Redis)    编排 PUBLISH 活流 delta     api PSUBSCRIBE → SSE（无 PG sequence）
-agent.jobs (Redis)     api（或旁路）enqueue         sources-retrieval 消费索引等
+          <h4>请求提交与准入</h4>
+          <p>工作台通过 <code>POST /api/v1/sessions/{sid}/turns</code> 提交用户消息。API 先验证用户会话身份，并检查当前用户是否拥有目标 Session，再确定场景和相关请求参数。默认的 pull 调度模式会在创建任务前检查尚未领取的队列深度：全局默认上限为 32，同一用户默认上限为 2。<span class="hl">达到上限时，API 返回 <code>429 Too Many Requests</code> 和 <code>Retry-After: 5</code>，此时新 Turn 尚未插入数据库</span>；如果携带的 <code>client_request_id</code> 命中已创建请求，则按幂等重放处理，不再重复创建任务。</p>
+          <p>准入检查通过后，API 在同一数据库事务中创建 <code>turns</code>、<code>runs</code> 和初始 <code>turn_views</code> 记录。事务提交后再发布 <code>turn.dispatch</code> 唤醒信号，并向客户端返回 HTTP <code>202 Accepted</code>。<span class="hl-warn">这个响应表示请求已经进入调度流程，不代表运行时已开始执行。运行时领取成功后，才会写入第一条耐久的 <code>turn.accepted</code> 事件，因此把 <code>202</code> 当作推理开始时间会将排队耗时错误地算进模型执行时延。</span></p>
 
-PG NOTIFY（仍用、非默认分发主路径）
-  turn_events_channel(turn_id)    耐久 INSERT 后 → 叫醒 api 投影 / 反熵
-  run_commands_channel            api → 持约编排
-  turn_dispatch_channel           仅 TURN_DISPATCH_WAKE=postgres|both
+          <h4>运行时领取与任务执行</h4>
+          <p>默认 pull 模式下，运行时订阅 <code>turn.dispatch</code>，同时每隔约 2 秒轮询数据库以弥补 Pub/Sub 通知丢失。候选 Run 只有在数据库条件更新成功后才会被该副本领取；领取后运行时记录执行租约，并按默认 10 秒间隔发送心跳。<span class="hl">租约 TTL 默认 180 秒，主要用于识别失去响应的执行者，而不是限制单次模型调用本身的时长。</span></p>
+          <p>Controller 在进入 Engine 前处理输入编译和本地指令。斜杠指令、<code>@path</code> 预读与会话历史在这一阶段组装；可以本地完成的 <code>/help</code>、<code>/compact</code> 或 <code>/verify</code> 请求可能不需要进入模型循环。需要推理的请求才会加载对应场景的工具表和提示词，并交由 <code>AgentEngine</code> 组装上下文、请求模型、调度工具。该循环内部由<a href="#engine-loop">Engine 单循环</a>单独说明，本页只强调它与后端各执行服务的连接关系。</p>
+          <p>默认 Compose 部署中，live 模型请求通过 HTTP NDJSON 发送到 <code>model-gateway</code>；<code>search_sources</code> 所需的 query Embedding 通过 HTTP 请求 <code>sources-retrieval</code>；<code>run_command</code> 和 <code>run_tests</code> 等命令执行请求进入 <code>sandbox</code>。<span class="hl">三条调用路径不共享 Redis Streams 作为热路径。</span>Redis Streams 面向资料索引等可延迟任务，而同步查询或执行的结果必须直接返回当前 Turn。</p>
 
-<span class="pt">◆ 要点  浏览器看见的字：耐久经 turn_events→SSE；活流经 turn.live→SSE。平面不写 Turn 事件。</span>
-<span class="pt">◆ 要点  model-gateway / sandbox 无业务表；sources-retrieval 写向量表，不写 Turn 事件。</span></pre>
+          <h4>事件返回与浏览器订阅</h4>
+          <p>工作台通常在收到 <code>202</code> 后立即对 <code>/api/v1/turns/{tid}/stream</code> 建立 SSE 连接。<span class="hl">该 GET 请求会再次进行会话身份验证和 Turn 归属检查；SSE 是独立 HTTP 请求，不能沿用此前 POST 的授权结果。</span>API 的流生成器同时等待 Redis live fan-out、PostgreSQL 通知与短间隔轮询：实时增量可以直接转发，耐久事件则根据当前 <code>sequence</code> 游标从 <code>turn_events</code> 读取。耐久事件带 SSE <code>id</code>，live 事件不带可用于耐久续传的 ID。</p>
+          <p><span class="hl-warn">SSE 连接只是观看任务进展的通道，不拥有任务执行权。关闭浏览器或断开 SSE 不会自动取消 Turn</span>；<span class="hl">大量浏览器挂看主要消耗 API 的文件描述符、协程和连接资源，不等同于同样数量的活动推理任务。</span>当任务结束，或者进入需要用户审批的暂停点时，API 会在投影更新后结束当前流，工作台再读取 <code>/view</code> 以展示权威状态。流空闲期间 API 会发送注释型 ping；客户端若长时间没有收到任何字节，会带着耐久游标重新连接。由于 live 增量没有耐久 <code>sequence</code>，重连不承诺从中断处继续逐 token 回放。</p>
 
-          <h3>宏观：一次 Turn 怎么穿过进程</h3>
-          <pre class="seq">读法：每一步前缀 = 进程。平面不写 turn_events。
-命令 ↓ 短 POST                    耐久 ↑ turn_events → SSE
-                                  活流 ↑ turn.live.* → SSE
-真源与 claim 在 Postgres；门铃/活流在 Redis；平面热路径是 HTTP。
+          <h4>审批与取消命令</h4>
+          <p>审批和取消通过独立的短 POST 请求提交。API 校验调用者是否可以访问该 Turn，将控制命令写入 <code>run_commands</code> 并发出唤醒通知；只有与 Run 的 <code>runner_id</code> 匹配且仍持有租约的运行时副本才处理相应命令。审批批准后，运行时从当前内存状态或持久化 checkpoint 恢复同一次执行，使用原有 <code>run_id</code> 和步数状态处理待审批工具调用；<span class="hl-warn">它不会创建一条新 Run 来续跑。</span><span class="hl">当前实现会在 Turn 交接到 <code>waiting_approval</code> 时将其从进程内 active 集合移除，审批决议后重新接管执行，因此“正在等待审批的任务总量”与“本进程当前正在执行的 Turn 数量”是两个不同指标。</span></p>
+        </div>
 
-【Browser】──HTTPS──►【Caddy】──►【api】
-                                  │ 写 turns · runs · turn_views(seed)
-                                  │ COMMIT 后 PUBLISH turn.dispatch · 先 202
-                                  ▼
-                               【postgres】（行可见）
-                                  │
-                               【redis】turn.dispatch
-                                  │ SUBSCRIBE / CAS claim（+ poll 反熵）
-                                  ▼
-                               【编排 runtime】
-                                  │ 耐久：accepted / tool.* / 终态 → turn_events
-                                  │ 活流：token/thinking/tool.delta → turn.live.*
-                                  ├─ HTTP ►【model-gateway】► Provider
-                                  ├─ HTTP ►【sources-retrieval】embed
-                                  └─ HTTP ►【sandbox】exec
-                                  ▼
-                               【api】订 live + SELECT 耐久 ──► SSE ──►【Browser】
-                                            └► UPSERT turn_views（仅耐久）
+        <div class="card">
+          <h3>4. 入口代理与身份校验</h3>
+          <p>Caddy 仅负责第七层路由与代理转发：<code>/api/*</code> 和健康检查路径发往 API，其他路径由 Web 提供。<span class="hl">它不验证 Cookie 或 HMAC，不决定队列准入，也不维护事件序号。</span>当前配置将 Web 和 API 暴露在同一主机下，<code>SameSite=Lax</code> Cookie 因而可用于同源请求；启用 HTTPS 时，Caddy 使用内部 TLS 配置。<span class="hl">代理必须保留流式响应的传输行为，否则 SSE 可能被中间层缓冲，导致已经生成的 token 延迟成批到达。</span></p>
+          <p>会话身份由 API 验证。浏览器携带的 <code>agent_end_user</code> 会话 token 使用 HMAC-SHA256 校验签名，负载含用户标识、过期时间和密码版本；密码版本不匹配时，旧 token 会失效。API 对修改请求与 SSE GET 分别执行身份验证，并将 Session/Turn 映射回所有者检查，不能仅因为请求中带有已知 <code>turn_id</code> 就允许订阅。<span class="hl-warn"><code>X-Internal-Token</code> 属于服务间调用与管理代理的内部凭据，不能作为浏览器会话凭据使用。</span></p>
 
-旁路：【api】enqueue 【redis】agent.jobs →【sources-retrieval】sources.index_sync
-      不经 Turn 分发，不经 turn_events 主链
+          <h3>5. PostgreSQL 连接与事件写入</h3>
+          <p>运行时将交互热路径和长时间后台数据库操作分到两类连接池。<span class="hl">两类池连接的是同一 PostgreSQL 实例，区别在于资源配额与超时预算，而不是数据库或数据副本不同。</span></p>
+          <table>
+            <thead>
+              <tr><th>连接类型</th><th>默认大小</th><th>客户端命令与服务端语句超时</th><th>典型用途</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>HOT 热池</td>
+                <td>最小 1，最大 5</td>
+                <td>5 秒</td>
+                <td>Run claim 与租约、耐久事件写入、SSE 回放、视图投影、准入检查、控制命令和 checkpoint/transcript。</td>
+              </tr>
+              <tr>
+                <td>BYPASS 慢操作池</td>
+                <td>最小 1，最大 5</td>
+                <td>120 秒</td>
+                <td>AST 与后台索引写入、硬删除 Session、事件保留与清理等允许长时间运行的数据库操作。</td>
+              </tr>
+              <tr class="pin">
+                <td>独立监听连接</td>
+                <td>不计入 HOT 池的 5 个槽位</td>
+                <td>由各监听任务控制</td>
+                <td><code>LISTEN/NOTIFY</code> 监听、健康探测等长连接。<span class="hl-warn">它们若占用热池连接，会永久减少 claim、事件写入和回放可用的槽位。</span></td>
+              </tr>
+              <tr>
+                <td>检索专用连接</td>
+                <td>由检索实现管理</td>
+                <td>按检索实现配置</td>
+                <td><code>sources-retrieval</code> 通过专用连接执行 ANN/FTS 查询和索引工作，不占用运行时 HOT 池。</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>HOT 池为交互事务设置较短的超时，是为了避免慢 SQL 长期占据有限连接，使新任务领取、事件批写和 SSE 回放都排队。BYPASS 池允许更长的执行时间，但不应接管本该快速完成的状态事务。<span class="hl">对同一个 Turn 写入 <code>turn_events</code> 时，写入事务通过按 Turn 标识计算的事务级 advisory lock 分配事件序号；它只串行化同一个 Turn 的事件序列，不锁住整张事件表，不同 Turn 仍可并行写入。</span></p>
+        </div>
 
-不变量
-──────
-  <span class="pt">◆ 202 ≠ turn.accepted</span>     202=已入队；accepted=编排 claim 后才写入耐久事件
-  <span class="pt">◆ Caddy ≠ 鉴权</span>            不验 Cookie、不持 Turn、不解析 SSE
-  <span class="pt">◆ 编排 ↛ Browser</span>          不对浏览器开 SSE
-  <span class="pt">◆ SSE ⊈ inflight</span>          挂看不占执行槽
-  <span class="pt">◆ 权重 ⊈ 编排副本</span>         bge-m3 只在 sources-retrieval
-  <span class="pt">◆ claim ⊈ Redis</span>           Pub/Sub 可丢；CAS 只在 PG；禁止 Streams/XACK claim
-  <span class="pt">◆ 活流 ≠ 真源</span>             重连靠 view + 耐久 sequence；不保证逐 token 续播
-  <span class="pt">◆ query embed ⊈ Streams</span>  热路径 HTTP；agent.jobs 只承载可慢异步索引
-  <span class="pt">◆ 看条带/前缀知进程</span>       海报与 ASCII 冲突时以 ASCII / 代码为准</pre>
+        <div class="card">
+          <h3>6. 并发上限与资源规划</h3>
+          <p>系统中的并发数分别约束排队请求、进程内活动 Turn、模型请求和数据库连接。<span class="hl-warn">它们的计数对象不同，不能将这些数字当作一个统一的“系统并发量”。</span></p>
+          <table>
+            <thead>
+              <tr><th>约束</th><th>默认值</th><th>作用范围</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>未领取队列准入</td>
+                <td>全局 32；每用户 2</td>
+                <td>pull 模式下、插入新 Turn 之前检查；超限返回 HTTP 429。</td>
+              </tr>
+              <tr class="pin">
+                <td><code>RUNTIME_MAX_INFLIGHT_TURNS</code></td>
+                <td>每个 runtime 进程 16</td>
+                <td>约束该进程正在执行的 Turn 数量；不是集群级总量，也不保证全部处于模型推理阶段。</td>
+              </tr>
+              <tr>
+                <td>模型调度槽位</td>
+                <td>全局 4；每租户 2</td>
+                <td>限制同时进入模型请求调度器的调用数。</td>
+              </tr>
+              <tr>
+                <td>HOT 数据库连接池</td>
+                <td>API/runtime 每进程默认各 5</td>
+                <td>约束状态读写、事件批写和回放可使用的并发连接。</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>实际吞吐取决于这些限制中最先饱和的资源，以及模型提供方限流、上下文大小和单次工具的耗时。一个编码 Turn 即使只计作一个活动任务，也可能长时间占用模型调度槽位，并在事件落库时等待数据库连接；SSE 观看者则占用 API 协程和文件描述符，却不占用 runtime 的 inflight 槽位。<span class="hl-warn">因此，软件上限 <code>16</code> 不能直接解释为“可同时进行 16 个满上下文编码任务”。</span>现有容量文档对满窗 Turn 的内存估算约为每个 5–30 MiB，但仓库没有逐 Turn RSS 探针，这一数字只能用于规划，不能作为经过压测验证的容量承诺。</p>
+          <p>上下文窗口同样影响可承载并发。默认配置的模型窗口为 128,000 token，并预留约 30,000 token 给输出，可用于输入内容的预算约为 98,000 token。组窗填充率达到 0.80 时触发 collapse，达到 0.90 时裁剪较旧内容，达到 0.95 时进入自动压缩路径；普通工具结果默认限制为 4,000 字，最近一次成功的 <code>read_file</code> 结果可以使用 32,000 字的上限。这些约束控制单个 Turn 的组窗大小，但组窗在执行中会产生多份对象与序列化副本，因此 token 数不能简单换算成固定的进程内存量。</p>
+          <p>默认 <code>planes.yml</code> 为 <code>model-gateway</code> 设置 512 MiB 内存上限、为 <code>sandbox</code> 设置 1 GiB 上限；<code>sources-retrieval</code> 的基础默认值为 4 GiB，可由部署环境覆盖。启用大型 Embedding 模型时，权重内存主要出现在检索服务，而不是编排进程。扩容运行时不会自动复制检索模型权重；应根据 <code>dispatch_queue_depth</code>、<code>dispatch_wait_seconds</code>、<code>event_pipeline_lag_seconds</code>、首字节时延及实际内存观测判断瓶颈，再决定扩展哪个服务。</p>
+          <p>多副本部署可以增加 runtime 实例，Run 的 claim 仍由共享 PostgreSQL 中的条件更新协调；执行租约和 active 计数则是每个进程自身的状态。<span class="hl-warn">默认部署按每个容器运行单个应用进程设计，不应直接通过 <code>uvicorn --workers</code> 在一个 runtime 容器中复制工作进程</span>，因为进程内的 active 集合和监听器会分别复制，单进程计数也就不再代表整个容器的总量。检索负载应单独扩展 <code>sources-retrieval</code>；异步资料索引则通过 <code>agent.jobs</code> 与交互式查询分开调度。</p>
+        </div>
 
-          <h3>微观时序</h3>
-          <pre class="seq">同一 Turn。t1 与 t3 在浏览器侧几乎同时发生；t2 与浏览器无 TCP。
-三道闸互不替代：门口丢掉请求 · 执行面停止领取 · 观看者占用的是另一类资源。
-
-t0  登录（一次性）
-    Browser  POST /api/v1/auth/login
-         │   Cookie 尚未存在；body = 用户名/密码
-         ▼
-    Caddy  handle /api/*  → reverse_proxy api:8000
-         │   角色：L7 reverse proxy + 路径分流（/api,/health → api；其余 → web）
-         │   不做：Cookie/HMAC 鉴权、缓冲业务体、sticky session、持有 Turn 状态
-         ▼
-    api    校验密码 → HMAC-SHA256 签发会话 token（非 JWT）
-           Set-Cookie: agent_end_user=…; HttpOnly; SameSite=Lax; Path=/
-           TTL 30d；payload.sub=user_id，pv=密码版本（改密即整站失效）
-           无独立 CSRF token：依赖同源 + SameSite；无 FastAPI CORS
-           （页面与 /api 同 host，由 Caddy 拼成同源）
-
-t1  发送（命令面，短连接）
-    Browser  fetch POST /api/v1/sessions/{sid}/turns
-             credentials: include  → 自动带 Cookie
-             body JSON { message, client_request_id, scenario_id? }
-         │
-         ▼
-    Caddy  透传；HTTP/1.1 短请求，无流式语义
-         │
-         ▼
-    api    RequestContextMiddleware  分配/回写 X-Request-ID
-           require_session_actor
-             Cookie | Bearer → HMAC verify → EndUser.active
-             失败 401；admin Basic + bypass → 映射 system user（评测/遗留）
-           assert_session_owner(sid, actor)     非 owner → 403
-           check_dispatch_admission(owner)
-             全局 unclaimed &lt; 32 且 本用户 unclaimed &lt; 2
-             否则 429 + Retry-After:5   ← Turn 尚未 INSERT
-           同一事务:
-             INSERT turns(pending, plan_phase, intent) + runs(accepted, pull_eligible)
-                    + turn_views seed
-             （TURN_DISPATCH_WAKE=postgres|both 时同事务 pg_notify turn_dispatch）
-           COMMIT 后 PUBLISH turn.dispatch run_id（默认；失败只日志，靠 poll）
-           响应 202  { turn_id, run_id, status: pending }
-           （幂等命中 client_request_id → 200，不新建）
-    <span class="pt">◆ 要点  队列满是 HTTP 429，Turn 还没 INSERT。写成 failed，终态语义就脏了。</span>
-
-t2  领取（编排 runtime；与浏览器无 TCP）
-    runtime  SUBSCRIBE turn.dispatch | poll 2s（可选 PG LISTEN if wake=postgres|both）
-             _active_turns &lt; 16 ? claim : 不领
-             UPDATE runs SET running, lease_expires_at = now()+180s
-               WHERE status='accepted'
-             _load_accepted 带出 t.intent，_intent_from_row 后传给 start_turn
-             INSERT turn_events type=turn.accepted  sequence=1
-             触发器 pg_notify('turn_events_channel', turn_id::text)（投影反熵）
-    <span class="pt">◆ 要点  CAS 失败者 = 已被抢走，勿当回滚重试，否则双 runtime 跑同一 Turn。</span>
-    <span class="pt">◆ 要点  编码一步常 60–160s，租约 180s 必须盖过它。更短 → 误标 runner_lost。</span>
-    闸② inflight = 本进程 _active_turns（含 waiting_approval），默认 16
-      满则停止 claim，压力留在未领取队列，回头顶到门口 429。
-    lease 心跳 10s。过期且不能安全续跑 → failed(runner_lost)。
-      审批挂起仍占同一 run_id：续跑必须是同一执行实例。
-    claim 超时 15s 无人领取 → 已 202 的请求随后 SSE failed(start_timeout)
-    内存 编排吃 runtime 4g（组窗、checkpoint）；ST 权重在 sources-retrieval；
-         模型流缓冲在 model-gateway；exec 在 sandbox 1g
-
-t3  订阅（SSE 面，长连接）——通常与 t1 的 202 之后立刻发起
-    Browser  GET /api/v1/turns/{tid}/stream?since_sequence=0
-             Accept: text/event-stream
-             Cookie 再次带上（SSE 是另一条 HTTP，必须重新鉴权）
-         │
-         ▼
-    Caddy  同一条 reverse_proxy。SSE = 永不结束的 HTTP 响应。
-           Caddyfile 未开额外 buffering；流式依赖：
-             · 上游 Transfer-Encoding: chunked / 逐步 yield
-             · api 头 Cache-Control: no-cache
-             · X-Accel-Buffering: no
-               （防 nginx 类代理攒包；Caddy reverse_proxy 默认不按
-                nginx proxy_buffering 攒，此头是防御性兼容）
-           Caddy 不解析 SSE 帧，不扇出，不存 sequence。
-         │
-         ▼
-    api    require_session_actor     同 t1
-           _require_turn_access      get_turn + assert_session_owner
-           Last-Event-ID 与 since_sequence 取 max → 续传游标（仅耐久）
-           StreamingResponse(generator)
-             协程: wait(live fan-out | PG NOTIFY | 2s poll)
-                   drain turn.live.* 信封（sequence=null；SSE 省略 id）
-                   SELECT * FROM turn_events WHERE sequence &gt; cursor
-                   yield "id: {seq}\nevent: message\ndata: {envelope}\n\n"（仅耐久带 id）
-                   空闲约 14s yield ": ping\n\n"
-             单进程一条 asyncio 循环：generator 多数时间 await 让出，偶尔 yield 一帧。
-             见到 turn.completed|failed|cancelled
-               或 approval.requested → 等投影追上 → 结束 generator
-               （暂停点关流，逼客户端 GET /view 再画审批 UI）
-    <span class="pt">◆ 要点  挂看是 asyncio Task，不是 OS 线程，也不是一路推理。关页不杀 Turn。</span>
-    <span class="pt">◆ 要点  耐久事实是 SELECT sequence&gt;cursor；活流可丢。重连不保证逐 token。</span>
-
-    SSE = api 读模型的单向出口（text/event-stream；fetch+ReadableStream 带 Cookie）
-      · 载荷 = 契约信封 JSON；耐久游标 = sequence；live 无 SSE id
-      · approval.requested 为暂停点：关流，逼客户端 GET /view
-      ~14s : ping；45s 无字节视为闷流，带 since_sequence 重连（≤8）
-    闸③ SSE 连接数 = 正在看的浏览器数，与 inflight 解耦。
-      大量挂起的 SSE 先挤 api 的 fd / 协程 / 1g。
-
-t4  模型增量（高频）
-    runtime ModelGateway ──HTTP NDJSON──► model-gateway ──► 上游 Provider
-         │  stub/recorded 仍在编排本地，不经 gateway
-         ▼
-    EVENT_DURABILITY=checkpoint（默认）
-         PUBLISH turn.live.&lt;turn_id&gt;（token/thinking/tool.delta；失败则降级写 PG）
-    EVENT_DURABILITY=all
-         BufferedEventWriter 首 token 立即 INSERT；其后 ≤40ms 多行 INSERT
-         PG AFTER INSERT → NOTIFY(turn_id)（投影门铃，不含 delta 正文）
-         │
-         ▼
-    api  PSUBSCRIBE turn.live.* + LISTEN turn_events（独立连接，不占 hot pool）
-         ├─ live fan-out → t3 SSE 直接 yield（无 sequence）
-         ├─ NOTIFY Event.set() → t3 SELECT 耐久后 yield
-         └─ projection queue → UPSERT turn_views（仅耐久）
-         │
-         ▼
-    Caddy  chunk 原样转发
-         │
-         ▼
-    Browser  TextDecoder 拆 \n\n 帧 → JSON.parse data
-             seq ≤ last 则丢弃
-             token/thinking/tool.delta → 内存 pending → rAF → setState
-             45s 无字节（含 ping）→ 视为中间设备闷流 → 带 since_sequence 重连（≤8）
-
-t5  控制命令（与 SSE 并行的短 POST）
-    Browser  POST /turns/{tid}/approve-tool-call   Cookie + JSON
-    Caddy    透传
-    api      鉴权 + _require_turn_access
-             INSERT run_commands + NOTIFY run_commands_channel
-    runtime  仅 runner_id 匹配且持有 lease 的副本消费
-             续跑同一 run_id（仍占 inflight）
-<span class="pt">◆ 要点  live 上游经 model-gateway；query embed 经 sources-retrieval HTTP；首 token / query embed 禁止上 Redis 总线。</span></pre>
-
-          <h3>Caddy</h3>
-          <pre class="seq">Caddy  L7 reverse proxy     SSE 对它 = 很久不结束的 GET /api/…
-────────────────────────────────────────────────────────────────
-做                                    不做
-:80/:443 入口                         不验 Cookie / HMAC
-/api /health → api，其余 → web        不 terminate SSE、不改 data:、不存 sequence
-页面与 API 同源                       不 sticky、不按 user 路由到某 runtime
-  → Cookie SameSite=Lax，无需 CORS    不执行 admission / inflight
-tls internal；/health 本地 ok
-
-禁缓冲：api 发 Cache-Control: no-cache 与 X-Accel-Buffering: no
-<span class="pt">◆ 要点  Caddy 不鉴权、不解析 SSE。代理若缓冲，token 会成批到达。</span></pre>
-
-          <h3>鉴权切面</h3>
-          <pre class="seq">每条 HTTP 都做，含 SSE GET。不能订阅他人的 turn_id。
-
-Cookie agent_end_user  ──HMAC-SHA256──►  { sub, exp, pv }
-        │
-        ▼
-require_session_actor  → EndUser
-        │
-        ├─ POST /sessions/{sid}/turns  → assert_session_owner(sid)
-        └─ GET  /turns/{tid}/stream    → turn.session_id → 同一 owner 检查
-
-X-Internal-Token 只用于 api↔runtime 的 push 回退 / admin 代理。
-浏览器拿不到；runtime 不认终端 Cookie。</pre>
-
-          <h3>容量信封</h3>
-          <pre class="seq">┌──────────────────────────────────────────────────────────────────────────┐
-│  容量信封（默认单副本 make up；数字以 settings / compose 为准）            │
-│  组窗内存是数量级估算（无 per-Turn RSS 探针），用于规划，不是精确会计。    │
-│                                                                          │
-│  软件帽    inflight = 16 / 编排 runtime     admission 全局 32 / 用户 2     │
-│  进程      各服务 uvicorn ×1 · asyncio 单 loop（禁止 --workers）          │
-│            产品执行侧容器：runtime + sources-retrieval + model-gateway   │
-│            + sandbox + redis（总线）+ api + postgres + …                 │
-│            扩容编排 = 加 runtime 副本，claim 仍走数据库 CAS。             │
-│            扩容权重面 = 扩 sources-retrieval，不是给 runtime 塞 ST。     │
-│  cgroup    runtime 4g（编排）  sources-retrieval 12g(GPU)/4g(CPU)        │
-│            model-gateway 512m  sandbox 1g  api 1g  postgres 1g  ast 768m │
-│  DB 池     api hot5 + bypass5               runtime hot5 + bypass5       │
-│            + LISTEN 专用连接 2～3 根/进程   PG 默认 max_connections≈100   │
-│  实际并发  min(16, 热池排队, RSS, 供应商限流) 推荐 2～4 路满窗 Turn       │
-│  embed     权重只在 sources-retrieval；编排 EMBEDDING_BACKEND=remote     │
-└──────────────────────────────────────────────────────────────────────────┘
-<span class="pt">◆ 要点  先撞上的是热池 5，不是 inflight 16。--workers 会复制互不相认的闸。</span>
-<span class="pt">◆ 要点  HA 扩 runtime 不复制 bge-m3；GPU overlay 挂在 sources-retrieval。</span>
-
-连接分类
-────────
-短连接  POST /turns  GET /view  POST approve|cancel
-        Caddy→api 一轮请求/响应；鉴权 Cookie；事务毫秒级；不占 inflight
-
-长连接  ① Browser↔Caddy↔api   SSE (chunked GET，Turn 生命周期)
-        ② api↔PG              LISTEN turn_events_channel（进程级，1 根）
-        ③ runtime↔PG          LISTEN dispatch + LISTEN run_commands
-        ④ runtime↔model-gateway↔Provider   模型 HTTP NDJSON（step 级，可 abort）
-        ⑤ runtime↔sources-retrieval        query/index embed（HTTP；不上总线）
-        ⑥ runtime↔sandbox                 exec（HTTP；可回退本进程）
-        ⑦ runtime 心跳        10s 续 lease（短 SQL，逻辑上是长租约）
-
-        ① 与 ④ 数量随「正在看 / 正在推理」涨
-        ②③ 是固定的控制面插座，与用户数无关
-        ⑤⑥ 是执行平面热路径；异步索引走 Redis Streams，不走这里
-
-叠回时序
-────────
-t1 POST        短连接 · api 热池借 1 · 一事务 · COMMIT 后 NOTIFY
-               内存：请求 JSON KB 级
-               并发：admission COUNT unclaimed（INSERT 之前，避免先写再 429）
-
-t2 claim       runtime 热池 1 · CAS UPDATE · inflight += 1
-               加载 transcript → TurnState（此时组窗尚未到 128k）
-
-t3 SSE         长连接 1 / 观看者
-               不借热池挂起：LISTEN 独立连接 + 唤醒后短 SELECT
-               内存：当前页 envelope（delta ≤8KiB/事件）
-               并发：N 路 SSE ≈ N 个 asyncio Task on api 1g
-               与 inflight 解耦
-
-t4 assemble    纯 CPU/内存 · 不写库
-               峰值 = 组窗对象图（约 5～30 MiB / 满窗 Turn）
-               fill≥0.80 才 collapse
-
-t4 INSERT      热池；同 Turn 串行拿 pg_advisory_xact_lock
-               按 Turn 哈希的事务级锁：同 Turn 串行拿号，异 Turn 不互相堵
-               不是锁整张 turn_events
-               16 Turn 并行 ⇒ 最多 5 个真正在 COMMIT
-               其余 await Pool.acquire()；排队 &gt;5s → statement/command timeout
-
-t4 模型流      长连接 ④ · 流经 model-gateway；编排只持组装窗与回灌
-               SSE 只搬 payload.delta
-
-t5 checkpoint  UPSERT JSONB = 组窗的磁盘镜像（审批挂起仍占 inflight + lease）</pre>
-
-          <h3>双池与旁路插座</h3>
-          <pre class="seq">同一实例 agent-postgres（cgroup 1g，max_connections≈100）
-超时分级 + 槽位隔离。checkout = 从池里借一条连接。
-热路径 SQL 必须在约 5s 内归还，否则 claim / 事件批写 / SSE 回放排队，
-再叠加超时会切断还在跑的 Turn。
-                    ─────────────────────────────────────────────────────
-                                      │
-          ┌───────────────────────────┼───────────────────────────┐
-          │                           │                           │
-          ▼                           ▼                           ▼
-   asyncpg HOT 池              asyncpg BYPASS 池              旁路插座（非双池）
-   get_pool()                  get_bypass_pool()
-   min=1 max=5                 min=1 max=5
-   statement_timeout=5s        statement_timeout=120s
-   command_timeout=5s          command_timeout=120s
-          │                           │                           │
-          │  交互必须快               │  允许慢、禁止占热池        │  自己建连
-          │                           │                           │
-          ├ claim / lease             ├ AST UPSERT                ├ LISTEN ×N
-          ├ INSERT turn_events          work_ast_* / jobs           独立 asyncpg.connect
-          ├ SELECT SSE 回放             SKIP LOCKED 领取            不计入 pool max=5
-          ├ 投影 turn_views           ├ 硬删除 Session              探活 SELECT 1 / 30s
-          ├ admission COUNT             级联 wipe turn_events     ├ RAG psycopg
-          ├ run_commands              ├ 事件分级保留 DELETE         PgVectorStore 自建连
-          └ checkpoint/transcript       stream 7d / 结构 90d        索引面 HNSW/GIN
-                                                                    查询面 search_sources
-                                                                    （Turn 内 ANN，但仍
-                                                                     不走 hot 池）
-
-叠回时序
-────────
-t1 POST /turns          HOT     短事务 INSERT + NOTIFY
-t2 claim                HOT     CAS UPDATE
-t3 SSE SELECT           HOT     sequence &gt; cursor（被 LISTEN 叫醒）
-t4 INSERT turn_events   HOT     advisory lock + 批写
-t4 search_sources       psycopg 专用连   ANN/FTS；失败/超时不占用 hot
-t4 AST 后台             BYPASS  indexer 进程；Turn 只读投影
-删历史 / retention      BYPASS  与直播 SSE 错开槽位
-
-<span class="pt">◆ 要点  bypass 不是第二台库，也不是 RAG 池。LISTEN 不能占热槽。硬删会话要显式清 turn_events。</span>
-
-HOT     checkout 必须快还；慢 SQL 占槽 → claim / 事件批写 / SSE 回放排队
-BYPASS  同实例另一组 5 槽、120s，给会超过 5s 的慢 SQL（AST / 硬删 / retention）
-LISTEN  checkout 就一直占着；放进热池 = 永久少槽 → extra connect
-RAG     psycopg 自建连，第三条绕开 hot 的路径</pre>
-
-          <h3>组窗内存</h3>
-          <pre class="seq">组窗（每 Turn，不是每 Session）
-  ContextEngine.assemble 的 Turn 级 RAM，不是 Session 常驻 128k。
-  session_transcripts 落盘前已确定性裁剪。
-──────────────────────────────
-  CompactionPolicy
-    model_window      128_000 tok     模型上下文上限
-    output_reserve     30_000 tok     预留给 completion（不计入 fill 分子）
-    usable             98_000 tok     fill = assembled / usable
-    collapse / snip / autocompact     0.80 / 0.90 / 0.95
-    hot_zone           0.35           collapse 时保留的尾部占比
-    tool_result        4_000 字       普通 tool_result 头尾截断
-    latest read_file  32_000 字       最近一次成功读文件放宽
-
-  驻留位置（同一 Turn 内会有多份拷贝）
-    TurnState.messages          真源（工具回灌后）
-    ContextEngine.assemble      本步送模型的窗口
-    checkpoint (JSONB)          审批挂起 / 续跑
-    session_transcripts         Session 级落盘；写入前确定性裁剪，不调 LLM
-    模型 HTTP body              序列化后再占一份
-
-  内存数量级（Python 对象图；仓库无 per-Turn RSS 探针，只作规划）
-    满 usable≈98k tok → 典型 5～30 MiB / Turn（对象头 + 多份拷贝）
-    16 inflight × 20 MiB ≈ 0.3 GiB   仅消息图（编排 runtime）
-    + sentence-transformers 常驻于 sources-retrieval（不在编排进程）
-        gte-small@384     ~0.1 GiB
-        bge-m3@1024       ~1.5–2.5 GiB（故 GPU overlay 把 sources-retrieval 抬到 12g）
-    ⇒ 编排 4g 下 16 路满窗仍可能先撞热池/供应商限流；权重 OOM 面在 retrieval。
-<span class="pt">◆ 要点  128k 是这一 Turn 的组窗，不是 Session 常驻。软件帽 16 ≠ 物理可跑 16。</span></pre>
-
-          <h3>规划上界</h3>
-          <pre class="seq">软件帽先于 cgroup；热连接先于软件帽。
-可回归的最高并发需要 rss_bytes/inflight 与 pool_acquire_wait_seconds；仓库只保证软件帽与 cgroup。
-<span class="pt">◆ 要点  不要宣称「支持 16 用户同时满负荷编码」。满窗大约 2～4 路。</span>
-
-  维度            默认单副本     备注
-  软件执行中      16             RUNTIME_MAX_INFLIGHT_TURNS
-  DB 热连接       runtime 5 + api 5    先于 16 饱和
-  满窗推理        2～4           编排 4g + 组窗拷贝；embed 在 retrieval
-  轻量对话        6～8           窗远小于 98k
-  SSE 挂看        数十           api 1g / fd；≠ 能推理 16
-  未领取排队      32 / 用户 2    再高 429
-  HA 双 runtime   软件 32        近双份 4g；不复制 bge-m3；PG 连接再 +12
-
-扩容
-────
-  make up-ha → runtime-a / runtime-b，共用同一 Postgres 与 agent_data
-  claim 走数据库 CAS，不配置 RUNTIME_URL_MAP
-  单进程 uvicorn，勿设 --workers（会复制互不相认的 inflight / LISTEN）
-  GPU / bge-m3 挂在 sources-retrieval（及 bench），不随 runtime 副本翻倍
-  dispatch_wait_seconds / dispatch_queue_depth 顶满再加 runtime
-  event_pipeline_lag_seconds / TTFB 变差先查热池与事件批窗（~40ms）
-
-事务与边界
-──────────
-  create_turn 单事务多 INSERT；NOTIFY 在 COMMIT 后投递
-  事件行在 pg_advisory_xact_lock(turn_id) 下分配 sequence
-    同 Turn 串行拿号；异 Turn 不互相堵；不是锁整张事件表
-  SQL 均 $n 参数化；asyncpg 每连接 statement cache（默认 100）
-  加密停在边界：:80 明文，:443 tls internal
-  容器内 PG/HTTP 默认无 sslmode=require
-  Cookie = HMAC 签名（完整性，payload 非加密）；供应商 Key 静态 Fernet</pre>
-          <p class="figure-lead">下图主链条带<strong>首词即进程</strong>（【api】【编排runtime】【model-gateway】…）。左列是进程图例与表归属；中链 POST→落库→<code>turn.dispatch</code>→CAS claim→耐久 <code>turn_events</code> + 活流 <code>turn.live.*</code>（扇出三个平面）→api 合并 SSE；右列禁止项与容量。菱形为未领取队列与 inflight。</p>
-          <div class="src"><code>deploy/caddy/Caddyfile</code> · <code>deploy/compose/planes.yml</code> · <code>admission.py</code> · <code>turn_dispatch.py</code> · <code>controller/event_writer.py</code> · <code>db/pool.py</code></div>
+        <div class="card">
+          <h3>7. 事务与部署边界</h3>
+          <p><span class="hl">创建 Turn 的多条初始记录在同一事务中写入，只有事务提交后才发送默认分发通知。</span>事件序号在每个 Turn 的事务锁下分配，避免两个执行路径为同一 Turn 生成重复或乱序的耐久序号。SQL 使用参数化语句；存储层、服务间 HTTP 和浏览器入口的 TLS/凭据处理仍分别由各自边界负责，<span class="hl-warn">不能将内部网络默认可达理解为无需鉴权。</span></p>
+          <p>需要核对实现时，可从以下位置继续阅读：<a href="https://github.com/zodirc/AgentPlatform/blob/master/services/api/app/routers/sessions.py">API 的 Turn 创建路由</a>、<a href="https://github.com/zodirc/AgentPlatform/blob/master/services/api/app/services/command/admission.py">准入队列计算</a>、<a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/controller/turn_controller.py">Controller 与 active Turn 管理</a>、<a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/settings.py">运行时配置</a>、<a href="https://github.com/zodirc/AgentPlatform/blob/master/services/runtime/app/db/pool.py">PostgreSQL 连接池</a>、<a href="https://github.com/zodirc/AgentPlatform/blob/master/deploy/compose/planes.yml">执行平面 Compose 配置</a>和<a href="https://github.com/zodirc/AgentPlatform/blob/master/deploy/caddy/Caddyfile">Caddy 路由配置</a>。</p>
+          <p class="figure-lead">下图展示进程和数据通道的关系。阅读时应区分 PostgreSQL 中的耐久事实、Redis 中的分发/实时通道，以及运行时到执行平面的 HTTP 调用；它们构成同一条后端主路径的不同部分，并不具有相同的持久化与恢复语义。</p>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">
-            <img src="../assets/architecture/backend-stack-zh.png" alt="后端宏观：进程、表、turn_events 与平面 HTTP" />
+            <img src="../assets/architecture/backend-stack-zh.png" alt="后端宏观架构：进程职责、数据库状态与 Redis 通道" />
           </div>
-          <figcaption>后端宏观详流 · 进程 / 表 / 耐久·活流 · 点击放大</figcaption>
+          <figcaption>点击放大</figcaption>
         </figure>
       </section>
-
