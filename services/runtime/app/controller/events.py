@@ -36,19 +36,18 @@ async def _insert_turn_event(conn, statement: str, *values: object) -> None:
 
     role = str(getattr(settings, "turn_events_insert_role", "") or "").strip()
     if not role or not _ROLE_NAME.match(role):
-        await conn.execute(statement, *values)
-        return
+        return await conn.execute(statement, *values)
     try:
         await conn.execute("SAVEPOINT agent_append_role")
     except Exception:
         logger.debug("append-role savepoint unavailable", exc_info=True)
-        await conn.execute(statement, *values)
-        return
+        return await conn.execute(statement, *values)
     try:
         await conn.execute(f"SET LOCAL ROLE {role}")
-        await conn.execute(statement, *values)
+        result = await conn.execute(statement, *values)
         await conn.execute("RESET ROLE")
         await conn.execute("RELEASE SAVEPOINT agent_append_role")
+        return result
     except asyncpg.UniqueViolationError:
         try:
             await conn.execute("ROLLBACK TO SAVEPOINT agent_append_role")
@@ -61,7 +60,7 @@ async def _insert_turn_event(conn, statement: str, *values: object) -> None:
             await conn.execute("ROLLBACK TO SAVEPOINT agent_append_role")
         except Exception:
             logger.debug("append-role savepoint rollback skipped", exc_info=True)
-        await conn.execute(statement, *values)
+        return await conn.execute(statement, *values)
 
 
 async def next_sequence(conn, turn_id: UUID) -> int:
@@ -129,14 +128,16 @@ async def append_event(
         event_id = uuid4()
         now = datetime.now(timezone.utc)
         try:
-            await _insert_turn_event(
+            inserted = await _insert_turn_event(
                 conn,
                 """
                 INSERT INTO turn_events (
                     event_id, turn_id, stream_id, sequence, type, run_id,
-                    step_index, trace_id, causation_id, ts, payload
+                    step_index, trace_id, causation_id, ts, payload, turn_created_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+                SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, t.created_at
+                FROM turns t
+                WHERE t.id = $2
                 """,
                 event_id,
                 turn_id,
@@ -150,6 +151,9 @@ async def append_event(
                 now,
                 json.dumps(payload),
             )
+            count = str(inserted or "").split()
+            if not count or count[-1] == "0":
+                raise RuntimeError(f"turn {turn_id} missing; event not inserted")
             metrics.observe("event_append_seconds", time.perf_counter() - started)
             return {
                 "event_id": str(event_id),

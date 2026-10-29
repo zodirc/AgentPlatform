@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import logging
-from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from app.db.pool import get_pool
@@ -73,37 +71,18 @@ async def reconcile_unclaimed_turns() -> int:
                         "UPDATE turns SET status = 'failed', updated_at = now() WHERE id = $1",
                         turn_id,
                     )
-                    await conn.execute(
-                        "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
-                        str(turn_id),
-                    )
-                    sequence = int(
-                        await conn.fetchval(
-                            "SELECT COALESCE(MAX(sequence), 0) FROM turn_events WHERE turn_id = $1",
-                            turn_id,
-                        )
-                        or 0
-                    ) + 1
-                    payload = {
-                        "termination_reason": "start_timeout",
-                        "message": f"no runtime claimed run within {timeout:.0f}s",
-                    }
-                    await conn.execute(
-                        """
-                        INSERT INTO turn_events (
-                            event_id, turn_id, stream_id, sequence, type, run_id,
-                            step_index, trace_id, causation_id, ts, payload
-                        )
-                        VALUES ($1, $2, $3, $4, 'turn.failed', $5, 0, $6, NULL, $7, $8::jsonb)
-                        """,
-                        uuid4(),
-                        turn_id,
-                        turn_id,
-                        sequence,
-                        run_id,
-                        row["trace_id"] or uuid4(),
-                        datetime.now(timezone.utc),
-                        json.dumps(payload),
+                    from app.services.projection.event_sequence import insert_terminal_event
+
+                    await insert_terminal_event(
+                        conn,
+                        turn_id=turn_id,
+                        run_id=run_id,
+                        trace_id=row["trace_id"] or uuid4(),
+                        event_type="turn.failed",
+                        payload={
+                            "termination_reason": "start_timeout",
+                            "message": f"no runtime claimed run within {timeout:.0f}s",
+                        },
                     )
             fixed += 1
             metrics.inc("dispatch_start_timeout_total")

@@ -88,9 +88,11 @@ def _build_live_envelope(
 _INSERT_SQL = """
 INSERT INTO turn_events (
     event_id, turn_id, stream_id, sequence, type, run_id,
-    step_index, trace_id, causation_id, ts, payload
+    step_index, trace_id, causation_id, ts, payload, turn_created_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, t.created_at
+FROM turns t
+WHERE t.id = $2
 """
 
 
@@ -451,6 +453,7 @@ class BufferedEventWriter:
                             )
                         ]
                         await conn.executemany(_INSERT_SQL, args)
+                        # turn_created_at 来自 turns.created_at，同一 Turn 的事件进同一个月分区。
                 # 流式期间证明 run 仍存活（thinking.delta 洪泛可能拖慢全局心跳任务，超过短租约 TTL）。
                 try:
                     from app.controller import run_lock

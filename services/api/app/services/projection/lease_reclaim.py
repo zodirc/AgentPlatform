@@ -7,9 +7,7 @@ SSE event instead of waiting for the stall watchdog (~180s).
 
 from __future__ import annotations
 
-import json
 import logging
-from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from app.db.pool import get_pool
@@ -29,38 +27,18 @@ async def _append_failed_event(
     trace_id: UUID,
     message: str,
 ) -> None:
-    await conn.execute(
-        "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
-        str(turn_id),
-    )
-    sequence = int(
-        await conn.fetchval(
-            "SELECT COALESCE(MAX(sequence), 0) FROM turn_events WHERE turn_id = $1",
-            turn_id,
-        )
-        or 0
-    ) + 1
-    event_id = uuid4()
-    payload = {
-        "termination_reason": "runner_lost",
-        "message": message[:1024],
-    }
-    await conn.execute(
-        """
-        INSERT INTO turn_events (
-            event_id, turn_id, stream_id, sequence, type, run_id,
-            step_index, trace_id, causation_id, ts, payload
-        )
-        VALUES ($1, $2, $3, $4, 'turn.failed', $5, 0, $6, NULL, $7, $8::jsonb)
-        """,
-        event_id,
-        turn_id,
-        turn_id,
-        sequence,
-        run_id,
-        trace_id,
-        datetime.now(timezone.utc),
-        json.dumps(payload),
+    from app.services.projection.event_sequence import insert_terminal_event
+
+    await insert_terminal_event(
+        conn,
+        turn_id=turn_id,
+        run_id=run_id,
+        trace_id=trace_id,
+        event_type="turn.failed",
+        payload={
+            "termination_reason": "runner_lost",
+            "message": message[:1024],
+        },
     )
 
 

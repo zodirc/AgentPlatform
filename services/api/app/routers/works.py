@@ -18,6 +18,8 @@ from app.services.admin.workspace import WorkspaceProxyError
 from app.services.admin import workspace as workspace_svc
 from app.services.resource.works import (
     Work,
+    WorkDeleteRefused,
+    delete_work_for_owner,
     ensure_default_work,
     update_work_visibility_seed,
 )
@@ -166,6 +168,29 @@ async def patch_work(
     )
     assert row is not None
     return WorkResponse(**dict(row))
+
+
+@router.delete("/works/{work_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_work(
+    work_id: UUID,
+    actor: EndUser = Depends(require_session_actor),
+):
+    """删除 Work 的库内行并写入墓碑。磁盘目录不在这里删。
+
+    参数:
+        work_id: 目标 Work。
+        actor: 须为 owner。
+
+    返回:
+        204。非 owner 或不存在时 404。仍有非终态 run 时 409，库和磁盘都不变。
+    """
+    try:
+        deleted = await delete_work_for_owner(work_id, actor.id)
+    except WorkDeleteRefused:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="work_not_deletable")
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+    return None
 
 
 def _tenant_from_work(work: Work, actor: EndUser) -> dict[str, str]:

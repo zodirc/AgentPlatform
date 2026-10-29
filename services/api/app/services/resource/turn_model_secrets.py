@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from app.db.pool import get_pool
+from app.db.pool import get_bypass_pool
 from app.services.admin.crypto import encrypt_api_key
 from app.settings import settings
 
@@ -70,7 +70,7 @@ async def purge_expired_turn_model_secrets() -> int:
     返回:
         删除行数；解析 asyncpg ``DELETE n`` 失败时返回 0。
     """
-    pool = await get_pool()
+    pool = await get_bypass_pool()
     result = await pool.execute(
         """
         DELETE FROM turn_model_secrets

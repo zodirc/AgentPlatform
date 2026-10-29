@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from uuid import UUID, uuid4
 
-from app.db.pool import get_pool
+from app.db.pool import get_bypass_pool, get_pool
 from app.settings import settings
 
 _WORK_COLS = "id, owner_user_id, name, work_root, is_default, visibility_seed"
@@ -195,3 +195,85 @@ async def resolve_session_tenant(
         owner_user_id,
     )
     return work
+
+
+# completed / failed / cancelled 之外都是非终态，waiting_approval 算在里面。
+_TERMINAL_RUN = frozenset({"completed", "failed", "cancelled"})
+
+
+class WorkDeleteRefused(Exception):
+    """该 Work 仍有非终态 run。本事务不删除行、不写墓碑，磁盘目录保持原样。"""
+
+
+async def delete_work_for_owner(work_id: UUID, owner_user_id: UUID) -> bool:
+    """删除 Work 的库内归属，并在同一事务写入墓碑。
+
+    锁顺序：先锁 ``works`` 行，再 ``FOR UPDATE`` 锁该 Work 下的 ``runs``。
+    存在非终态 run 时抛 ``WorkDeleteRefused``，事务回滚，零删除。
+    通过后依次删除会话、``work_memories``、``works``，再插入 ``work_tombstones``。
+    磁盘目录不在本事务删除，留给后续按墓碑回收。
+
+    返回:
+        非 owner 或不存在时 False。删除成功 True。
+    """
+    from app.services.resource.sessions import _delete_optional, delete_owned_session_rows
+
+    pool = await get_bypass_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            work = await conn.fetchrow(
+                """
+                SELECT id FROM works
+                WHERE id = $1 AND owner_user_id = $2
+                FOR UPDATE
+                """,
+                work_id,
+                owner_user_id,
+            )
+            if work is None:
+                return False
+            runs = await conn.fetch(
+                """
+                SELECT r.status
+                FROM runs r
+                JOIN turns t ON t.id = r.turn_id
+                JOIN sessions s ON s.id = t.session_id
+                WHERE s.work_id = $1
+                FOR UPDATE OF r
+                """,
+                work_id,
+            )
+            if any(row["status"] not in _TERMINAL_RUN for row in runs):
+                raise WorkDeleteRefused()
+            session_rows = await conn.fetch(
+                """
+                SELECT id FROM sessions
+                WHERE work_id = $1 AND owner_user_id = $2
+                FOR UPDATE
+                """,
+                work_id,
+                owner_user_id,
+            )
+            owned = [row["id"] for row in session_rows]
+            await delete_owned_session_rows(conn, owned, owner_user_id)
+            await _delete_optional(
+                conn,
+                "DELETE FROM work_memories WHERE work_id = $1",
+                work_id,
+            )
+            await conn.execute(
+                "DELETE FROM works WHERE id = $1 AND owner_user_id = $2",
+                work_id,
+                owner_user_id,
+            )
+            await conn.execute(
+                """
+                INSERT INTO work_tombstones (work_id, deleted_at)
+                VALUES ($1, now())
+                """,
+                work_id,
+            )
+            from app.services.resource.work_gc_queue import enqueue_work_gc
+
+            await enqueue_work_gc(conn, str(work_id))
+            return True

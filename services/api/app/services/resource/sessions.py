@@ -196,6 +196,129 @@ async def delete_session_for_owner(session_id: UUID, owner_user_id: UUID) -> boo
     return session_id in deleted
 
 
+async def delete_owned_session_rows(
+    conn: asyncpg.Connection,
+    owned: list[UUID],
+    owner_user_id: UUID,
+) -> None:
+    """在调用方的事务里删掉这些会话及其子行。
+
+    ``work_memories``、``writing_fragment_evaluations``、``outbox_jobs`` 没有指向
+    会话的外键。必须在 ``turns`` 还在时按 ``session_id`` / payload 里的 ``turn_id``
+    删掉，否则会话消失后这些行留在库里。可选表仍走 savepoint：缺表只跳过这一张，
+    不中止本事务。
+    """
+    if not owned:
+        return
+    turn_in = "turn_id IN (SELECT id FROM turns WHERE session_id = ANY($1::uuid[]))"
+    await _delete_optional(
+        conn,
+        "DELETE FROM work_memories WHERE session_id = ANY($1::uuid[])",
+        owned,
+    )
+    await _delete_optional(
+        conn,
+        f"""
+        DELETE FROM writing_fragment_evaluations
+        WHERE session_id = ANY($1::uuid[])
+           OR {turn_in}
+        """,
+        owned,
+    )
+    await _delete_optional(
+        conn,
+        f"""
+        DELETE FROM outbox_jobs
+        WHERE payload->>'turn_id' IN (
+            SELECT id::text FROM turns WHERE session_id = ANY($1::uuid[])
+        )
+        """,
+        owned,
+    )
+    await _delete_optional(
+        conn,
+        f"DELETE FROM projection_log WHERE {turn_in}",
+        owned,
+    )
+    await _delete_optional(
+        conn,
+        f"DELETE FROM turn_events WHERE {turn_in}",
+        owned,
+    )
+    await _delete_optional(
+        conn,
+        f"DELETE FROM run_commands WHERE run_id IN "
+        f"(SELECT id FROM runs WHERE {turn_in})",
+        owned,
+    )
+    await _delete_optional(
+        conn,
+        f"DELETE FROM turn_model_secrets WHERE {turn_in}",
+        owned,
+    )
+    await _delete_optional(
+        conn,
+        f"DELETE FROM checkpoints WHERE {turn_in}",
+        owned,
+    )
+    await _delete_optional(
+        conn,
+        f"DELETE FROM artifacts WHERE {turn_in}",
+        owned,
+    )
+    await _delete_optional(
+        conn,
+        f"DELETE FROM approval_views WHERE {turn_in}",
+        owned,
+    )
+    await _delete_optional(
+        conn,
+        """
+        DELETE FROM model_request_envelopes
+        WHERE session_id = ANY($1::uuid[])
+           OR turn_id IN (SELECT id FROM turns WHERE session_id = ANY($1::uuid[]))
+        """,
+        owned,
+    )
+    await _delete_optional(
+        conn,
+        f"DELETE FROM runs WHERE {turn_in}",
+        owned,
+    )
+    await _delete_optional(
+        conn,
+        "DELETE FROM turn_views WHERE session_id = ANY($1::uuid[])",
+        owned,
+    )
+    await _delete_optional(
+        conn,
+        "DELETE FROM session_raw_snapshots WHERE session_id = ANY($1::uuid[])",
+        owned,
+    )
+    await _delete_optional(
+        conn,
+        "DELETE FROM session_transcripts WHERE session_id = ANY($1::uuid[])",
+        owned,
+    )
+    await _delete_optional(
+        conn,
+        "DELETE FROM session_views WHERE session_id = ANY($1::uuid[])",
+        owned,
+    )
+    await conn.execute(
+        "DELETE FROM turns WHERE session_id = ANY($1::uuid[])",
+        owned,
+    )
+    await conn.execute(
+        """
+        DELETE FROM sessions
+        WHERE owner_user_id = $1 AND id = ANY($2::uuid[])
+        """,
+        owner_user_id,
+        owned,
+    )
+
+
 async def delete_sessions_for_owner(
     session_ids: list[UUID],
     owner_user_id: UUID,
@@ -223,7 +346,7 @@ async def delete_sessions_for_owner(
             async with conn.transaction():
                 rows = await conn.fetch(
                     """
-                    SELECT id FROM sessions
+                    SELECT id, work_id FROM sessions
                     WHERE owner_user_id = $1 AND id = ANY($2::uuid[])
                     FOR UPDATE
                     """,
@@ -233,92 +356,19 @@ async def delete_sessions_for_owner(
                 owned = [row["id"] for row in rows]
                 if not owned:
                     return []
+                work_ids = []
+                for row in rows:
+                    try:
+                        work_id = row["work_id"]
+                    except (KeyError, IndexError):
+                        work_id = None
+                    if work_id:
+                        work_ids.append(work_id)
+                await delete_owned_session_rows(conn, owned, owner_user_id)
+                from app.services.resource.work_gc_queue import enqueue_work_gc
 
-                turn_in = (
-                    "turn_id IN (SELECT id FROM turns WHERE session_id = ANY($1::uuid[]))"
-                )
-                await _delete_optional(
-                    conn,
-                    f"DELETE FROM projection_log WHERE {turn_in}",
-                    owned,
-                )
-                await _delete_optional(
-                    conn,
-                    f"DELETE FROM turn_events WHERE {turn_in}",
-                    owned,
-                )
-                await _delete_optional(
-                    conn,
-                    f"DELETE FROM run_commands WHERE run_id IN "
-                    f"(SELECT id FROM runs WHERE {turn_in})",
-                    owned,
-                )
-                await _delete_optional(
-                    conn,
-                    f"DELETE FROM turn_model_secrets WHERE {turn_in}",
-                    owned,
-                )
-                await _delete_optional(
-                    conn,
-                    f"DELETE FROM checkpoints WHERE {turn_in}",
-                    owned,
-                )
-                await _delete_optional(
-                    conn,
-                    f"DELETE FROM artifacts WHERE {turn_in}",
-                    owned,
-                )
-                await _delete_optional(
-                    conn,
-                    f"DELETE FROM approval_views WHERE {turn_in}",
-                    owned,
-                )
-                await _delete_optional(
-                    conn,
-                    """
-                    DELETE FROM model_request_envelopes
-                    WHERE session_id = ANY($1::uuid[])
-                       OR turn_id IN (SELECT id FROM turns WHERE session_id = ANY($1::uuid[]))
-                    """,
-                    owned,
-                )
-                await _delete_optional(
-                    conn,
-                    f"DELETE FROM runs WHERE {turn_in}",
-                    owned,
-                )
-                await _delete_optional(
-                    conn,
-                    "DELETE FROM turn_views WHERE session_id = ANY($1::uuid[])",
-                    owned,
-                )
-                await _delete_optional(
-                    conn,
-                    "DELETE FROM session_raw_snapshots WHERE session_id = ANY($1::uuid[])",
-                    owned,
-                )
-                await _delete_optional(
-                    conn,
-                    "DELETE FROM session_transcripts WHERE session_id = ANY($1::uuid[])",
-                    owned,
-                )
-                await _delete_optional(
-                    conn,
-                    "DELETE FROM session_views WHERE session_id = ANY($1::uuid[])",
-                    owned,
-                )
-                await conn.execute(
-                    "DELETE FROM turns WHERE session_id = ANY($1::uuid[])",
-                    owned,
-                )
-                await conn.execute(
-                    """
-                    DELETE FROM sessions
-                    WHERE owner_user_id = $1 AND id = ANY($2::uuid[])
-                    """,
-                    owner_user_id,
-                    owned,
-                )
+                for work_id in dict.fromkeys(work_ids):
+                    await enqueue_work_gc(conn, str(work_id))
                 return owned
     except asyncpg.ForeignKeyViolationError:
         logger.exception(
