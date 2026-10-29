@@ -742,13 +742,38 @@ async def workspace_rollback_turn(
     visibility_seed: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
-    """按影子 git 恢复本 Turn 记过的路径。工作区外的副作用无法撤销。"""
-    from app.policy.shadow_git import restore_turn
+    """按影子 git 恢复本 Turn 记过的路径。窗口外不改工作区。"""
+    from uuid import UUID
+
+    from app.db.pool import get_pool
+    from app.policy.revert_window import RevertRefused, RevertUnavailable, restore_turn_if_in_window
     from app.services.workspace_scope import workspace_tenant_scope
     from app.tenant_context import current_work_root_path
 
-    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
-        restored = restore_turn(current_work_root_path(), turn_id=turn_id)
+    if not work_id:
+        raise HTTPException(status_code=400, detail="work_id required")
+    try:
+        work_uuid = UUID(work_id)
+        turn_uuid = UUID(turn_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid id") from exc
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                with workspace_tenant_scope(
+                    **_tenant_query(work_id, work_root, owner_user_id, visibility_seed)
+                ):
+                    restored = await restore_turn_if_in_window(
+                        conn,
+                        work_id=work_uuid,
+                        turn_id=turn_uuid,
+                        work_root=current_work_root_path(),
+                    )
+    except RevertRefused as exc:
+        raise HTTPException(status_code=409, detail="turn_not_revertable") from exc
+    except RevertUnavailable as exc:
+        raise HTTPException(status_code=503, detail="revert_unavailable") from exc
     return {
         "restored": restored,
         "note": "工作区外的副作用无法撤销",
@@ -1222,6 +1247,9 @@ async def lifespan(app):
     from app.tools.core.sandbox import start_escape_probe_loop, stop_escape_probe_loop
 
     start_escape_probe_loop()
+    from app.policy.work_gc import work_gc_loop
+
+    work_gc = asyncio.create_task(work_gc_loop(), name="work-gc")
     try:
         yield
     finally:
@@ -1251,8 +1279,13 @@ async def lifespan(app):
         except Exception:
             logger.exception("lsp pool shutdown failed")
         watchdog.cancel()
+        work_gc.cancel()
         try:
             await watchdog
+        except asyncio.CancelledError:
+            pass
+        try:
+            await work_gc
         except asyncio.CancelledError:
             pass
         await stop_escape_probe_loop()

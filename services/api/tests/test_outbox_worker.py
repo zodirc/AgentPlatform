@@ -74,7 +74,11 @@ async def test_claim_jobs_returns_payload(monkeypatch: pytest.MonkeyPatch) -> No
             return None
 
     class FakeConn:
+        def __init__(self) -> None:
+            self.query = ""
+
         async def fetch(self, query: str, limit: int):
+            self.query = query
             return [row]
 
         async def execute(self, query: str, ids: list[UUID]) -> None:
@@ -84,8 +88,11 @@ async def test_claim_jobs_returns_payload(monkeypatch: pytest.MonkeyPatch) -> No
             return _AsyncCM(self)
 
     class FakePool:
+        def __init__(self) -> None:
+            self.conn = FakeConn()
+
         def acquire(self) -> _AsyncCM:
-            return _AsyncCM(FakeConn())
+            return _AsyncCM(self.conn)
 
     pool = FakePool()
     monkeypatch.setattr("app.services.outbox.get_pool", AsyncMock(return_value=pool))
@@ -94,6 +101,7 @@ async def test_claim_jobs_returns_payload(monkeypatch: pytest.MonkeyPatch) -> No
     assert jobs
     assert jobs[0]["job_type"] == "sources.index_sync"
     assert isinstance(jobs[0]["payload"], dict)
+    assert "job_type <> 'work_gc'" in pool.conn.query
 
 
 @pytest.mark.asyncio

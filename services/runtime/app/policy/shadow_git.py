@@ -24,20 +24,26 @@ def intent_baseline(work_root: Path, turn_id: str) -> None:
 
 
 def ensure_turn_baseline(work_root: Path, *, turn_id: str) -> str | None:
-    """Turn 开始时记下工作区当前文件，供回退和 auto_edit 判断快照是否存在。"""
+    """Turn 开始时记下工作区当前文件。提交没有父，标签比较并交换，HEAD 不动。"""
     try:
         _ensure_repo(work_root)
     except OSError:
         return None
-    tag = f"turn/{_safe(turn_id)}"
-    if _git(work_root, "rev-parse", "--verify", tag).returncode == 0:
-        return _head(work_root)
-    if _git(work_root, "commit", "--allow-empty", "-m", f"baseline {turn_id}").returncode != 0:
-        return None
+    existing = _tag_sha(work_root, turn_id)
+    if existing:
+        return existing
     snapshot_unrecorded(work_root, turn_id=turn_id)
-    if _git(work_root, "rev-parse", "--verify", tag).returncode != 0:
-        _git(work_root, "tag", "-f", tag)
-    return _head(work_root)
+    created = _tag_sha(work_root, turn_id)
+    if created:
+        return created
+    index = _prepare_index(work_root, turn_id, parent_sha=None)
+    tree = _write_tree(work_root, index)
+    if tree is None:
+        return None
+    new = _commit_tree(work_root, tree, f"baseline {turn_id}", parent=None)
+    if new is None or not _cas_tag(work_root, turn_id, new, old=None):
+        return _tag_sha(work_root, turn_id)
+    return new
 
 
 def snapshot_preimage(work_root: Path, rel_path: str, *, turn_id: str) -> str | None:
@@ -50,29 +56,39 @@ def snapshot_preimage(work_root: Path, rel_path: str, *, turn_id: str) -> str | 
     except OSError:
         return None
     if rel in _recorded(git_dir, turn_id):
-        return _head(work_root)
+        return _tag_sha(work_root, turn_id)
     target = (work_root / rel).resolve()
     try:
         target.relative_to(work_root.resolve())
     except ValueError:
         return None
+    parent = _tag_sha(work_root, turn_id)
+    if parent is None:
+        parent = ensure_turn_baseline(work_root, turn_id=turn_id)
+    if parent is None:
+        return None
+    index = _prepare_index(work_root, turn_id, parent_sha=parent)
     if target.is_file():
-        if _git(work_root, "add", "--", rel).returncode != 0:
+        if _git(work_root, "add", "--", rel, index=index).returncode != 0:
             return None
     else:
         absent = git_dir / "absent" / _safe(turn_id)
         absent.parent.mkdir(parents=True, exist_ok=True)
         with absent.open("a", encoding="utf-8") as handle:
             handle.write(rel + "\n")
-    if _git(work_root, "commit", "-m", f"preimage {turn_id} {rel}", "--allow-empty").returncode != 0:
+    tree = _write_tree(work_root, index)
+    if tree is None:
+        return None
+    new = _commit_tree(work_root, tree, f"preimage {turn_id} {rel}", parent=parent)
+    # 比较并交换失败说明标签已被别的写入移动。丢掉本回合 index，不记成已录。
+    if new is None or not _cas_tag(work_root, turn_id, new, old=parent):
+        index.unlink(missing_ok=True)
         return None
     _mark(git_dir, turn_id, rel)
-    tag = f"turn/{_safe(turn_id)}"
-    _git(work_root, "tag", "-f", tag)
-    return _head(work_root)
+    return new
 
 
-def restore_file(work_root: Path, rel_path: str, *, turn_id: str) -> str | None:
+def restore_file(work_root: Path, rel_path: str, *, turn_id: str, sha: str | None = None) -> str | None:
     """把单个路径恢复到本 Turn 第一次写之前。新文件则删除。"""
     rel = rel_path.replace("\\", "/").lstrip("/")
     git_dir = shadow_dir(work_root)
@@ -83,17 +99,19 @@ def restore_file(work_root: Path, rel_path: str, *, turn_id: str) -> str | None:
             target.unlink()
         _note_rollback("file")
         return "deleted"
-    tag = f"turn/{_safe(turn_id)}"
-    proc = _git(work_root, "checkout", tag, "--", rel)
+    commit = sha or f"refs/tags/turn/{_safe(turn_id)}"
+    proc = _git(work_root, "checkout", commit, "--", rel, index=_checkout_index(work_root, turn_id))
     if proc.returncode != 0:
         return None
     _note_rollback("file")
     return "restored"
 
 
-def restore_turn(work_root: Path, *, turn_id: str) -> list[str]:
-    """恢复本 Turn 记过的全部路径。"""
-    tag = f"turn/{_safe(turn_id)}"
+def restore_turn(work_root: Path, *, turn_id: str, sha: str | None = None) -> list[str]:
+    """按标签当前 SHA 恢复本 Turn 记过的路径。传入 sha 时不再解析标签。"""
+    tag = sha or _tag_sha(work_root, turn_id)
+    if not tag:
+        return []
     listed = _git(work_root, "ls-tree", "-r", "--name-only", tag)
     restored: list[str] = []
     if listed.returncode == 0:
@@ -101,7 +119,7 @@ def restore_turn(work_root: Path, *, turn_id: str) -> list[str]:
             rel = rel.strip()
             if not rel:
                 continue
-            if restore_file(work_root, rel, turn_id=turn_id) is not None:
+            if restore_file(work_root, rel, turn_id=turn_id, sha=tag) is not None:
                 restored.append(rel)
     git_dir = shadow_dir(work_root)
     absent = git_dir / "absent" / _safe(turn_id)
@@ -187,18 +205,24 @@ def snapshot_unrecorded(work_root: Path, *, turn_id: str, limit: int = 1500) -> 
     pending = [rel for rel in _iter_work_files(work_root, limit=limit) if rel not in recorded]
     if not pending:
         return
+    parent = _tag_sha(work_root, turn_id)
+    index = _prepare_index(work_root, turn_id, parent_sha=parent)
     listing = git_dir / "pending.txt"
     listing.write_text("\n".join(pending) + "\n", encoding="utf-8")
-    added = _git(work_root, "add", f"--pathspec-from-file={listing}")
+    added = _git(work_root, "add", f"--pathspec-from-file={listing}", index=index)
     if added.returncode != 0:
-        added = _git(work_root, "add", "--", *pending[:200])
+        added = _git(work_root, "add", "--", *pending[:200], index=index)
         if added.returncode != 0:
             return
-    if _git(work_root, "commit", "-m", f"preimage {turn_id} batch", "--allow-empty").returncode != 0:
+    tree = _write_tree(work_root, index)
+    if tree is None:
+        return
+    new = _commit_tree(work_root, tree, f"preimage {turn_id} batch", parent=parent)
+    if new is None or not _cas_tag(work_root, turn_id, new, old=parent):
+        index.unlink(missing_ok=True)
         return
     for rel in pending:
         _mark(git_dir, turn_id, rel)
-    _git(work_root, "tag", "-f", f"turn/{_safe(turn_id)}")
 
 
 def note_created_files(work_root: Path, *, turn_id: str, limit: int = 1500) -> None:
@@ -260,14 +284,26 @@ def _ensure_repo(work_root: Path) -> Path:
             raise OSError(init.stderr.strip() or "git init failed")
         _git(work_root, "config", "user.email", "shadow@localhost")
         _git(work_root, "config", "user.name", _AUTHOR)
+    # 压缩只由 work_gc 发起。git commit 的自动 gc 会在标记快照过期之后删对象。
+    _git(work_root, "config", "gc.auto", "0")
     return git_dir
 
 
-def _git(work_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _git(
+    work_root: Path,
+    *args: str,
+    index: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
     git_dir = shadow_dir(work_root)
     env = os.environ.copy()
     env["GIT_DIR"] = str(git_dir)
     env["GIT_WORK_TREE"] = str(work_root.resolve())
+    env["GIT_AUTHOR_NAME"] = _AUTHOR
+    env["GIT_AUTHOR_EMAIL"] = "shadow@localhost"
+    env["GIT_COMMITTER_NAME"] = _AUTHOR
+    env["GIT_COMMITTER_EMAIL"] = "shadow@localhost"
+    if index is not None:
+        env["GIT_INDEX_FILE"] = str(index)
     return subprocess.run(
         ["git", *args],
         cwd=str(work_root),
@@ -277,6 +313,76 @@ def _git(work_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         timeout=20,
         check=False,
     )
+
+
+def drop_turn_index(work_root: Path, turn_id: str) -> None:
+    """回合结束后删除本回合的 index。标签和对象保留。"""
+    path = shadow_dir(work_root) / f"index-{_safe(turn_id)}"
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        return
+
+
+def _tag_ref(turn_id: str) -> str:
+    return f"refs/tags/turn/{_safe(turn_id)}"
+
+
+def resolve_turn_sha(work_root: Path, turn_id: str) -> str | None:
+    """锁内读到的标签 SHA。之后的恢复用这个 SHA，不再跟着标签走。"""
+    return _tag_sha(work_root, turn_id)
+
+
+def _tag_sha(work_root: Path, turn_id: str) -> str | None:
+    proc = _git(work_root, "rev-parse", "--verify", _tag_ref(turn_id))
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def _turn_index(work_root: Path, turn_id: str) -> Path:
+    return shadow_dir(work_root) / f"index-{_safe(turn_id)}"
+
+
+def _checkout_index(work_root: Path, turn_id: str) -> Path:
+    """恢复写到临时 index，不改本回合正在使用的 index。"""
+    return shadow_dir(work_root) / f"index-checkout-{_safe(turn_id)}"
+
+
+def _prepare_index(work_root: Path, turn_id: str, *, parent_sha: str | None) -> Path:
+    index = _turn_index(work_root, turn_id)
+    if index.exists():
+        return index
+    if parent_sha:
+        _git(work_root, "read-tree", parent_sha, index=index)
+    else:
+        _git(work_root, "read-tree", "--empty", index=index)
+    return index
+
+
+def _write_tree(work_root: Path, index: Path) -> str | None:
+    proc = _git(work_root, "write-tree", index=index)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def _commit_tree(work_root: Path, tree: str, message: str, *, parent: str | None) -> str | None:
+    args = ["commit-tree", tree]
+    if parent:
+        args.extend(["-p", parent])
+    args.extend(["-m", message])
+    proc = _git(work_root, *args)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def _cas_tag(work_root: Path, turn_id: str, new: str, *, old: str | None) -> bool:
+    """old 为空时要求标签尚不存在。失败则标签保持原 SHA。"""
+    previous = old if old else "0" * 40
+    proc = _git(work_root, "update-ref", _tag_ref(turn_id), new, previous)
+    return proc.returncode == 0
 
 
 def _head(work_root: Path) -> str | None:

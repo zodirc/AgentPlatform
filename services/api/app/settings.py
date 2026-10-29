@@ -88,6 +88,8 @@ class Settings(BaseSettings):
     events_retention_stream_batch: int = 50_000
     events_retention_structural_batch: int = 10_000
     events_retention_budget_seconds: float = 25.0
+    # ADR-021: api enqueues one work_gc job per work, once a day.
+    work_gc_enqueue_interval_seconds: float = 86400.0
     # Optional Fernet secret for model API keys. Empty → APP_SECRET_KEY.
     config_encryption_key: str = ""
     # docs/27 — Work roots (path strings stored in DB; runtime mounts/creates dirs)

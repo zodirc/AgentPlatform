@@ -121,19 +121,22 @@ async def _lease_reclaim_loop() -> None:
     说明:
         - ``runner_lease_enabled`` 为真时才回收租约（与 runtime RUNNER_LEASE_* 配对）。
         - claim 超时与租约回收后若发生变更，触发一次 lagging projection 对账。
-        - 事件保留按 ``events_retention_interval_seconds`` 节流，避免每次 tick 都跑大 DELETE。
+        - 事件保留和过期行删除按 ``events_retention_interval_seconds`` 节流，共用同一把 advisory lock。过期行预算读 ``events_retention_budget_seconds``。
     """
     from app.services.projection.advisory import (
         LOCK_CLAIM_TIMEOUT,
         LOCK_EVENTS_RETENTION,
         LOCK_LEASE_RECLAIM,
+        LOCK_WORK_GC_ENQUEUE,
         try_advisory_lock,
     )
     from app.services.projection.events_retention import run_events_retention
 
     interval = max(5.0, float(settings.runner_lease_reconcile_interval_seconds))
     retention_every = max(60.0, float(settings.events_retention_interval_seconds))
+    work_gc_every = max(60.0, float(settings.work_gc_enqueue_interval_seconds))
     last_retention = 0.0
+    last_work_gc = 0.0
     while True:
         await asyncio.sleep(interval)
         try:
@@ -157,8 +160,45 @@ async def _lease_reclaim_loop() -> None:
             if now - last_retention >= retention_every:
                 async with try_advisory_lock(LOCK_EVENTS_RETENTION) as held:
                     if held:
-                        await run_events_retention()
+                        try:
+                            await run_events_retention()
+                        except Exception:
+                            logger.exception("periodic events retention failed")
+                        try:
+                            from app.services.resource.expired_rows import purge_expired_rows
+
+                            await purge_expired_rows()
+                        except Exception:
+                            logger.exception("periodic expired row purge failed")
+                        try:
+                            from app.services.projection.event_partitions import (
+                                maintain_turn_event_partitions,
+                            )
+
+                            await maintain_turn_event_partitions()
+                        except Exception:
+                            logger.exception("periodic turn_events partition maintenance failed")
+                        try:
+                            from app.services.projection.event_partitions import (
+                                maintain_series_partitions,
+                            )
+
+                            await maintain_series_partitions()
+                        except Exception:
+                            logger.exception("periodic series partition maintenance failed")
                 last_retention = now
+            if now - last_work_gc >= work_gc_every:
+                async with try_advisory_lock(LOCK_WORK_GC_ENQUEUE) as held:
+                    if held:
+                        try:
+                            from app.services.resource.work_gc_queue import enqueue_due_work_gc
+
+                            pool = await get_pool()
+                            async with pool.acquire() as conn:
+                                await enqueue_due_work_gc(conn)
+                        except Exception:
+                            logger.exception("periodic work_gc enqueue failed")
+                last_work_gc = now
         except Exception:
             logger.exception("periodic lease/claim/retention failed")
 

@@ -128,6 +128,7 @@ async def claim_jobs(*, limit: int = 10) -> list[dict[str, Any]]:
                 FROM outbox_jobs
                 WHERE status IN ('pending', 'retry')
                   AND available_at <= now()
+                AND job_type <> 'work_gc'
                 ORDER BY created_at ASC
                 FOR UPDATE SKIP LOCKED
                 LIMIT $1
