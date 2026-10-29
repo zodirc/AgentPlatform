@@ -170,14 +170,16 @@ def test_revision_chain_is_one_migration_per_table() -> None:
 
     root = Path(__file__).resolve().parents[1] / "alembic" / "versions"
     chain = [
-        ("0037_session_raw_snapshots_partition.py", "0036_turn_events_partition"),
-        ("0038_model_request_envelopes_partition.py", "0037_session_raw_snapshots_partition"),
-        ("0039_projection_log_partition.py", "0038_model_request_envelopes_partition"),
-        ("0040_audit_log_partition.py", "0039_projection_log_partition"),
+        ("0037_session_raw_snapshots_partition.py", "0036_turn_events_partition", "0037_raw_snapshots_partition"),
+        ("0038_model_request_envelopes_partition.py", "0037_raw_snapshots_partition", "0038_model_envelopes_partition"),
+        ("0039_projection_log_partition.py", "0038_model_envelopes_partition", "0039_projection_log_partition"),
+        ("0040_audit_log_partition.py", "0039_projection_log_partition", "0040_audit_log_partition"),
     ]
-    for filename, previous in chain:
+    for filename, previous, revision in chain:
         text_src = (root / filename).read_text()
         assert f'down_revision = "{previous}"' in text_src
+        assert f'revision = "{revision}"' in text_src
+        assert len(revision) <= 32
 
 
 def test_text_roundtrip_keeps_the_predicate() -> None:

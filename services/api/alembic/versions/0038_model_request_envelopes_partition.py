@@ -10,8 +10,8 @@ from alembic import op
 
 from app.db.monthly_partition import SERIES_SPECS, attach_monthly_history
 
-revision = "0038_model_request_envelopes_partition"
-down_revision = "0037_session_raw_snapshots_partition"
+revision = "0038_model_envelopes_partition"
+down_revision = "0037_raw_snapshots_partition"
 branch_labels = None
 depends_on = None
 
