@@ -11,6 +11,13 @@ from typing import Any
 from uuid import UUID
 
 from app.db.pool import get_pool
+from app.observability.step_write_measure import (
+    canonical_json,
+    classify_sample,
+    commit_seen,
+    record_sample,
+    record_written_bytes,
+)
 from app.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -21,12 +28,7 @@ def envelope_content_hash(
     tools: list[dict[str, Any]] | None,
 ) -> str:
     """作用：messages+tools 稳定 SHA256。"""
-    blob = json.dumps(
-        {"messages": messages, "tools": tools or []},
-        sort_keys=True,
-        ensure_ascii=False,
-        default=str,
-    )
+    blob = canonical_json({"messages": messages, "tools": tools or []})
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
@@ -57,6 +59,7 @@ async def maybe_persist_model_envelope(
         return
     content_hash = envelope_content_hash(messages, tools)
     store_full = should_store_full_envelope(fill_ratio=fill_ratio)
+    sample = classify_sample(messages) if store_full else None
     envelope_json: str | None = None
     if store_full:
         try:
@@ -94,3 +97,10 @@ async def maybe_persist_model_envelope(
             step_index,
             exc_info=True,
         )
+        return
+    if envelope_json:
+        record_written_bytes(len(envelope_json.encode("utf-8")))
+    if sample is not None:
+        canonical, hit, new_hashes = sample
+        commit_seen(new_hashes)
+        record_sample(canonical, hit)

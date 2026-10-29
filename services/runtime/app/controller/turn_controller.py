@@ -1237,6 +1237,18 @@ async def _fail_turn(
         termination_reason=termination_reason,
     )
     _schedule_purge_thinking(turn_id)
+    _drop_shadow_index(turn_id)
+
+
+def _drop_shadow_index(turn_id: UUID) -> None:
+    """终态之后删除本回合的影子 index。审批挂起不走这里，index 留着。"""
+    try:
+        from app.policy.shadow_git import drop_turn_index
+        from app.tenant_context import current_work_root_path
+
+        drop_turn_index(current_work_root_path(), str(turn_id))
+    except Exception:
+        return
 
 
 async def _finalize_turn(
@@ -1461,6 +1473,7 @@ async def _finalize_turn(
         await _maybe_write_continuity_pending(state, turn_id=turn_id)
     await delete_checkpoint(run_id)
     _schedule_purge_thinking(turn_id)
+    _drop_shadow_index(turn_id)
 
 
 async def _maybe_write_continuity_pending(state: TurnState, *, turn_id: UUID) -> None:

@@ -13,6 +13,7 @@ from typing import Any
 from uuid import UUID
 
 from app.db.pool import get_pool
+from app.observability.step_write_measure import record_written_bytes
 from app.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ async def append_raw_snapshot(
     if not settings.raw_snapshot_enabled:
         return
     try:
+        payload = json.dumps(messages, ensure_ascii=False, default=str)
         pool = await get_pool()
         await pool.execute(
             """
@@ -61,9 +63,10 @@ async def append_raw_snapshot(
             session_id,
             turn_id,
             step_index,
-            json.dumps(messages, ensure_ascii=False, default=str),
+            payload,
             tools_fingerprint(tools),
         )
+        record_written_bytes(len(payload.encode("utf-8")))
     except Exception:
         # Never block the turn on audit write failure (R1/R4).
         # 审计失败不得拖垮主路径。

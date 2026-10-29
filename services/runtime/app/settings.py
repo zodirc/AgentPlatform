@@ -174,6 +174,9 @@ class Settings(BaseSettings):
     writing_patch_auto_apply: bool = True
     # WW1/WW2: work-scoped drafts (docs/23); history snapshots per section (0 disables).
     writing_draft_history_keep: int = 5
+    # Server revert window, counted per Work.
+    writing_revert_keep_turns: int = 20
+    coding_revert_keep_days: int = 7
     writing_work_index_max_chars: int = 400
     # monofile (default): chapters append into manuscript.md; sections = one file per chapter.
     writing_manuscript_mode: str = "monofile"
@@ -454,9 +457,9 @@ class Settings(BaseSettings):
     # HM8: fold long narratives into layers (default off).
     context_layered_summary_enabled: bool = False
     # HM2 / HM4 observability (async; never blocks TTFB).
-    raw_snapshot_enabled: bool = True
+    raw_snapshot_enabled: bool = False
     model_envelope_enabled: bool = True
-    model_envelope_sample_rate: float = 1.0
+    model_envelope_sample_rate: float = 0.01
     model_envelope_on_high_fill: bool = True
     model_envelope_debug: bool = False
     # HM7: export citation verify gate — off | warn | block
