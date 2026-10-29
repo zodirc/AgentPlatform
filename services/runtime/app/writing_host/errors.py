@@ -73,6 +73,21 @@ class InternalError(HostError):
     user_message = "写作内核遇到内部错误，请稍后重试。"
 
 
+class TurnNotRevertable(HostError):
+    code = "turn_not_revertable"
+    user_message = "这个回合已超出本地保留范围，不能撤销。"
+
+
+class StorageLow(HostError):
+    code = "storage_low"
+    user_message = "剩余空间不足，请清理后再开始。"
+
+
+class SnapshotCorrupt(HostError):
+    code = "snapshot_corrupt"
+    user_message = "快照已损坏，没有写回稿件。"
+
+
 def classify_model_error(exc: BaseException) -> HostError:
     """把模型层异常收成宿主错误。"""
     status = getattr(exc, "status_code", None)

@@ -59,6 +59,14 @@ from app.writing_host.protocol import (
     TurnBudget,
     TurnResult,
 )
+from app.writing_host.storage import (
+    begin_turn,
+    cleanup_import_staging,
+    ensure_space,
+    finish_turn,
+    mark_running,
+    work_lock,
+)
 from app.writing_host.works import snapshot_turn
 
 _CANCELLED: set[str] = set()
@@ -141,6 +149,37 @@ async def _run(
 ) -> TurnResult:
     root = Path(work_root).resolve()
     root.mkdir(parents=True, exist_ok=True)
+    cleanup_import_staging(root)
+    with work_lock(root):
+        return await _run_locked(
+            root=root,
+            message=message,
+            model=model,
+            budget=budget,
+            plan_phase=plan_phase,
+            on_event=on_event,
+            recording=recording,
+            resume_turn_id=resume_turn_id,
+            host=host,
+            turn_id=turn_id,
+            intent=intent,
+        )
+
+
+async def _run_locked(
+    *,
+    root: Path,
+    message: str | None,
+    model: ModelConfig,
+    budget: TurnBudget,
+    plan_phase: str | None,
+    on_event,
+    recording: str | None,
+    resume_turn_id: str | None,
+    host: bool,
+    turn_id: str | None = None,
+    intent: dict | None = None,
+) -> TurnResult:
     ensure_sidecar_format(root)
     work_id, owner = _host_ids(root)
     tenant = bind_tenant_context(
@@ -174,9 +213,13 @@ async def _run(
     log: TurnEventLog | None = None
     ids: dict[str, str] = {}
     terminal = False
+    ledger_id = ""
+    terminal_state = ""
     try:
         store = FileCheckpointStore(root)
         if resume_turn_id:
+            mark_running(root, resume_turn_id)
+            ledger_id = resume_turn_id
             state, _interrupt, _step = store.load(resume_turn_id)
             profile = ScenarioRegistry.get(state.scenario_id or "writing")
             text = state.turn_user_text
@@ -185,6 +228,8 @@ async def _run(
             profile = ScenarioRegistry.get("writing")
             if not turn_id:
                 raise RuntimeError("start_turn missing turn_id")
+            begin_turn(root, turn_id)
+            ledger_id = turn_id
             snapshot_id = turn_id
             from app.writing.intents import preferred_plan_phase
 
@@ -253,6 +298,7 @@ async def _run(
             if str(state.turn_id) in _CANCELLED:
                 _emit("turn.cancelled", {"reason": "user_requested", "cancelled_at_phase": "step_boundary"}, 0)
                 result = TurnResult(str(state.turn_id), "", "user_requested", "cancelled")
+                terminal_state = "cancelled"
                 return result
 
         async def write_event(**kwargs: Any) -> None:
@@ -312,11 +358,13 @@ async def _run(
             status = "cancelled"
             _emit("turn.cancelled", {"reason": "user_requested", "cancelled_at_phase": "step_boundary"}, state.step_count)
             reason = "user_requested"
+            terminal_state = "cancelled"
         else:
             if state.budget_exceeded:
                 status = "budget_exceeded"
                 reason = "budget_exceeded"
             _emit("turn.completed", completed_payload(state, summary or ""), state.step_count)
+            terminal_state = "completed"
         result = TurnResult(str(state.turn_id), summary or "", reason, status)
         return result
     except Exception as exc:
@@ -339,10 +387,18 @@ async def _run(
                 )
             except Exception:
                 pass
+        terminal_state = "failed"
         if isinstance(exc, HostError):
             raise
         raise error from exc
     finally:
+        # 终态事件已经发出。回收失败不再改写一次已经失败的回合错误。
+        if ledger_id:
+            try:
+                finish_turn(root, ledger_id, terminal_state or "failed")
+            except Exception:
+                if terminal_state != "failed":
+                    raise
         from app.writing.intents import clear_turn_choice
 
         clear_turn_choice()
@@ -369,7 +425,11 @@ async def start_turn(
     host: bool = True,
     turn_id: str | None = None,
     intent: dict | None = None,
+    min_free_bytes: int | None = None,
 ) -> TurnResult:
+    root = Path(work_root)
+    root.mkdir(parents=True, exist_ok=True)
+    ensure_space(root, min_free_bytes)
     chosen, cached = _begin(turn_id)
     if cached is not None:
         return cached

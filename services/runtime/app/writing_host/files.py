@@ -83,9 +83,6 @@ class FileEventLog:
         line.setdefault("schema_version", EVENT_SCHEMA)
         with self._path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(line, ensure_ascii=False) + "\n")
-        from app.writing_host.works import retain_recent_turns
-
-        retain_recent_turns(self._path.parent.parent.parent)
 
 
 class FileEvaluationStore:

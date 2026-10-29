@@ -247,13 +247,13 @@ Web 上的函数是 `services/web/src/shared/workbench/reduceTurn.ts` 的 `reduc
 |------|------|
 | 多作品 | 每部作品一个 `work_root`：`files/works/<id>/`。内部布局见 SDK 文档第 6 节，壳不依赖 |
 | 读稿 | 稿页按 `work_view` 的文档角色分组展示，内容经 `read_document` 读取 |
-| 不因卸载丢稿 | `export_work` / `import_work` 打成 zip，经 SAF 选位置；首回合完成后引导设置自动导出位置 |
+| 不因卸载丢稿 | `export_work` / `import_work` 打成 zip，经 SAF 选位置。自动导出用 `manuscript`，不含回合历史；换机用 `full`。首回合完成后引导设置自动导出位置 |
 | 系统备份 | 只作补充（有容量上限，部分 ROM 不提供） |
 | 密钥不进备份 | 密文从备份规则中排除；恢复后无法解密时引导重填 |
 | 可回退 | 每回合开始前由接头留内容寻址快照（A14）；稿页提供「撤销本回合」与按回合的版本列表（`list_turn_history`）。撤销某回合会丢弃其后所有回合，历史是线性的 |
 | 编辑冲突 | 回合进行中稿页只读；手动编辑在回合之间经 `write_document` 写入，带 `base_revision`，冲突时提示重新载入 |
 | 提交语义 | 只有收到 `step.completed` 后，磁盘上的稿才算已提交。`opening.ponds`、`patch.proposed` 是候选 |
-| 清理 | 设置中可清理旧断点、事件与归档稿（经接头，不直接删目录） |
+| 清理 | 设置中绑定服务调用 `gc_work`，界面显示已删数和候选数。壳不直接删目录 |
 
 ---
 

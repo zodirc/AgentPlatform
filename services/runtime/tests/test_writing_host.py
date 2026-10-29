@@ -149,7 +149,8 @@ async def test_recorded_turn_and_resume(tmp_path: Path):
     assert events[0].type == "turn.accepted"
     assert events[-1].type == "turn.completed"
     assert all(getattr(event, "turn_id", "") == result.turn_id for event in events)
-    assert list_resumable(work)
+    assert not list_resumable(work)
+    assert (work / ".agent" / "checkpoints" / f"{result.turn_id}.json").is_file()
 
     again = _recording(tmp_path, "host_more", "又写了一点")
     resumed = await resume_turn(
@@ -334,7 +335,7 @@ def test_version_must_change_when_package_hashes_change(tmp_path: Path):
         build_package(tmp_path / "again", private_key=key, previous_manifest=previous)
 
 
-def test_event_log_keeps_recent_turns(tmp_path: Path):
+def test_event_append_does_not_sweep(tmp_path: Path):
     import asyncio
 
     from app.writing_host.files import FileEventLog
@@ -345,7 +346,7 @@ def test_event_log_keeps_recent_turns(tmp_path: Path):
     for index in range(EVENT_KEEP_TURNS + 4):
         (directory / f"turn-{index:02d}.jsonl").write_text("{}\n", encoding="utf-8")
     asyncio.run(FileEventLog(tmp_path, "latest").append({"event_type": "usage"}))
-    assert len(list(directory.glob("*.jsonl"))) == EVENT_KEEP_TURNS
+    assert len(list(directory.glob("*.jsonl"))) == EVENT_KEEP_TURNS + 5
 
 
 def test_memory_file_has_schema_version(tmp_path: Path):

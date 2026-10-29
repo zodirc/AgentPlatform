@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from app.writing_host.protocol import (
     ModelConfig,
     TurnBudget,
     core_info,
+    gc_work,
     list_resumable,
     probe_model,
     resume_turn,
@@ -34,6 +36,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--recording", default="", help="回放用例名，不调用网络")
     parser.add_argument("--recordings-dir", default="")
     parser.add_argument("--probe", action="store_true")
+    parser.add_argument("--gc", action="store_true", help="回收并打印 JSON")
     return parser
 
 
@@ -63,12 +66,17 @@ def _print_event(event) -> None:
 
 
 async def _main(args: argparse.Namespace) -> int:
+    work = Path(args.work)
+    if args.gc:
+        from app.writing_host.storage import gc_report_payload
+
+        print(json.dumps(gc_report_payload(gc_work(work)), ensure_ascii=False), flush=True)
+        return 0
     info = core_info()
     print(
         f"core {info.core_version} protocol {info.protocol_version} schemas {info.schema_versions}",
         flush=True,
     )
-    work = Path(args.work)
     if args.probe:
         report = await probe_model(_model(args))
         for check in report.checks:

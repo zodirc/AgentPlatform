@@ -8,15 +8,14 @@ import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
-from app.writing_host.errors import Busy, Conflict, ResumeIncompatible
-from app.writing_host.schema import EVENT_KEEP_TURNS, SCHEMA_VERSIONS
-
-_SKIP_PREFIXES = (
-    ".agent/checkpoints/",
-    ".agent/events/",
-    ".agent/snapshots/",
+from app.writing_host.errors import Busy, Conflict
+from app.writing_host.schema import SCHEMA_VERSIONS
+from app.writing_host.storage import (
+    history,
+    revert_turn as revert_locked,
+    work_lock,
+    write_snapshot,
 )
 
 
@@ -43,6 +42,8 @@ class WorkView:
 class TurnRecord:
     turn_id: str
     created_at: str
+    seq: int = 0
+    state: str = ""
 
 
 def _now() -> str:
@@ -135,12 +136,13 @@ def read_document(work_root: Path, doc_id: str) -> Document:
 def write_document(work_root: Path, doc_id: str, text: str, *, base_revision: str, busy: bool) -> Document:
     if busy:
         raise Busy()
-    doc_id, role, title, path = _find(work_root, doc_id)
-    current = _sha(path.read_bytes())[:16]
-    if current != base_revision:
-        raise Conflict()
-    path.write_text(text, encoding="utf-8")
-    return _doc_from_path(doc_id, role, title, path, with_text=True)
+    with work_lock(work_root):
+        doc_id, role, title, path = _find(work_root, doc_id)
+        current = _sha(path.read_bytes())[:16]
+        if current != base_revision:
+            raise Conflict()
+        path.write_text(text, encoding="utf-8")
+        return _doc_from_path(doc_id, role, title, path, with_text=True)
 
 
 def _find(work_root: Path, doc_id: str) -> tuple[str, str, str, Path]:
@@ -151,80 +153,33 @@ def _find(work_root: Path, doc_id: str) -> tuple[str, str, str, Path]:
 
 
 def snapshot_turn(work_root: Path, turn_id: str) -> None:
-    root = Path(work_root)
-    objects = root / ".agent" / "snapshots" / "objects"
-    objects.mkdir(parents=True, exist_ok=True)
-    files: list[dict[str, str]] = []
-    for path in sorted(root.rglob("*")):
-        if not path.is_file():
-            continue
-        rel = path.relative_to(root).as_posix()
-        if rel.startswith(_SKIP_PREFIXES) or rel == ".agent/host.json":
-            continue
-        data = path.read_bytes()
-        digest = _sha(data)
-        target = objects / digest
-        if not target.is_file():
-            target.write_bytes(data)
-        files.append({"path": rel, "sha256": digest})
-    manifest = {
-        "schema_version": 1,
-        "turn_id": turn_id,
-        "created_at": _now(),
-        "files": files,
-    }
-    dest = root / ".agent" / "snapshots" / "turns" / f"{turn_id}.json"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
-    retain_recent_turns(root)
+    write_snapshot(Path(work_root), turn_id)
 
 
 def list_turn_history(work_root: Path) -> list[TurnRecord]:
-    directory = Path(work_root) / ".agent" / "snapshots" / "turns"
-    if not directory.is_dir():
-        return []
-    rows: list[TurnRecord] = []
-    for path in sorted(directory.glob("*.json")):
-        data = json.loads(path.read_text(encoding="utf-8"))
-        rows.append(TurnRecord(turn_id=str(data.get("turn_id") or path.stem), created_at=str(data.get("created_at") or "")))
-    return rows
+    return [
+        TurnRecord(
+            turn_id=str(row["turn_id"]),
+            created_at=str(row.get("created_at") or ""),
+            seq=int(row.get("seq") or 0),
+            state=str(row.get("state") or ""),
+        )
+        for row in history(Path(work_root))
+    ]
 
 
 def revert_turn(work_root: Path, turn_id: str) -> None:
-    root = Path(work_root)
-    history = list_turn_history(root)
-    ids = [row.turn_id for row in history]
-    if turn_id not in ids:
-        raise FileNotFoundError(turn_id)
-    keep = ids[: ids.index(turn_id)]
-    drop = ids[ids.index(turn_id) :]
-    manifest_path = root / ".agent" / "snapshots" / "turns" / f"{turn_id}.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    wanted = {item["path"]: item["sha256"] for item in manifest.get("files") or []}
-    objects = root / ".agent" / "snapshots" / "objects"
-    for rel, digest in wanted.items():
-        target = root / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes((objects / digest).read_bytes())
-    for path in list(root.rglob("*")):
-        if not path.is_file():
-            continue
-        rel = path.relative_to(root).as_posix()
-        if rel.startswith(_SKIP_PREFIXES) or rel in wanted:
-            continue
-        if rel.startswith(".agent/") and not rel.startswith(".agent/work/"):
-            continue
-        path.unlink(missing_ok=True)
-    for dropped in drop:
-        _unlink(root / ".agent" / "snapshots" / "turns" / f"{dropped}.json")
-        _unlink(root / ".agent" / "checkpoints" / f"{dropped}.json")
-        _unlink(root / ".agent" / "events" / f"{dropped}.jsonl")
-    del keep
+    revert_locked(Path(work_root), turn_id)
 
 
-def export_work(work_root: Path, dest: Path) -> None:
+def export_work(work_root: Path, dest: Path, *, mode: str = "manuscript", min_free_bytes: int | None = None) -> None:
+    from app.writing_host.storage import ensure_space
+
     root = Path(work_root)
     dest = Path(dest)
+    if mode not in {"manuscript", "full"}:
+        raise ValueError(mode)
+    ensure_space(root, min_free_bytes)
     dest.parent.mkdir(parents=True, exist_ok=True)
     from app.writing.version import core_version
 
@@ -232,89 +187,32 @@ def export_work(work_root: Path, dest: Path) -> None:
         "core_version": core_version(),
         "schema_versions": SCHEMA_VERSIONS,
         "exported_at": _now(),
+        "mode": mode,
     }
-    with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("export.json", json.dumps(export_meta, ensure_ascii=False))
-        for path in sorted(root.rglob("*")):
-            if path.is_file():
-                archive.write(path, path.relative_to(root).as_posix())
+    with work_lock(root):
+        with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("export.json", json.dumps(export_meta, ensure_ascii=False))
+            for path in sorted(root.rglob("*")):
+                if not path.is_file():
+                    continue
+                rel = path.relative_to(root).as_posix()
+                if rel == ".agent/lock":
+                    continue
+                if mode == "manuscript" and (rel.startswith(_MANUSCRIPT_SKIP) or rel in _MANUSCRIPT_SKIP):
+                    continue
+                archive.write(path, rel)
+
+
+_MANUSCRIPT_SKIP = (
+    ".agent/snapshots/",
+    ".agent/events/",
+    ".agent/checkpoints/",
+    ".agent/evaluations/",
+    ".agent/turns.json",
+)
 
 
 def import_work(src: Path, work_root: Path) -> WorkView:
-    root = Path(work_root)
-    root.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(src) as archive:
-        meta_raw = archive.read("export.json")
-        meta = json.loads(meta_raw)
-        incoming = meta.get("schema_versions") or {}
-        for name, version in incoming.items():
-            current = int(SCHEMA_VERSIONS.get(name) or 0)
-            if int(version) > current:
-                raise ResumeIncompatible(detail=f"{name} schema {version}")
-        archive.extractall(root)
-    exported = root / "export.json"
-    if exported.is_file():
-        exported.unlink()
-    return work_view(root)
+    from app.writing_host.storage import import_work as impl
 
-
-def _unlink(path: Path) -> None:
-    path.unlink(missing_ok=True)
-
-
-def retain_recent_turns(work_root: Path) -> None:
-    """快照与事件只留最近 32 回合，丢掉的回合连同断点一起删。"""
-    root = Path(work_root)
-    ranked: dict[str, int] = {}
-    turns_dir = root / ".agent" / "snapshots" / "turns"
-    if turns_dir.is_dir():
-        for path in turns_dir.glob("*.json"):
-            turn_id, stamp = _turn_stamp(path, "turn_id")
-            ranked[turn_id] = max(ranked.get(turn_id, 0), stamp)
-    events_dir = root / ".agent" / "events"
-    if events_dir.is_dir():
-        for path in events_dir.glob("*.jsonl"):
-            turn_id, stamp = _turn_stamp(path, "turn_id")
-            ranked[turn_id] = max(ranked.get(turn_id, 0), stamp)
-    if len(ranked) <= EVENT_KEEP_TURNS:
-        return
-    ordered = sorted(ranked, key=lambda turn_id: (ranked[turn_id], turn_id))
-    for turn_id in ordered[: len(ordered) - EVENT_KEEP_TURNS]:
-        _unlink(turns_dir / f"{turn_id}.json")
-        _unlink(events_dir / f"{turn_id}.jsonl")
-        _unlink(root / ".agent" / "checkpoints" / f"{turn_id}.json")
-    _gc_snapshot_objects(root)
-
-
-def _turn_stamp(path: Path, id_key: str) -> tuple[str, int]:
-    turn_id = path.stem
-    if path.suffix == ".json":
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            data = None
-        if isinstance(data, dict):
-            turn_id = str(data.get(id_key) or path.stem)
-    return turn_id, path.stat().st_mtime_ns
-
-
-def _gc_snapshot_objects(root: Path) -> None:
-    objects = root / ".agent" / "snapshots" / "objects"
-    turns = root / ".agent" / "snapshots" / "turns"
-    if not objects.is_dir():
-        return
-    used: set[str] = set()
-    if turns.is_dir():
-        for path in turns.glob("*.json"):
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                return
-            if not isinstance(data, dict):
-                return
-            for item in data.get("files") or []:
-                if isinstance(item, dict) and item.get("sha256"):
-                    used.add(str(item["sha256"]))
-    for path in objects.iterdir():
-        if path.is_file() and path.name not in used:
-            path.unlink(missing_ok=True)
+    return impl(Path(src), Path(work_root))

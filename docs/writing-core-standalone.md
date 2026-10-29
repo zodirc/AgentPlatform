@@ -155,8 +155,9 @@ def read_document(work_root: Path, doc_id: str) -> Document: ...
 def write_document(work_root: Path, doc_id: str, text: str, *, base_revision: str) -> Document: ...
 def list_turn_history(work_root: Path) -> list[TurnRecord]: ...
 def revert_turn(work_root: Path, turn_id: str) -> None: ...
-def export_work(work_root: Path, dest: Path) -> None: ...       # 写出 zip
+def export_work(work_root: Path, dest: Path, *, mode: str = "manuscript") -> None: ...
 def import_work(src: Path, work_root: Path) -> WorkView: ...
+def gc_work(work_root: Path, budget_ms: int = 1000) -> GcReport: ...
 
 # 模型与内核
 async def probe_model(model: ModelConfig) -> ProbeReport: ...
@@ -169,8 +170,9 @@ def core_info() -> CoreInfo: ...                                # core_version, 
 |-------------|------|
 | `WorkView` | `work_id`、标题、`core_version`、文档列表。每个文档有 `doc_id`（不透明字符串）、`role`（`outline` / `chapter` / `manuscript` / `cards` / `notes` / `archive`）、标题、可见字数、`revision`、修改时间 |
 | `write_document` | 回合之间的手动编辑。`base_revision` 不等于当前版本时抛 `Conflict`；有回合进行中时抛 `Busy` |
-| `revert_turn` | 把作品恢复到该回合开始前，并丢弃该回合及其后所有回合的快照、断点与事件。历史是线性的，不做分支 |
-| `export_work` / `import_work` | zip 是唯一对外的作品格式：稿树加一份 `export.json`（`core_version`、`schema_versions`、导出时间）。导入走第 6 节的向前迁移 |
+| `revert_turn` | 按台账 `seq` 把作品恢复到该回合开始前，并丢弃该回合及其后所有回合。窗口外抛 `TurnNotRevertable`；对象哈希不符抛 `SnapshotCorrupt`，不写回稿件 |
+| `export_work` / `import_work` | zip 加一份 `export.json`。`manuscript` 是默认，不含快照、事件和断点；`full` 带回合历史。导入先在暂存目录校验再改名，失败不留下半个作品 |
+| `gc_work` | 回收旧回合的快照、事件和断点。返回已删数和候选数；清单或台账扫不全则零删除。命令行 `--gc` 只打印一行 JSON，字段是 `gc_marked`、`gc_candidates`、`gc_deleted`、`gc_aborted`、`gc_bytes_reclaimed`；放弃时 `gc_deleted` 为 0 |
 
 ### 5.2 事件
 
@@ -259,8 +261,9 @@ def core_info() -> CoreInfo: ...                                # core_version, 
 | 正文 | `drafts/manuscript.md` | 写作工具落盘 |
 | 归档稿 | `drafts/archive/` | `occupy=fresh` 时整文件归档 |
 | 断点 | `.agent/checkpoints/<turn>.json` | 每步原子写（临时文件加 rename） |
-| 事件 | `.agent/events/<turn>.jsonl` | 先追加再回调；一行一条信封；按回合滚动，保留最近 32 回合 |
-| 快照 | `.agent/snapshots/objects/<sha256>`、`.agent/snapshots/turns/<turn>.json` | 回合开始前写清单；内容寻址，未变文件不重复存；与事件同步保留最近 32 回合 |
+| 回合台账 | `.agent/turns.json` | `seq` 是回合顺序。原子替换 |
+| 事件 | `.agent/events/<turn>.jsonl` | 先追加再回调；一行一条信封。保留最近 32 回合，在回合终态后回收，不在每次追加时扫描 |
+| 快照 | `.agent/snapshots/objects/<sha256>`、`.agent/snapshots/turns/<turn>.json` | 回合开始写稿前写清单。同名对象校验哈希，一致才跳过。与事件一起保留最近 32 回合 |
 | 评分 | `.agent/evaluations/<turn>.jsonl` | 首版只写不读（为日后在本地恢复拍晋升预留） |
 | 记忆 | `memory/memories.json` | 沿用 `memory_backend` 的文件后端 |
 | 侧车 | `.agent/work/` | `story_state`、审读笔记、作者笔记、声口等 |

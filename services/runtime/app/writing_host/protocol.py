@@ -68,6 +68,14 @@ class CoreInfo:
     schema_versions: dict[str, int]
 
 
+@dataclass
+class GcReport:
+    candidates: int
+    deleted: int
+    aborted: str = ""
+    bytes_reclaimed: int = 0
+
+
 def core_info() -> CoreInfo:
     from app.writing.version import core_version
     from app.writing_host.schema import SCHEMA_VERSIONS
@@ -86,16 +94,15 @@ def cancel_turn(turn_id: str) -> None:
 
 
 def list_resumable(work_root: Path) -> list[ResumableTurn]:
-    from app.writing_host.files import FileCheckpointStore
+    from app.writing_host.storage import resumable
 
-    rows = FileCheckpointStore(Path(work_root)).list_turns()
     return [
         ResumableTurn(
             turn_id=row["turn_id"],
             step_index=int(row["step_index"]),
             schema_version=int(row["schema_version"]),
         )
-        for row in rows
+        for row in resumable(Path(work_root))
     ]
 
 
@@ -140,10 +147,22 @@ def revert_turn(work_root: Path, turn_id: str) -> None:
     impl(Path(work_root), turn_id)
 
 
-def export_work(work_root: Path, dest: Path) -> None:
+def export_work(work_root: Path, dest: Path, *, mode: str = "manuscript", min_free_bytes: int | None = None) -> None:
     from app.writing_host.works import export_work as impl
 
-    impl(Path(work_root), Path(dest))
+    impl(Path(work_root), Path(dest), mode=mode, min_free_bytes=min_free_bytes)
+
+
+def gc_work(work_root: Path, budget_ms: int = 1000, on_progress: Callable[[int, int], None] | None = None) -> GcReport:
+    from app.writing_host.storage import gc_work as impl
+
+    report = impl(Path(work_root), budget_ms, on_progress)
+    return GcReport(
+        candidates=report.candidates,
+        deleted=report.deleted,
+        aborted=report.aborted,
+        bytes_reclaimed=report.bytes_reclaimed,
+    )
 
 
 def import_work(src: Path, work_root: Path):
@@ -164,6 +183,7 @@ async def start_turn(
     host: bool = True,
     turn_id: str | None = None,
     intent: dict | None = None,
+    min_free_bytes: int | None = None,
 ) -> TurnResult:
     from app.writing_host.runner import start_turn as impl
 
@@ -178,6 +198,7 @@ async def start_turn(
         host=host,
         turn_id=turn_id,
         intent=intent,
+        min_free_bytes=min_free_bytes,
     )
 
 
