@@ -10,23 +10,31 @@ from pathlib import Path
 
 from alembic import op
 
-DDL_DIR = Path("/app/contracts/ddl")
-if not DDL_DIR.exists():
-    DDL_DIR = Path(__file__).resolve().parents[4] / "packages" / "contracts" / "schemas" / "ddl"
+def _ddl_dirs() -> list[Path]:
+    here = Path(__file__).resolve()
+    checkout = here.parents[4] / "packages" / "contracts" / "schemas" / "ddl"
+    return [checkout, Path("/app/contracts/ddl")]
+
+
+DDL_DIR = next(path for path in _ddl_dirs() if path.is_dir())
 
 
 def run_ddl(filename: str) -> None:
     """在 Alembic upgrade 事务中执行指定 DDL 文件。
 
     参数:
-        filename: ``DDL_DIR`` 下的 SQL 文件名（如 ``001_sessions.sql``）。
+        filename: DDL 目录下的 SQL 文件名（如 ``001_sessions.sql``）。
 
     返回:
         无。
 
     异常:
-        FileNotFoundError: DDL 文件不存在。
+        FileNotFoundError: 检出目录和 ``/app/contracts/ddl`` 都没有该文件。
         数据库错误: ``op.execute`` 执行失败时由 Alembic/驱动抛出。
     """
-    sql = (DDL_DIR / filename).read_text()
-    op.execute(sql)
+    for directory in _ddl_dirs():
+        path = directory / filename
+        if path.is_file():
+            op.execute(path.read_text())
+            return
+    raise FileNotFoundError(filename)
